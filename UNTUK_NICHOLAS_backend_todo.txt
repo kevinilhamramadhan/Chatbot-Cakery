@@ -36,8 +36,6 @@
  kirim foto di chatbot SUDAH jadi & sudah support skema path relatif ini;
  kolom products.image_url juga sudah ada.)
 
- Keputusan tim: foto di-serve backend sendiri (bukan Cloudinary/SaaS).
-
  ATURAN PENTING — SIMPAN PATH RELATIF, BUKAN URL ABSOLUT:
    Kolom image_url diisi HANYA path:  /static/products/12.jpg
    JANGAN http://localhost:8001/... atau http://backend:8001/... — alamat
