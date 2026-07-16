@@ -33,6 +33,24 @@ def _clean(text: str | None) -> str:
     return _THINK_RE.sub("", text).strip()
 
 
+def _history_view(content: str) -> str:
+    """Compact view of a past bot reply for the LLM's context window.
+
+    Raw tool outputs (menu list, product detail) must NOT re-enter the context:
+    the small model copies them verbatim as its next answer instead of calling
+    the tool — no photo gets queued and prices go stale. A short marker keeps
+    the conversational thread while forcing a fresh tool call to show data again.
+    """
+    if content.startswith("Berikut menu"):
+        return "[Aku sudah menampilkan daftar menu via tool get_menu]"
+    if content.startswith("*") and "Harga:" in content:
+        produk = content.split("*")[1] if content.count("*") >= 2 else "produk"
+        return f"[Aku sudah menampilkan detail {produk} + fotonya via tool get_product_detail]"
+    if len(content) > 200:
+        return content[:200] + " …(dipotong)"
+    return content
+
+
 async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # 1) Retrieval + scope guard (PROMPT §7). retrieve() does blocking I/O
     # (Ollama embed + Chroma query) — keep it off the event loop.
@@ -53,8 +71,16 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         messages.append(
             HumanMessage(content=h["content"])
             if h["role"] == "user"
-            else AIMessage(content=h["content"])
+            else AIMessage(content=_history_view(h["content"]))
         )
+    # Routing reminder NEXT TO the question: small models weigh the nearest
+    # instruction far more than rules buried at the top of a long system prompt.
+    messages.append(SystemMessage(content=(
+        "INGAT ATURAN TOOL: jika pesan berikut menyebut nama SATU produk dan "
+        "menanyakan produk itu (kayak gimana/seperti apa/foto/detail), panggil "
+        "get_product_detail dengan nama produk itu. get_menu HANYA untuk minta "
+        "daftar semua menu. Jangan meniru pola jawaban sebelumnya."
+    )))
     messages.append(HumanMessage(content=user_text))
 
     llm = get_llm().bind_tools(ALL_TOOLS)
