@@ -179,6 +179,33 @@ async def test_product_detail_prefixes_relative_image_path(monkeypatch):
     assert ctx2.media[0].image_url == "https://cdn.example.com/12.jpg"
 
 
+async def test_detail_preroute_skips_llm_for_named_product(monkeypatch):
+    """Regression (live WA): 'bento cookies kayak gimana ya?' kept getting the
+    full menu from the LLM. The deterministic pre-route must answer directly —
+    the agent (LLM) must NOT be called at all."""
+    from app.backend_client import products as products_api
+    bento = {"id": 20, "nama_produk": "Bento Cookies 10cm", "harga_jual": 45000,
+             "deskripsi": "Bento cookies", "is_active": True,
+             "image_url": "/static/products/20.jpg"}
+    monkeypatch.setattr(products_api, "list_products",
+                        lambda only_active=True, kategori=None: _async([bento]))
+
+    async def agent_must_not_run(wa, text, history):
+        raise AssertionError("LLM agent dipanggil padahal pre-route harus menangani")
+    monkeypatch.setattr("app.conversation.orchestrator.run_agent", agent_must_not_run)
+
+    r = await handle_message(WA, "bento cookies kayak gimana ya?")
+    assert "Bento Cookies 10cm" in r.text and "Rp45.000" in r.text
+    assert r.media and r.media[0].image_url.endswith("/static/products/20.jpg")
+
+    # Order-ish phrasing must NOT be hijacked -> goes to the agent.
+    async def agent_ok(wa, text, history):
+        return "AGENT"
+    monkeypatch.setattr("app.conversation.orchestrator.run_agent", agent_ok)
+    r2 = await handle_message(WA, "aku mau pesan bento cookies bentuknya lucu itu")
+    assert r2.text == "AGENT"
+
+
 async def test_product_detail_asks_when_ambiguous(monkeypatch):
     from app.backend_client import products as products_api
     from app.tools.get_product_detail import get_product_detail

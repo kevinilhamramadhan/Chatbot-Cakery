@@ -84,9 +84,35 @@ async def _takeover_still_active(wa_number: str) -> bool:
     return bool(st.get("human_takeover_active")) and not st.get("is_expired")
 
 
+# Deterministic pre-route for "ceritakan produk X" (foto/bentuk/detail).
+# The 1.7b model keeps answering these with get_menu when its history is full
+# of menu replies — and burns ~60s of CPU inference doing it. If the message
+# clearly asks about ONE named product, call the tool directly: instant and
+# immune to history bias. Anything unclear still falls through to the agent.
+_DETAIL_HINTS = ("kayak gimana", "kaya gimana", "seperti apa", "kayak apa",
+                 "bentuknya", "bentuk nya", "foto", "gambar", "detail", "itu apa")
+_NOT_DETAIL = ("pesan", "beli", "order", "tambah", "batal", "status", "bayar",
+               "menu apa", "daftar", "banding")
+
+
+async def _try_detail_preroute(text: str) -> str | None:
+    low = text.lower()
+    if not any(h in low for h in _DETAIL_HINTS) or any(h in low for h in _NOT_DETAIL):
+        return None
+    from app.tools.get_product_detail import get_product_detail
+    out = await get_product_detail.ainvoke({"product": text})
+    # Resolver couldn't tie the sentence to any product -> let the agent try.
+    return None if "tidak menemukan" in out else out
+
+
 async def _run_agent_turn(wa_number: str, text: str) -> Reply:
     ctx = TurnContext(wa_number=wa_number)
     set_turn_context(ctx)
+
+    preroute = await _try_detail_preroute(text)
+    if preroute is not None:
+        return Reply(text=preroute, media=ctx.media)
+
     history = await store.recent_history(wa_number, limit=6)
     answer = await run_agent(wa_number, text, history)
     # A tool (add_to_cart) may have requested a state transition.

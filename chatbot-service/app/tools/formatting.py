@@ -15,9 +15,9 @@ def product_label(p: dict) -> str:
 
 
 def _tokens(s: str) -> set[str]:
-    # rstrip("s") folds singular/plural ("cupcake" == "cupcakes") — without it a
-    # bare "cupcake" query matched nothing/one variant arbitrarily.
-    return {w.rstrip("s") for w in s.lower().split() if w}
+    # strip punctuation, then rstrip("s") folds singular/plural ("cupcake" ==
+    # "cupcakes") — without it a bare "cupcake" matched one variant arbitrarily.
+    return {w.strip(".,?!()\"'").rstrip("s") for w in s.lower().split() if w.strip(".,?!()\"'")}
 
 
 async def resolve_product(query: str) -> tuple[dict | None, list[dict]]:
