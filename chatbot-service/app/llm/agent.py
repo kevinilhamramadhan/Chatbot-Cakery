@@ -76,10 +76,11 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # Routing reminder NEXT TO the question: small models weigh the nearest
     # instruction far more than rules buried at the top of a long system prompt.
     messages.append(SystemMessage(content=(
-        "INGAT ATURAN TOOL: jika pesan berikut menyebut nama SATU produk dan "
-        "menanyakan produk itu (kayak gimana/seperti apa/foto/detail), panggil "
-        "get_product_detail dengan nama produk itu. get_menu HANYA untuk minta "
-        "daftar semua menu. Jangan meniru pola jawaban sebelumnya."
+        "INGAT ATURAN TOOL: kamu TIDAK hafal menu maupun harga — pengetahuanmu "
+        "tentang produk SELALU usang. Ditanya menu/daftar kue/harga -> WAJIB "
+        "panggil get_menu, JANGAN menjawab dari ingatan. Pesan yang menyebut "
+        "SATU produk dan menanyakannya (kayak gimana/seperti apa/foto/detail) "
+        "-> panggil get_product_detail. Jangan meniru pola jawaban sebelumnya."
     )))
     messages.append(HumanMessage(content=user_text))
 
