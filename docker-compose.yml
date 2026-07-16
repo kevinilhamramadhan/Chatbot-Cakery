@@ -48,6 +48,10 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: toti-ollama
+    environment:
+      # Default keep_alive 5m unloads the model after idle — the next customer
+      # then pays ~15s of model reload on top of inference. Keep it resident.
+      OLLAMA_KEEP_ALIVE: "-1"
     volumes:
       # Pakai model yang SUDAH ada di host (toti-qwen-1.7b, qwen3-embedding, dll)
       # — tidak perlu pull/import ulang. Host ini CPU-only, jadi tanpa config GPU.
