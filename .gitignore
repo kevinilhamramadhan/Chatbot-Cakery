@@ -32,6 +32,11 @@ Dokumen capstone/
 # Local Claude Code settings
 .claude/
 
+# WhatsApp gateway credentials — a logged-in session is a live account handle,
+# and the pairing QR is just as sensitive. Never commit these.
+whatsapp-gateway/sessions/
+qr.png
+
 # Fine-tune model binaries — live on HuggingFace (LasagnaS/toti-qwen-gguf), not git
 *.gguf
 *.gguf.*
