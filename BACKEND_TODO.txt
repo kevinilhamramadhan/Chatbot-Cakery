@@ -1,5 +1,5 @@
 ==============================================================================
- TO-DO BACKEND UNTUK NICHOLAS — dari Kevin (Chatbot/AI)
+ TO-DO BACKEND — dari Kevin (Chatbot/AI)
 ==============================================================================
  STATUS: SEMUA SELESAI. 🎉🎉🎉 Tidak ada lagi yang ditunggu chatbot.
  Terima kasih banyak — kerjamu rapi dan cepat!
@@ -42,7 +42,7 @@
    host itu beda-beda tergantung pemanggil (browser vs container wwebjs vs
    production). Tiap konsumen mem-prefix base URL-nya sendiri:
      - chatbot  -> BACKEND_BASE_URL + path   (sudah diimplementasi)
-     - Buyer/Admin Site -> base URL API + path (kabari Ainaya)
+     - Buyer/Admin Site -> base URL API + path (kabari tim frontend)
 
  Yang dikerjakan:
    1) Serving statis (1 baris di app/main.py):

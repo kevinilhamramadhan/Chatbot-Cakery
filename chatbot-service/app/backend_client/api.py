@@ -1,4 +1,4 @@
-"""Real HTTP client to Nicholas's backend (built endpoints B1-B5, C1).
+"""Real HTTP client to the main backend (built endpoints B1-B5, C1).
 
 Replaces the old mock_backend. All calls send X-Service-Key. Customer/Order use
 `id`; we expose it as `customer_id`/`order_id` for the chatbot's call sites.

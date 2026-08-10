@@ -59,7 +59,7 @@ toti-cakery-chatbot/
 │   │   ├── llm/                     # setup Ollama, prompt template, parameter
 │   │   ├── tools/                   # satu file per tool (get_menu.py, create_order.py, dst)
 │   │   ├── conversation/            # state machine alur percakapan + session store
-│   │   ├── backend_client/          # HTTP client ke FastAPI backend Nicholas
+│   │   ├── backend_client/          # HTTP client ke FastAPI backend teammate
 │   │   └── models/                  # SQLAlchemy models utk DB lokal chatbot (session, cart, conversation log)
 │   ├── knowledge_base/
 │   │   ├── faq/
@@ -82,7 +82,7 @@ toti-cakery-chatbot/
 
 ## 4. ENDPOINT BACKEND YANG SUDAH TERSEDIA (boleh dipakai langsung)
 
-Ini hasil baca source code backend yang dikirim teammate saya. **PERINGATAN**: source punya bug double-prefix routing di `main.py` (setiap router di-include dengan prefix tambahan padahal sudah punya prefix sendiri). Path di bawah ini adalah path **logis/yang dimaksud**, bukan jaminan path final yang live — verifikasi dulu lewat `/docs` backend sebelum hardcode, atau tanya saya/Nicholas.
+Ini hasil baca source code backend yang dikirim teammate saya. **PERINGATAN**: source punya bug double-prefix routing di `main.py` (setiap router di-include dengan prefix tambahan padahal sudah punya prefix sendiri). Path di bawah ini adalah path **logis/yang dimaksud**, bukan jaminan path final yang live — verifikasi dulu lewat `/docs` backend sebelum hardcode, atau tanya saya/backend engineer.
 
 - `GET /products?only_active=true&kategori=...` — list produk/menu (untuk tool `get_menu`)
 - `GET /products/{product_id}` — detail produk, termasuk `image_url`, `harga_jual`, `deskripsi`, `kategori`
@@ -135,7 +135,7 @@ wwebjs-api (Node.js, Docker, lib avoylenko)  ──webhook POST──▶  chatbo
                               ▼                         ▼                         ▼
                           rag/ (ChromaDB +         tools/ (LangChain         backend_client/
                           qwen3-embedding)          tool calling)            (HTTP ke backend
-                              │                         │                    Nicholas)
+                              │                         │                    teammate)
                               ▼                         ▼
                           llm/ (Ollama, qwen3:1.7b, tool calling enabled)
 ```
@@ -262,7 +262,7 @@ Ini **bukan** "menambah endpoint ke backend" — ini storage internal milik chat
 
 1. Seluruh struktur folder di bagian 3, jalan lewat `docker-compose up`.
 2. `README.md` — cara setup dari nol (env vars, cara start Ollama/pull model, cara link WhatsApp, cara run ingest knowledge base).
-3. `MISSING_ENDPOINTS.md` — daftar lengkap semua endpoint backend yang di-mock, siap saya kirim ke Nicholas.
+3. `MISSING_ENDPOINTS.md` — daftar lengkap semua endpoint backend yang di-mock, siap saya kirim ke backend engineer.
 4. `.env.example` — semua env var yang dibutuhkan, terdokumentasi.
 5. Minimal 3-5 file `knowledge_base/faq/faqN.txt` contoh (boleh isi dummy dulu, format sudah saya jelaskan di bagian 8) sebagai starter.
 6. Test manual minimal: bisa kirim pesan WA "menu apa aja" dan dapat balasan benar dari `get_menu` real (bukan mock), karena ini satu-satunya tool yang endpointnya sudah pasti ada.
@@ -272,7 +272,7 @@ Ini **bukan** "menambah endpoint ke backend" — ini storage internal milik chat
 ## 16. DI LUAR SCOPE (jangan dikerjakan)
 
 - Frontend Buyer Site / Admin Site (React).
-- Endpoint baru di repo backend utama Nicholas.
+- Endpoint baru di repo backend utama teammate.
 - Implementasi Midtrans yang sungguhan (SDK asli, API key asli).
 - Fine-tuning model Qwen3 (anggap modelnya sudah/akan disediakan lewat Ollama).
 - OTP WhatsApp untuk login Buyer Site (itu fitur web, bukan chatbot WhatsApp).

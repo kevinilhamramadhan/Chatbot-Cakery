@@ -1,6 +1,6 @@
 """Live smoke test against the REAL qwen3 models via Ollama.
 
-Backend product reads are mocked (so get_menu returns data without Nicholas's
+Backend product reads are mocked (so get_menu returns data without the main
 backend), WhatsApp sends are stubbed. This exercises the full real path:
   real LLM tool-calling + real embeddings/RAG + scope guard + order flow.
 

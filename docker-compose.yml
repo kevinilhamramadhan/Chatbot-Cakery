@@ -2,7 +2,7 @@
 #
 #   docker compose up --build -d
 #
-# Menjalankan 4 container: chatbot, backend (Nicholas), Ollama, wwebjs-api.
+# Menjalankan 4 container: chatbot, backend, Ollama, wwebjs-api.
 # Semua saling memanggil lewat nama service di network internal compose.
 
 services:
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
 
   backend:
-    # Backend-Cakery punya Nicholas (repo read-only, tanpa Dockerfile) —
+    # Backend-Cakery punya teammate (repo read-only, tanpa Dockerfile) —
     # dijalankan apa adanya di image python resmi, kode di-mount.
     image: python:3.12-slim
     container_name: cakery-backend

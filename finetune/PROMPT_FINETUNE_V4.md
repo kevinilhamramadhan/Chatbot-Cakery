@@ -133,6 +133,6 @@ menang melawan kebenaran.
 - Kode chatbot: `chatbot-service/` (prompt: `app/llm/prompt.py`,
   perakitan pesan + reminder + penanda history: `app/llm/agent.py`,
   resolver ambiguitas: `app/tools/formatting.py`).
-- Stack: `docker compose up -d` (chatbot + backend Nicholas + ollama + wwebjs).
+- Stack: `docker compose up -d` (chatbot + backend + ollama + wwebjs).
 - Test suite chatbot: `cd chatbot-service && .venv/bin/python -m pytest tests/`
   (30 test — harus tetap hijau; tidak tergantung model).

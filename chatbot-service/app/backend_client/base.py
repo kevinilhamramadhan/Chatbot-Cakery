@@ -1,4 +1,4 @@
-"""HTTP client to Nicholas's backend for public product/FAQ reads.
+"""HTTP client to the main backend for public product/FAQ reads.
 
 Base URL comes from config (BACKEND_BASE_URL). The backend's old double-prefix
 routing bug is fixed upstream, so paths here are the clean, real ones.

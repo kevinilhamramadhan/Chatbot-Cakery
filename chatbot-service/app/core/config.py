@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     app_name: str = "Toti Cakery Chatbot Service"
     log_level: str = "INFO"
 
-    # ── Backend (Nicholas's FastAPI) ──────────────────────────────────────────
+    # ── Backend (teammate's FastAPI) ──────────────────────────────────────────
     backend_base_url: str = "http://localhost:8001"
     backend_request_timeout_seconds: float = 10.0
     # Sent as X-Service-Key on every backend call. Must match the backend's

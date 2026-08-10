@@ -1,4 +1,4 @@
-"""Checkout finalization: real customer+order+payment via Nicholas's backend.
+"""Checkout finalization: real customer+order+payment via the main backend.
 
 Order/invoice/payment live in the backend (Neon + Midtrans). We keep a local
 `pending_orders` row (order_ref = backend order_id) only for timeout tracking,

@@ -7,10 +7,10 @@ gateway. This repo is **only** the chatbot + WhatsApp integration — the main b
 
 > Scope, rules, and the full conversation flow live in
 > `PROMPT_CLAUDE_CODE_TOTI_CAKERY_CHATBOT.md`. Endpoints the backend still owes us
-> are in `UNTUK_NICHOLAS_backend_todo.txt`. See `CLAUDE.md` for an orientation aimed at AI agents.
+> are in `BACKEND_TODO.txt`. See `CLAUDE.md` for an orientation aimed at AI agents.
 >
 > **Backend engineer?** Langsung ke
-> [Konfigurasi backend ⇄ chatbot](#konfigurasi-backend--chatbot-untuk-nicholas).
+> [Konfigurasi backend ⇄ chatbot](#konfigurasi-backend--chatbot-untuk-backend-engineer).
 
 ## Architecture
 
@@ -29,7 +29,7 @@ wwebjs-api (Docker) ──webhook──▶ chatbot-service /webhook/whatsapp
 ```
 
 - **Everything is real**: products, orders, customers, payments (Midtrans via the
-  backend), human takeover, ready-push, and Owner reports all hit Nicholas's
+  backend), human takeover, ready-push, and Owner reports all hit the main
   backend (Neon PostgreSQL). No mocks remain.
 - The chatbot keeps its **own SQLite DB** (sessions, conversation log, pending orders).
 
@@ -81,7 +81,7 @@ folder is a live account credential — it's gitignored, keep it out of the repo
 
 ---
 
-## Konfigurasi backend ⇄ chatbot (untuk Nicholas)
+## Konfigurasi backend ⇄ chatbot (untuk backend engineer)
 
 > Bagian ini sengaja ditulis dalam bahasa Indonesia karena ditujukan ke backend
 > engineer. Ringkasnya cuma **dua hal** yang perlu di-set di sisi backend:
@@ -195,7 +195,7 @@ sendiri; di chatbot sudah diimplementasi (`BACKEND_BASE_URL` + path).
 | Chatbot dapat `401` dari backend | `SERVICE_API_KEY` vs `BACKEND_SERVICE_API_KEY` beda |
 | Dari dalam container tidak bisa connect ke `localhost` | Di dalam Docker, `localhost` = container itu sendiri. Pakai nama service: `chatbot-service`, `backend`, `ollama` |
 
-Daftar to-do backend lama + status verifikasinya ada di `UNTUK_NICHOLAS_backend_todo.txt`.
+Daftar to-do backend lama + status verifikasinya ada di `BACKEND_TODO.txt`.
 
 ---
 
@@ -243,7 +243,7 @@ pytest
 
 | Var | Meaning |
 |---|---|
-| `BACKEND_BASE_URL` | Base URL of Nicholas's backend (paths resolved defensively) |
+| `BACKEND_BASE_URL` | Base URL of the main backend (paths resolved defensively) |
 | `BACKEND_SERVICE_API_KEY` | Sent as `X-Service-Key`; must equal the backend's `SERVICE_API_KEY` |
 | `OLLAMA_BASE_URL` | Ollama endpoint (LLM + embeddings) |
 | `LLM_MODEL` | `toti-qwen-1.7b` (the fine-tune) — see `finetune/README.md` |
