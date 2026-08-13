@@ -1,34 +1,4 @@
 ==============================================================================
- TO-DO BACKEND — dari Kevin (Chatbot/AI)
-==============================================================================
- STATUS: SEMUA SELESAI. 🎉🎉🎉 Tidak ada lagi yang ditunggu chatbot.
- Terima kasih banyak — kerjamu rapi dan cepat!
-
- TERVERIFIKASI LIVE oleh Kevin (2026-07-03, backend commit 8670242):
-   - B1: Customers          -> GET /customers?nomor_wa= , POST /customers
-   - B2: Create order        -> POST /orders (cek + kurangi stok resep,
-                                optimistic locking)
-   - B3: Status pesanan      -> GET /orders/latest?nomor_wa=
-   - B4: Cancel order        -> POST /orders/{order_id}/cancel
-                                + SEKARANG MENGEMBALIKAN STOK ✅ (fix #2)
-   - B5: Payment + Midtrans  -> POST /payments , GET /payments/{order_id}/status ,
-                                POST /payments/notify (charge Midtrans asli)
-   - C1: Human takeover      -> POST & GET /customers/{nomor_wa}/takeover
-   - C2: Takeover handlers   -> GET /admin/takeover-handlers {"numbers":[...]}
-   - C3: is_available        -> di ProductOut + POST /orders tolak stok kurang
-   - C4: Push "ready"        -> POST {CHATBOT_URL}/webhook/internal/orders/{id}/ready
-   - C5: PATCH /orders/{id}/status -> SEKARANG BALAS 200 + OrderOut LENGKAP ✅
-                                (fix #1 — dites live: order 4, items+invoice ikut)
-   - REPORTS: GET /reports/summary?start_date&end_date ✅ (endpoint #4)
-       * Dites live: angka cocok dengan isi Neon (order_count, top_products,
-         avg). Tanpa X-Service-Key -> 401. Format tanggal salah -> 400.
-       * Tool chatbot financial_report & business_analytics SUDAH tersambung
-         dan dites live — fitur laporan Owner via WA resmi HIDUP.
-   - USERS: PATCH /users/{user_id}/takeover-handler ✅ (item #5)
-       * Dites live: user level Admin ditolak 403 (require_owner bekerja).
-         Toggle penuh tinggal dites pakai akun Owner (level 1).
-
-==============================================================================
  PERMINTAAN BARU: foto produk di-host BACKEND + bisa diedit dari Admin Site
 ==============================================================================
  Fitur: Admin upload/ganti foto menu dari Admin Site -> foto tampil di Buyer
