@@ -13,6 +13,7 @@ from app.conversation import checkout, store
 from app.conversation.context import OutboundMedia, TurnContext, set_turn_context
 from app.conversation.states import State, text_is_cancel, text_is_confirm
 from app.core.config import settings
+from app.core.security import mask_phone
 from app.llm.agent import run_agent
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         # while the local flag is on, so the common path stays backend-free.
         if await _takeover_still_active(wa_number):
             await store.log_message(wa_number, "in", text, intent="takeover_suppressed")
-            logger.info("Takeover active for %s — suppressing auto-reply", wa_number)
+            logger.info("Takeover active for %s — suppressing auto-reply", mask_phone(wa_number))
             return Reply(suppressed=True)
         await store.deactivate_takeover(wa_number)
 
@@ -103,6 +104,11 @@ async def _handle_confirmation(wa_number: str, text: str) -> Reply:
         return Reply(text="Oke, pesanan dibatalkan ya. Ada lagi yang bisa kubantu? 😊")
 
     if text_is_confirm(text):
+        cust = await store.get_customer(wa_number)
+        if cust.get("channel"):
+            # Re-confirmation after checkout bounced the cart back (e.g. a price
+            # changed) — identity is already complete, don't ask for it again.
+            return Reply(text=await checkout.finalize_order(wa_number))
         await store.set_customer(wa_number, {})  # reset identity collection
         await store.set_state(wa_number, State.COLLECTING_IDENTITY)
         return Reply(

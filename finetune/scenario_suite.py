@@ -27,11 +27,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "chatbot-service"))
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # noqa: E402
+from langchain_core.messages import HumanMessage  # noqa: E402
 from langchain_ollama import ChatOllama  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
+from app.llm.prompt import SYSTEM_PROMPT  # noqa: E402
 from app.tools.registry import ALL_TOOLS  # noqa: E402
+
+# v4: rakitan pesan paritas-runtime + skor argumen netral-kebijakan
+from eval_common import args_match, gold_of, to_lc_messages  # noqa: E402
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -55,37 +59,57 @@ TYPE_LABEL = {
     "N4":  "Out-of-scope                  -> tolak, TANPA tool",
     "N5":  "Ambigu                        -> tanya balik, TANPA tool",
     "N6":  "Adversarial (jebakan)         -> teks, TANPA tool",
+    "R1":  "Regresi: menu fresh           -> get_menu (bukan jawab hafalan)",
+    "R2":  "Regresi: detail by name       -> get_product_detail (bukan get_menu)",
+    "R3":  "Regresi: menu lagi (penanda)  -> get_menu (bukan meniru history)",
+    "R4":  "Regresi: detail lain (penanda)-> get_product_detail produk BARU",
+    "R5":  "Regresi: order generik        -> add_to_cart verbatim 'cupcake'",
+    "R6":  "Regresi: menu + history cemar -> get_menu (persis insiden live #1)",
 }
 
 ORDER = [f"T{i}" for i in range(1, 13)] + [f"N{i}" for i in range(1, 7)]
 
 
-def to_lc_messages(messages):
-    out = []
-    for m in messages:
-        if m["role"] == "system":
-            out.append(SystemMessage(content=m["content"]))
-        elif m["role"] == "user":
-            out.append(HumanMessage(content=m["content"]))
-        else:
-            out.append(AIMessage(content=m.get("content") or ""))
-    return out
+# ── Skenario regresi 4 insiden live WA 15-16 Jul 2026 (PROMPT_FINETUNE_V4 §2) ──
+# History ditulis sebagai OUTPUT RUNTIME MENTAH (menu literal, blok detail) —
+# to_lc_messages menjalankannya lewat _history_view persis seperti produksi,
+# sehingga model melihat penanda "history tercemar" yang sama dengan live.
+def _tool_turn(name, args):
+    return {"role": "assistant", "content": "",
+            "tool_calls": [{"type": "function", "function": {
+                "name": name, "arguments": json.dumps(args, ensure_ascii=False)}}]}
 
 
-def gold_of(row):
-    final = row["messages"][-1]
-    if "tool_calls" in final:
-        fn = final["tool_calls"][0]["function"]
-        return fn["name"], json.loads(fn["arguments"])
-    return None, None
+_H_MENU = [
+    {"role": "user", "content": "menu dong"},
+    {"role": "assistant", "content": "Berikut menu Toti Cakery:\n"
+     "• Cupcakes isi 6 Cokelat — Rp85.000\n• Bento Cookies 10cm Original — Rp55.000\n"
+     "\nMau lihat detail salah satu kue? Sebutkan namanya ya 😊"},
+]
+_H_DETAIL = [
+    {"role": "user", "content": "bento cookies kayak gimana ya?"},
+    {"role": "assistant", "content": "*Bento Cookies 10cm Original*\n"
+     "Favorit pelanggan — teksturnya lembut dengan rasa yang kaya.\nHarga: Rp55.000\n\n"
+     "Mau pesan ini? Bilang aja jumlahnya ya 😊"},
+]
 
 
-def canon(obj):
-    if isinstance(obj, dict):
-        return {k: canon(v) for k, v in sorted(obj.items())}
-    if isinstance(obj, list):
-        return [canon(v) for v in obj]
-    return obj
+def regression_rows():
+    def row(rtype, user, gold, history=()):
+        return rtype, {"messages": [{"role": "system", "content": SYSTEM_PROMPT},
+                                    *history, {"role": "user", "content": user}, gold],
+                       "meta": {"type": rtype, "lang": "id"}}
+    return [
+        row("R1", "ada menu apa saja?", _tool_turn("get_menu", {})),
+        row("R2", "bento cookies kayak gimana ya?",
+            _tool_turn("get_product_detail", {"product": "bento cookies"})),
+        row("R3", "tampilin menunya lagi dong", _tool_turn("get_menu", {}), _H_MENU),
+        row("R4", "kalau mini cookies kayak gimana?",
+            _tool_turn("get_product_detail", {"product": "mini cookies"}), _H_DETAIL),
+        row("R5", "beli 4 cupcake",
+            _tool_turn("add_to_cart", {"items": [{"product": "cupcake", "qty": 4}]})),
+        row("R6", "ada menu apa saja?", _tool_turn("get_menu", {}), _H_MENU),
+    ]
 
 
 def clean_text(t):
@@ -98,7 +122,7 @@ def pick_rows(data_path):
     for r in rows:
         t = r["meta"]["type"]
         first.setdefault(t, r)
-    return [(t, first[t]) for t in ORDER if t in first]
+    return [(t, first[t]) for t in ORDER if t in first] + regression_rows()
 
 
 def main():
@@ -106,7 +130,8 @@ def main():
     ap.add_argument("--model", required=True)
     ap.add_argument("--data", default=str(ROOT / "finetune/data/test.jsonl"))
     ap.add_argument("--runs", type=int, default=3)
-    ap.add_argument("--num-ctx", type=int, default=8192)
+    ap.add_argument("--num-ctx", type=int, default=settings.llm_num_ctx)
+    ap.add_argument("--out", default="", help="path output JSON (default: scenario_<model>.json)")
     args = ap.parse_args()
 
     llm = ChatOllama(
@@ -115,7 +140,7 @@ def main():
         temperature=settings.llm_temperature,   # production parity (0.7)
         top_p=settings.llm_top_p,                # production parity (0.8)
         num_ctx=args.num_ctx,
-        num_predict=768,
+        num_predict=settings.llm_num_predict,
     ).bind_tools(ALL_TOOLS)
 
     scenarios = pick_rows(args.data)
@@ -147,21 +172,21 @@ def main():
                 if calls:
                     decided = f"TOOL {calls[0]['name']} {json.dumps(calls[0]['args'], ensure_ascii=False)}"
                     called_name = calls[0]["name"]
-                    args_match = (canon(calls[0]["args"]) == canon(gargs)) if gname else None
+                    am = args_match(gname, calls[0]["args"], gargs) if gname else None
                 else:
                     decided = "TEXT: " + (clean_text(resp.content)[:160] or "(kosong)")
                     called_name = None
-                    args_match = None
+                    am = None
             except Exception as exc:  # noqa: BLE001
                 dt = time.time() - t0
-                decided, called_name, args_match = f"ERROR: {exc}", "__error__", None
+                decided, called_name, am = f"ERROR: {exc}", "__error__", None
             # correctness
             if gname is None:
                 ok = called_name is None            # non-tool: must NOT call a tool
             else:
                 ok = (called_name == gname)          # tool: must call the right tool
             runs.append({"latency": round(dt, 2), "decided": decided,
-                         "ok": ok, "args_match": args_match})
+                         "ok": ok, "args_match": am})
 
         lats = [r["latency"] for r in runs]
         oks = sum(r["ok"] for r in runs)
@@ -204,12 +229,22 @@ def main():
         "total_seconds": round(time.time() - t_start, 1),
         "per_scenario": results,
     }
-    out = ROOT / "finetune" / f"scenario_{args.model.replace(':', '_').replace('/', '_')}.json"
+    out = Path(args.out) if args.out else (
+        ROOT / "finetune" / f"scenario_{args.model.replace(':', '_').replace('/', '_')}.json")
+    out.write_text(json.dumps(agg, indent=2, ensure_ascii=False))
+
+    # Gerbang rilis v4 (§5): SEMUA skenario regresi harus lolos di semua run.
+    reg = [r for r in results if r["type"].startswith("R")]
+    reg_ok = all(r["correct_runs"] == r["total_runs"] for r in reg)
+    agg["regression_pass"] = reg_ok
     out.write_text(json.dumps(agg, indent=2, ensure_ascii=False))
 
     ts, tt = agg["tool_selection_correct_runs"], agg["tool_selection_total_runs"]
     ns, nt = agg["non_tool_correct_runs"], agg["non_tool_total_runs"]
     print(f"\n{'-' * 72}\nRINGKASAN {args.model}")
+    print(f"  regresi insiden live  : {'LOLOS' if reg_ok else 'GAGAL'} "
+          f"({sum(r['correct_runs'] for r in reg)}/{sum(r['total_runs'] for r in reg)} run, "
+          f"gagal di: {[r['type'] for r in reg if r['correct_runs'] < r['total_runs']] or '-'})")
     print(f"  tool-selection benar : {ts}/{tt} run  ({ts/max(1,tt):.1%})")
     print(f"  args exact-match     : {agg['args_exact_runs']}/{tt} run  ({agg['args_exact_runs']/max(1,tt):.1%})")
     print(f"  non-tool benar       : {ns}/{nt} run  ({ns/max(1,nt):.1%})")

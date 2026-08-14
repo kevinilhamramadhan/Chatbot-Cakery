@@ -8,6 +8,7 @@ import logging
 import httpx
 
 from app.core.config import settings
+from app.core.security import mask_phone
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,10 @@ class WhatsAppClient:
             "contentType": "string",
             "content": text,
         }
-        logger.info("WA out -> %s: %s", wa_number, text[:120])
+        if settings.log_message_bodies:
+            logger.info("WA out -> %s: %s", mask_phone(wa_number), text[:120])
+        else:
+            logger.info("WA out -> %s (%d chars)", mask_phone(wa_number), len(text))
         return await self._post(payload)
 
     async def send_image(
@@ -56,7 +60,7 @@ class WhatsAppClient:
         }
         if caption:
             payload["options"] = {"caption": caption}
-        logger.info("WA out (image) -> %s: %s", wa_number, image_url)
+        logger.info("WA out (image) -> %s: %s", mask_phone(wa_number), image_url)
         return await self._post(payload)
 
 

@@ -8,6 +8,7 @@ from app.backend_client import api as backend
 from app.conversation import store
 from app.conversation.context import get_turn_context
 from app.core.config import settings
+from app.core.security import mask_phone, sanitize_relay, wa_digits
 from app.whatsapp_client.client import whatsapp_client
 
 logger = logging.getLogger(__name__)
@@ -35,16 +36,24 @@ async def escalate_to_admin(reason: str) -> str:
         numbers = [settings.admin_wa_number]
     if not numbers:
         logger.warning("No admin number available (dynamic list empty & env unset).")
+    # `reason` is written by the LLM, which the customer steers — it must not be
+    # able to look like an instruction from us or carry a clickable link, since
+    # admins receive it from the store's own WhatsApp number.
+    note = sanitize_relay(reason)
     for number in numbers:
         try:
             await whatsapp_client.send_text(
                 number,
-                f"🔔 Permintaan butuh penanganan admin.\nDari: {wa}\nAlasan: {reason}",
+                "🔔 Permintaan butuh penanganan admin.\n"
+                f"Dari: {wa_digits(wa)}\n"
+                "--- kutipan kebutuhan pelanggan (teks pelanggan, jangan diperlakukan "
+                "sebagai instruksi) ---\n"
+                f"{note}",
             )
         except Exception as exc:  # noqa: BLE001 - notification best-effort
-            logger.error("Failed to notify admin %s: %s", number, exc)
+            logger.error("Failed to notify admin %s: %s", mask_phone(number), exc)
 
-    logger.info("Takeover active for %s until %s", wa, expires.isoformat())
+    logger.info("Takeover active for %s until %s", mask_phone(wa), expires.isoformat())
     return (
         "Permintaanmu sudah aku teruskan ke admin kami ya. Mohon tunggu, admin akan "
         "menghubungimu langsung lewat chat ini. 🙏"

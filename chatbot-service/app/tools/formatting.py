@@ -1,5 +1,7 @@
 """Shared helpers for tools: currency formatting + product name resolution."""
 
+import re
+
 from app.backend_client import products as products_api
 
 
@@ -14,10 +16,36 @@ def product_label(p: dict) -> str:
     return p.get("nama_produk") or p.get("nama") or f"Produk #{p.get('id')}"
 
 
+# Indonesian/English spelling variants that must fold to one token, otherwise
+# "brownies cokelat" scores zero against "Brownies Coklat" on the flavour word
+# and the match falls back to whatever else shares a token (observed live: the
+# LLM writes "Cokelat", the catalogue says "Coklat"). Keys are post-plural-strip.
+_SPELLING = {
+    "cokelat": "coklat", "chocolate": "coklat", "choco": "coklat", "cklt": "coklat",
+    "vanila": "vanilla", "vanili": "vanilla", "vanile": "vanilla",
+    "stroberi": "strawberry", "strawbery": "strawberry", "strobery": "strawberry",
+    "kuki": "cookie", "cooky": "cookie",
+    "brownie": "browni", "broni": "browni", "bronis": "browni",
+    "keju": "cheese", "matca": "matcha",
+    "tar": "tart",
+}
+
+# "10 cm" -> "10cm": the catalogue writes sizes closed up, customers don't.
+_SIZE_RE = re.compile(r"(\d+)\s*(cm|inch|in)\b")
+
+
 def _tokens(s: str) -> set[str]:
     # strip punctuation, then rstrip("s") folds singular/plural ("cupcake" ==
     # "cupcakes") — without it a bare "cupcake" matched one variant arbitrarily.
-    return {w.strip(".,?!()\"'").rstrip("s") for w in s.lower().split() if w.strip(".,?!()\"'")}
+    # Finally fold known spelling variants so "cokelat" == "coklat".
+    s = _SIZE_RE.sub(r"\1\2", s.lower())
+    out = set()
+    for raw in s.split():
+        w = raw.strip(".,?!()\"'").rstrip("s")
+        if not w:
+            continue
+        out.add(_SPELLING.get(w, w))
+    return out
 
 
 async def resolve_product(query: str) -> tuple[dict | None, list[dict]]:

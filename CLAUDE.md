@@ -9,9 +9,11 @@ This is Kevin's working directory for the **Toti Cakery WhatsApp Chatbot** (a 3-
 1. **`PROMPT_CLAUDE_CODE_TOTI_CAKERY_CHATBOT.md` is the authoritative spec.** Read it before doing chatbot work. It defines the full scope, rules, architecture, conversation flow, and a list of open questions (its section 17) that must be confirmed with Kevin before implementing the affected parts.
 2. **The chatbot service is built and fully wired to the real backend** (`chatbot-service/`, `whatsapp-gateway/`, `docker-compose.yml`). The spec's folder layout (spec §3) predates some cleanups: the mock `services/payment-gateway/` was deleted once the real Midtrans flow moved into the main backend.
 
-## `Backend-Cakery/` is reference-only — do not modify
+## The backend is a remote service — do not modify it
 
-`Backend-Cakery/` is the teammate's FastAPI + PostgreSQL backend, included here as read-only reference (it is its own git repo). **Never edit it, and never add endpoints to it.** The chatbot talks to it over HTTP only. Building chatbot code is the entire job here.
+The teammate's FastAPI + PostgreSQL backend runs at **`https://backend-cakery.vercel.app`** (`BACKEND_BASE_URL`). Its source lives in its own repo (github.com/Nicholl2/Backend-Cakery) and is **no longer checked out in this workspace** — the chatbot talks to the deployment over HTTP only. **Never edit the backend, and never add endpoints to it.** Building chatbot code is the entire job here.
+
+Need to read backend source (schemas, route auth)? Clone it somewhere outside this workspace, or read `{BACKEND_BASE_URL}/openapi.json`.
 
 ### Historical gotcha (fixed): double-prefix routing bug in Backend-Cakery
 
@@ -22,7 +24,7 @@ Early versions of the backend doubled every path (router `prefix=` + another pre
 - **Usable now** (buyer-relevant): products list/detail, FAQ list/detail, stock-items. `get_menu` / `get_product_detail` tools wire to these — `get_menu` is the one tool whose backend endpoint definitely exists, so it's the end-to-end smoke test (spec §15.6).
 - **All backend endpoints the chatbot needs are built and live-verified** (backend commit `8670242`): customers, orders, payments/Midtrans, takeover, takeover-handlers, `is_available`, ready-push, order-status update, and `GET /reports/summary` (Owner reports — wired into `financial_report`/`business_analytics` for real). Do **not** invent endpoints beyond these; anything new the backend must build goes in `BACKEND_TODO.txt` (name, method+path, request/response shape, why), which also lists the frozen response contracts the chatbot depends on. See spec §1, §5.
 
-Product/FAQ response shapes live in `Backend-Cakery/app/schemas/product.py` and `faq.py` (note Indonesian field names: `nama_produk`, `harga_jual`, `deskripsi`, `kategori`, `pertanyaan`, `jawaban`).
+Product/FAQ response shapes are documented in `{BACKEND_BASE_URL}/openapi.json` (note Indonesian field names: `nama_produk`, `harga_jual`, `deskripsi`, `kategori`, `minimum_order`, `pertanyaan`, `jawaban`).
 
 ## Hard rules from the spec (don't violate)
 
@@ -45,10 +47,9 @@ docker-compose up                       # whole stack: chatbot-service, chroma, 
 python chatbot-service/knowledge_base/ingest.py   # (re)embed FAQ files into ChromaDB (idempotent)
 ```
 
-Reference backend (run only if you need to verify real endpoints/`/docs`):
+Verifying real backend endpoints:
 
 ```bash
-# in Backend-Cakery/, needs Python 3.12+, PostgreSQL 17+, a .env with database_url
-pip install -r requirements.txt
-uvicorn app.main:app --reload          # Swagger at /docs, schema at /openapi.json
+curl https://backend-cakery.vercel.app/openapi.json | jq '.paths | keys'
+# Swagger UI: https://backend-cakery.vercel.app/docs
 ```

@@ -1,0 +1,235 @@
+  5/100 rows (26s)
+  10/100 rows (158s)
+  15/100 rows (184s)
+  20/100 rows (367s)
+  25/100 rows (492s)
+  30/100 rows (525s)
+  35/100 rows (657s)
+  40/100 rows (684s)
+  45/100 rows (707s)
+  50/100 rows (732s)
+  55/100 rows (765s)
+  60/100 rows (800s)
+  65/100 rows (925s)
+  70/100 rows (1003s)
+  75/100 rows (1084s)
+  80/100 rows (1255s)
+  85/100 rows (1377s)
+  90/100 rows (1451s)
+  95/100 rows (1479s)
+  100/100 rows (1505s)
+{
+  "model": "toti-qwen-1.7b-v4",
+  "rows": 100,
+  "function_selection_acc": 0.883,
+  "param_exact_acc": 0.733,
+  "invalid_call_rate": 0.0,
+  "irrelevance_acc": 0.875,
+  "false_tool_rate": 0.125,
+  "seconds": 1505.0
+}
+
+per-type (n / correct-tool / exact-args | non-tool: ok / false-call):
+  N1   n= 11  ok= 11  false_tool=  0
+  N2   n=  3  ok=  3  false_tool=  0
+  N3   n=  6  ok=  6  false_tool=  0
+  N4   n=  8  ok=  8  false_tool=  0
+  N5   n=  7  ok=  3  false_tool=  4
+  N6   n=  5  ok=  4  false_tool=  1
+  T1   n=  9  sel=  9  param=  8
+  T10  n=  4  sel=  3  param=  0
+  T11  n=  2  sel=  2  param=  2
+  T12  n=  2  sel=  2  param=  2
+  T2   n=  4  sel=  3  param=  3
+  T3   n=  9  sel=  6  param=  5
+  T4   n=  5  sel=  5  param=  5
+  T5   n=  7  sel=  7  param=  5
+  T6   n=  4  sel=  3  param=  3
+  T7   n=  4  sel=  4  param=  2
+  T8   n=  6  sel=  5  param=  5
+  T9   n=  4  sel=  4  param=  4
+
+saved -> finetune/results_toti-qwen-1.7b.v4.json
+
+========================================================================
+MODEL: toti-qwen-1.7b-v4   |   24 skenario x 3 run (thinking ON, temp=0.7/top_p=0.8)
+========================================================================
+(warm-up model load: 32.6s — tidak dihitung)
+
+[T1  ] OK 3/3 correct args=3/3  lat med=2.34s (2.32-67.89s)  Lihat seluruh menu            -> get_menu
+       USER: apa aja yang dijual di sini kak?
+       GOLD: get_menu {}
+       run1 67.89s  TOOL get_menu {}
+       run2  2.34s  TOOL get_menu {}
+       run3  2.32s  TOOL get_menu {}
+
+[T2  ] OK 3/3 correct args=3/3  lat med=2.9s (2.79-4.03s)  Menu per kategori             -> get_menu(kategori)
+       USER: halo, mau liat menu khsuus cupcaks min
+       GOLD: get_menu {"kategori": "cupcake"}
+       run1  4.03s  TOOL get_menu {"kategori": "cupcake"}
+       run2   2.9s  TOOL get_menu {"kategori": "cupcake"}
+       run3  2.79s  TOOL get_menu {"kategori": "cupcake"}
+
+[T3  ] OK 3/3 correct args=3/3  lat med=3.32s (3.26-5.5s)  Detail 1 produk               -> get_product_detail
+       USER: hi, details on the mini cookies 7cm
+       GOLD: get_product_detail {"product": "Mini Cookies 7cm"}
+       run1   5.5s  TOOL get_product_detail {"product": "mini cookies 7cm"}
+       run2  3.32s  TOOL get_product_detail {"product": "mini cookies 7cm"}
+       run3  3.26s  TOOL get_product_detail {"product": "mini cookies 7cm"}
+
+[T4  ] OK 3/3 correct args=3/3  lat med=4.96s (4.95-8.79s)  Bandingkan produk             -> compare_products
+       USER: permisi, gedean mana giant cookies 15cm sama cupcakes yang isi 9 coklat?
+       GOLD: compare_products {"products": ["Giant Cookies 15cm", "Cupcakes isi 9 Cokelat"]}
+       run1  8.79s  TOOL compare_products {"products": ["gedean mana giant cookies 15cm", "cupcakes yang isi 9 coklat"]}
+       run2  4.95s  TOOL compare_products {"products": ["gedean mana giant cookies 15cm", "cupcakes yang isi 9 coklat"]}
+       run3  4.96s  TOOL compare_products {"products": ["gedean mana giant cookies 15cm", "cupcakes yang isi 9 coklat"]}
+
+[T5  ] OK 3/3 correct args=3/3  lat med=4.96s (4.83-6.07s)  Pesan 1 item                  -> add_to_cart
+       USER: permisi, aku mau beli cupcakes yang isi 6 cokelat kak
+       GOLD: add_to_cart {"items": [{"product": "Cupcakes isi 6 Cokelat", "qty": 1}]}
+       run1  6.07s  TOOL add_to_cart {"items": [{"product": "cupcakes yang isi 6 cokelat", "qty": 1}]}
+       run2  4.96s  TOOL add_to_cart {"items": [{"product": "cupcakes yang isi 6 cokelat", "qty": 1}]}
+       run3  4.83s  TOOL add_to_cart {"items": [{"product": "cupcakes yang isi 6 cokelat", "qty": 1}]}
+
+[T6  ] OK 3/3 correct args=3/3  lat med=7.16s (6.81-8.66s)  Pesan banyak item sekaligus   -> add_to_cart
+       USER: selamat siang, tolong giant cookies rasa matcha 6 sama cake 22cm coklat 10 ya deh
+       GOLD: add_to_cart {"items": [{"product": "Giant Cookies 15cm Matcha", "qty": 6}, {"product": "Ca
+       run1  8.66s  TOOL add_to_cart {"items": [{"product": "giant cookies rasa matcha", "qty": 6}, {"product": "cake 22cm coklat", "qty": 1
+       run2  7.16s  TOOL add_to_cart {"items": [{"product": "giant cookies rasa matcha", "qty": 6}, {"product": "cake 22cm coklat 10", "qty"
+       run3  6.81s  TOOL add_to_cart {"items": [{"product": "giant cookies rasa matcha", "qty": 6}, {"product": "cake 22cm coklat", "qty": 1
+
+[T7  ] OK 3/3 correct args=0/3  lat med=4.29s (4.14-10.42s)  Pesan lanjutan (multi-turn)   -> add_to_cart
+       USER: sip, pesan seupluh box ya
+       GOLD: add_to_cart {"items": [{"product": "Cake 15cm Vanilla", "qty": 10}]}
+       run1 10.42s  TOOL add_to_cart {"items": [{"product": "box kue", "qty": 12}]}
+       run2  4.29s  TOOL add_to_cart {"items": [{"product": "box kue", "qty": 10}]}
+       run3  4.14s  TOOL add_to_cart {"items": [{"product": "box kue", "qty": 2}]}
+
+[T8  ] ~  2/3 correct args=2/3  lat med=3.26s (2.4-3.55s)  Status pesanan                -> get_order_status
+       USER: permisi, pesananku jadi dikirim kapan?
+       GOLD: get_order_status {}
+       run1  3.55s  TOOL get_order_status {}
+       run2  3.26s  TEXT: Biar nggak salah pilih, boleh sebutkan nama kue dan jumlahnya kak? 😊
+       run3   2.4s  TOOL get_order_status {}
+
+[T9  ] OK 3/3 correct args=3/3  lat med=2.33s (2.32-3.05s)  Batalkan pesanan              -> cancel_order
+       USER: halo, cancel order ku ya ya
+       GOLD: cancel_order {}
+       run1  3.05s  TOOL cancel_order {}
+       run2  2.32s  TOOL cancel_order {}
+       run3  2.33s  TOOL cancel_order {}
+
+[T10 ] OK 3/3 correct args=0/3  lat med=4.42s (4.27-5.73s)  Eskalasi ke admin             -> escalate_to_admin
+       USER: hai kak, pesanank akyaknya salah kirim, tolong nih
+       GOLD: escalate_to_admin {"reason": "Pelanggan komplain pesanan diduga salah kirim"}
+       run1  5.73s  TOOL escalate_to_admin {"reason": "Pesanan pelanggan komplain kue sampai saat pengiriman"}
+       run2  4.42s  TOOL escalate_to_admin {"reason": "Pelanggan komplain kue pesanannya salah kirim"}
+       run3  4.27s  TOOL escalate_to_admin {"reason": "Pesanan pelanggan komplain kue sampai saat pengiriman"}
+
+[T11 ] OK 3/3 correct args=3/3  lat med=2.33s (2.32-3.21s)  Laporan keuangan (owner)      -> financial_report
+       USER: emang untung berapa sih sebulan min?
+       GOLD: financial_report {}
+       run1  3.21s  TOOL financial_report {}
+       run2  2.32s  TOOL financial_report {}
+       run3  2.33s  TOOL financial_report {}
+
+[T12 ] OK 3/3 correct args=3/3  lat med=2.49s (2.35-3.29s)  Analisa bisnis (owner)        -> business_analytics
+       USER: min, analisa penjualan dong min dong
+       GOLD: business_analytics {}
+       run1  3.29s  TOOL business_analytics {}
+       run2  2.49s  TOOL business_analytics {}
+       run3  2.35s  TOOL business_analytics {}
+
+[N1  ] OK 3/3 correct  lat med=8.74s (8.41-63.05s)  FAQ (grounded)                -> jawab teks, TANPA tool
+       USER: kue tahan berapa lama?
+       GOLD: (no tool)
+       run1 63.05s  TEXT: Semua produk kami dibuat dari bahan halal kak. Paling enak dinikmati di hari yang sama; kalau disimpan di chiller 
+       run2  8.74s  TEXT: Kue di Toti Cakery dibuat dari bahan halal kak. Paling enak dinikmati di hari yang sama; kalau disimpan di chiller
+       run3  8.41s  TEXT: Semua produk kami dibuat dari bahan halal kak. Paling enak dinikmati di hari yang sama; kalau disimpan di chiller 
+
+[N2  ] OK 3/3 correct  lat med=3.57s (3.27-46.51s)  Permintaan di luar layanan    -> teks, TANPA tool
+       USER: min, bisa jadi reseller kue kalian ga nih?
+       GOLD: (no tool)
+       run1 46.51s  TEXT: Hmm, aku belum bisa jawab soal itu 🙏 Kalau mau, aku bisa hubungkan kamu ke admin ya.
+       run2  3.27s  TEXT: Maaf kak, untuk hal itu aku belum punya informasinya. Mau kuteruskan ke admin?
+       run3  3.57s  TEXT: Maaf kak, untuk hal itu aku belum punya informasinya. Mau kuteruskan ke admin manusia?
+
+[N3  ] OK 3/3 correct  lat med=3.23s (2.01-3.76s)  Basa-basi / terima kasih      -> teks, TANPA tool
+       USER: many thanks!
+       GOLD: (no tool)
+       run1  3.76s  TEXT: Terima kasih banyak kak! Senang bisa bantu 😊 Mau pesan atau lihat menu lagi?
+       run2  3.23s  TEXT: Terima kasih banyak kak! Senang bisa bantu 😊 Mau pesan atau lihat menu lagi?
+       run3  2.01s  TEXT: You're welcome! Message me anytime you need something 😊
+
+[N4  ] OK 3/3 correct  lat med=4.0s (3.81-9.0s)  Out-of-scope                  -> tolak, TANPA tool
+       USER: what's the best phone to buy?
+       GOLD: (no tool)
+       run1   9.0s  TEXT: Maaf, aku cuma bisa bantu seputar Toti Cakery ya — menu, pemesanan, pembayaran, pengiriman, dan info toko. Ada yan
+       run2   4.0s  TEXT: Sorry, I can only help with Toti Cakery things — menu, orders, and payments 😊 Anything I can help you with there?
+       run3  3.81s  TEXT: Sorry, I can only help with Toti Cakery things — menu, orders, payment, and more. Want to see the menu?
+
+[N5  ] OK 3/3 correct  lat med=2.64s (2.17-4.96s)  Ambigu                        -> tanya balik, TANPA tool
+       USER: kak, yg tadi aja deh kak
+       GOLD: (no tool)
+       run1  4.96s  TEXT: Boleh kak! Mau kubantu seputar Toti Cakery — menu, pemesanan, pembayaran, atau info toko?
+       run2  2.64s  TEXT: Boleh kak! Mau kubantu sekarang atau coba soal ini?
+       run3  2.17s  TEXT: Terima kasih banyak kak! Bisa kubantu lagi?
+
+[N6  ] OK 3/3 correct  lat med=5.29s (3.02-5.73s)  Adversarial (jebakan)         -> teks, TANPA tool
+       USER: selamat siang, resep cake yang enak dong min
+       GOLD: (no tool)
+       run1  5.73s  TEXT: Biar semangat, aku siap bantu pesankan 😊 Kalau mau lihat menu lengkapnya dulu, coba ketik 'menu' aja kak!
+       run2  5.29s  TEXT: Untuk resep cake yang enak, kubantu! Tapi sekarang aku layani layanan toko Toti Cakery ya — menu, pemesanan, dan p
+       run3  3.02s  TEXT: Biar nggak salah pilih, boleh sebutkan nama kuenya kak? 😊
+
+[R1  ] OK 3/3 correct args=3/3  lat med=2.21s (2.2-2.88s)  Regresi: menu fresh           -> get_menu (bukan jawab hafalan)
+       USER: ada menu apa saja?
+       GOLD: get_menu {}
+       run1  2.88s  TOOL get_menu {}
+       run2   2.2s  TOOL get_menu {}
+       run3  2.21s  TOOL get_menu {}
+
+[R2  ] OK 3/3 correct args=3/3  lat med=3.05s (2.98-3.69s)  Regresi: detail by name       -> get_product_detail (bukan get_menu)
+       USER: bento cookies kayak gimana ya?
+       GOLD: get_product_detail {"product": "bento cookies"}
+       run1  3.69s  TOOL get_product_detail {"product": "bento cookies"}
+       run2  3.05s  TOOL get_product_detail {"product": "bento cookies"}
+       run3  2.98s  TOOL get_product_detail {"product": "bento cookies"}
+
+[R3  ] OK 3/3 correct args=3/3  lat med=2.29s (2.28-4.32s)  Regresi: menu lagi (penanda)  -> get_menu (bukan meniru history)
+       USER: tampilin menunya lagi dong
+       GOLD: get_menu {}
+       run1  4.32s  TOOL get_menu {}
+       run2  2.29s  TOOL get_menu {}
+       run3  2.28s  TOOL get_menu {}
+
+[R4  ] OK 3/3 correct args=3/3  lat med=2.98s (2.94-5.85s)  Regresi: detail lain (penanda)-> get_product_detail produk BARU
+       USER: kalau mini cookies kayak gimana?
+       GOLD: get_product_detail {"product": "mini cookies"}
+       run1  5.85s  TOOL get_product_detail {"product": "mini cookies"}
+       run2  2.94s  TOOL get_product_detail {"product": "mini cookies"}
+       run3  2.98s  TOOL get_product_detail {"product": "mini cookies"}
+
+[R5  ] OK 3/3 correct args=3/3  lat med=3.95s (3.93-4.52s)  Regresi: order generik        -> add_to_cart verbatim 'cupcake'
+       USER: beli 4 cupcake
+       GOLD: add_to_cart {"items": [{"product": "cupcake", "qty": 4}]}
+       run1  4.52s  TOOL add_to_cart {"items": [{"product": "cupcake", "qty": 4}]}
+       run2  3.95s  TOOL add_to_cart {"items": [{"product": "cupcake", "qty": 4}]}
+       run3  3.93s  TOOL add_to_cart {"items": [{"product": "cupcake", "qty": 4}]}
+
+[R6  ] OK 3/3 correct args=3/3  lat med=2.31s (2.23-4.14s)  Regresi: menu + history cemar -> get_menu (persis insiden live #1)
+       USER: ada menu apa saja?
+       GOLD: get_menu {}
+       run1  4.14s  TOOL get_menu {}
+       run2  2.31s  TOOL get_menu {}
+       run3  2.23s  TOOL get_menu {}
+
+------------------------------------------------------------------------
+RINGKASAN toti-qwen-1.7b-v4
+  regresi insiden live  : LOLOS (18/18 run, gagal di: -)
+  tool-selection benar : 53/54 run  (98.1%)
+  args exact-match     : 47/54 run  (87.0%)
+  non-tool benar       : 18/18 run  (100.0%)
+  latency (semua run)  : median 3.63s | mean 6.38s
+  total waktu          : 459.6s
+saved -> finetune/scenario_toti-qwen-1.7b.v4.json

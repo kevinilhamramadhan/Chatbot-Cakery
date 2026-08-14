@@ -56,7 +56,11 @@ def patch_externals(monkeypatch):
         return {"order_id": 30001, "nomor_invoice": "INV-TEST",
                 "total_harga_pesanan": 100000, "status": "pending"}
 
-    async def f_create_payment(order_id, amount, channel="bank_transfer"):
+    charges = []
+
+    async def f_create_payment(order_id, amount, channel="bank_transfer", payment_type="full"):
+        charges.append({"order_id": order_id, "amount": amount,
+                        "channel": channel, "payment_type": payment_type})
         if channel == "qris":
             return {"payment_id": 1, "pg_transaction_id": "MID",
                     "va_number": None, "qris_url": "https://api.qr/mid-test", "status": "Pending"}
@@ -89,7 +93,8 @@ def patch_externals(monkeypatch):
                      "set_takeover": f_set_takeover, "get_takeover_admin_numbers": f_admin,
                      "get_takeover_status": f_takeover_status}.items():
         monkeypatch.setattr(backend, name, fn)
-    return {"sent": sent, "backend": backend, "monkeypatch": monkeypatch}
+    return {"sent": sent, "backend": backend, "monkeypatch": monkeypatch,
+            "charges": charges}
 
 
 async def _seed_cart_awaiting_confirmation(items):
@@ -116,6 +121,46 @@ async def test_add_to_cart_unknown_product():
     out = await add_to_cart.ainvoke({"items": [{"product": "Pizza", "qty": 1}]})
     assert "tidak menemukan" in out.lower()
     assert await store.get_cart(WA) == []
+
+
+async def test_add_to_cart_enforces_minimum_order(monkeypatch):
+    """products.minimum_order exists in the catalogue but POST /orders does NOT
+    enforce it — without this check the customer gets an invoice for a quantity
+    the store won't bake. Never silently bump the qty: ask instead."""
+    from app.backend_client import products as products_api
+    from app.tools.add_to_cart import add_to_cart
+    bulk = {"id": 77, "nama_produk": "Mini Cookies 7cm", "harga_jual": 25000,
+            "is_active": True, "minimum_order": 5}
+    monkeypatch.setattr(products_api, "list_products",
+                        lambda only_active=True, kategori=None: _async([bulk]))
+    monkeypatch.setattr(products_api, "get_product",
+                        lambda pid: _async(bulk if pid == 77 else None))
+    set_turn_context(TurnContext(wa_number=WA))
+
+    out = await add_to_cart.ainvoke({"items": [{"product": "Mini Cookies 7cm", "qty": 2}]})
+    assert "minimal 5" in out
+    assert await store.get_cart(WA) == []          # nothing added, nothing bumped
+
+    out = await add_to_cart.ainvoke({"items": [{"product": "Mini Cookies 7cm", "qty": 5}]})
+    cart = await store.get_cart(WA)
+    assert len(cart) == 1 and cart[0]["qty"] == 5
+
+
+async def test_add_to_cart_minimum_counts_existing_lines(monkeypatch):
+    """3 + 2 of the same product clears a minimum of 5 — the check is on the
+    resulting line total, not on each message in isolation."""
+    from app.backend_client import products as products_api
+    from app.tools.add_to_cart import add_to_cart
+    bulk = {"id": 77, "nama_produk": "Mini Cookies 7cm", "harga_jual": 25000,
+            "is_active": True, "minimum_order": 5}
+    monkeypatch.setattr(products_api, "list_products",
+                        lambda only_active=True, kategori=None: _async([bulk]))
+    set_turn_context(TurnContext(wa_number=WA))
+    await store.set_cart(WA, [{"product_id": 77, "nama": "Mini Cookies 7cm",
+                               "harga": 25000.0, "qty": 3}])
+    await add_to_cart.ainvoke({"items": [{"product": "Mini Cookies 7cm", "qty": 2}]})
+    cart = await store.get_cart(WA)
+    assert len(cart) == 1 and cart[0]["qty"] == 5
 
 
 async def test_add_to_cart_rejects_unavailable(monkeypatch):
@@ -165,6 +210,9 @@ async def test_product_detail_prefixes_relative_image_path(monkeypatch):
            "is_active": True, "image_url": "/static/products/12.jpg"}
     monkeypatch.setattr(products_api, "list_products",
                         lambda only_active=True, kategori=None: _async([p12]))
+    # Reachability is a separate concern (covered below); assume the URL serves.
+    monkeypatch.setattr("app.tools.get_product_detail._image_exists",
+                        lambda url: _async(True))
     ctx = TurnContext(wa_number=WA)
     set_turn_context(ctx)
     await get_product_detail.ainvoke({"product": "cake 10cm"})
@@ -177,6 +225,24 @@ async def test_product_detail_prefixes_relative_image_path(monkeypatch):
     set_turn_context(ctx2)
     await get_product_detail.ainvoke({"product": "cake 10cm"})
     assert ctx2.media[0].image_url == "https://cdn.example.com/12.jpg"
+
+
+async def test_product_detail_skips_unreachable_image(monkeypatch):
+    """The backend on Vercel loses /static on redeploy (verified 404), and a dead
+    URL makes wwebjs-api throw after an otherwise fine reply. Text still goes."""
+    from app.backend_client import products as products_api
+    from app.tools.get_product_detail import get_product_detail
+    p12 = {"id": 12, "nama_produk": "Cake 10cm", "harga_jual": 90000,
+           "is_active": True, "image_url": "/static/products/12.jpg"}
+    monkeypatch.setattr(products_api, "list_products",
+                        lambda only_active=True, kategori=None: _async([p12]))
+    monkeypatch.setattr("app.tools.get_product_detail._image_exists",
+                        lambda url: _async(False))
+    ctx = TurnContext(wa_number=WA)
+    set_turn_context(ctx)
+    out = await get_product_detail.ainvoke({"product": "cake 10cm"})
+    assert ctx.media == []                 # no broken media queued
+    assert "Rp90.000" in out               # the text answer is unaffected
 
 
 async def test_product_detail_asks_when_ambiguous(monkeypatch):
@@ -218,6 +284,92 @@ async def test_full_order_flow_with_dp():
     assert order.payment_type == "dp" and order.total_amount == 100000 and order.amount_due == 50000
     assert order.order_ref == "30001"            # backend order id tracked locally
     assert json.loads(order.customer_json)["nomor_hp"] == "628123456789"
+
+
+async def test_charge_sends_payment_method_and_type(patch_externals):
+    """Backend commit 3409fc7 split the body: `payment_method` (bank_transfer|
+    qris) vs `payment_type` (full|dp), and now recomputes the expected amount
+    from the order — sending the old shape gets a 422, a wrong amount a 400."""
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "dp", "qris"):
+        await handle_message(WA, msg)
+
+    charge = patch_externals["charges"][-1]
+    assert charge["channel"] == "qris"          # -> payment_method
+    assert charge["payment_type"] == "dp"       # -> payment_type
+    assert charge["amount"] == 50000.0          # exactly total * 0.5 (100000)
+
+
+async def test_dp_amount_keeps_cents_on_odd_total(patch_externals, monkeypatch):
+    """The backend compares against (total * 0.5).quantize(0.01); rounding to
+    whole rupiah here would 400 on any odd total."""
+    from app.backend_client import products as products_api
+    odd = {"id": 5, "nama_produk": "Brownies Coklat", "harga_jual": 50001,
+           "is_active": True}
+    monkeypatch.setattr(products_api, "list_products",
+                        lambda only_active=True, kategori=None: _async([odd]))
+    monkeypatch.setattr(products_api, "get_product",
+                        lambda pid: _async(odd if pid == 5 else None))
+
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "dp", "va"):
+        await handle_message(WA, msg)
+    assert patch_externals["charges"][-1]["amount"] == 25000.5
+
+
+async def test_checkout_reprices_stale_cart_and_reconfirms(patch_externals):
+    """Security fix: the charged amount used to come from the price snapshotted
+    at add_to_cart time, so a cart parked in the session could be checked out at
+    an old price. Checkout must re-read the live price and re-confirm."""
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "full"):
+        await handle_message(WA, msg)
+
+    FAKE_PRODUCTS[0]["harga_jual"] = 60000          # price went up mid-session
+    try:
+        r = await handle_message(WA, "va")
+        assert await store.get_active_pending(WA) is None   # nothing charged yet
+        assert "Rp120.000" in r.text and "Rp50.000" in r.text  # new total + old price
+        assert (await store.get_or_create_session(WA)).state == State.AWAITING_CART_CONFIRMATION
+
+        # Re-confirming charges the NEW price without re-asking for identity.
+        r = await handle_message(WA, "sudah sesuai")
+        assert "8808123456789012" in r.text
+        order = await store.get_active_pending(WA)
+        assert order.total_amount == 120000 and order.amount_due == 120000
+    finally:
+        FAKE_PRODUCTS[0]["harga_jual"] = 50000
+
+
+async def test_checkout_drops_item_that_went_unavailable(patch_externals):
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "full"):
+        await handle_message(WA, msg)
+
+    FAKE_PRODUCTS[0]["is_available"] = False
+    try:
+        r = await handle_message(WA, "va")
+        assert "tidak tersedia" in r.text.lower()
+        assert await store.get_active_pending(WA) is None
+        assert await store.get_cart(WA) == []
+    finally:
+        FAKE_PRODUCTS[0].pop("is_available")
+
+
+async def test_retention_purge_clears_old_transcripts(patch_externals):
+    from sqlalchemy import text as sql_text
+
+    from app.core.database import async_session_factory
+
+    await store.log_message(WA, "in", "alamat rumahku Jl. Rahasia 1")
+    async with async_session_factory() as db:      # backdate past the retention window
+        await db.execute(sql_text(
+            "UPDATE chatbot_conversations SET created_at = '2020-01-01 00:00:00'"))
+        await db.commit()
+
+    logs, _ = await store.purge_old_data()
+    assert logs == 1
+    assert await store.recent_history(WA) == []
 
 
 async def test_payment_failure_cancels_backend_order(patch_externals):

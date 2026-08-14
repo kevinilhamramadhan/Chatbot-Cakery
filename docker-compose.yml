@@ -2,7 +2,8 @@
 #
 #   docker compose up --build -d
 #
-# Menjalankan 4 container: chatbot, backend, Ollama, wwebjs-api.
+# Menjalankan 3 container: chatbot, Ollama, wwebjs-api.
+# (Backend dipakai dari Vercel, bukan container lokal.)
 # Semua saling memanggil lewat nama service di network internal compose.
 
 services:
@@ -13,37 +14,27 @@ services:
     environment:
       # Topologi antar-container (menimpa nilai .env):
       WWEBJS_BASE_URL: http://wwebjs-api:3000
-      BACKEND_BASE_URL: http://backend:8001
       OLLAMA_BASE_URL: http://ollama:11434
+      # BACKEND_BASE_URL sengaja TIDAK di-override: backend sekarang dipakai dari
+      # deployment Vercel (nilainya di .env), bukan container lokal.
     ports:
-      # Bound to localhost: /webhook/* has no auth (wwebjs-api can't send an
-      # auth header), so it must not be reachable from the LAN.
+      # Bound to localhost as defense in depth. Auth itself is in the app:
+      # /webhook/whatsapp/<WEBHOOK_TOKEN> (secret in the path, because
+      # wwebjs-api can't send an auth header) and X-Internal-Key on
+      # /webhook/internal/*. Both are required at startup.
       - "127.0.0.1:8000:8000"
     volumes:
       - ./chatbot-service/chroma_db:/app/chroma_db      # persistent vector store
       - ./chatbot-service/toti_chatbot.db:/app/toti_chatbot.db
     depends_on:
       - wwebjs-api
-      - backend
       - ollama
     restart: unless-stopped
 
-  backend:
-    # Backend-Cakery punya teammate (repo read-only, tanpa Dockerfile) —
-    # dijalankan apa adanya di image python resmi, kode di-mount.
-    image: python:3.12-slim
-    container_name: cakery-backend
-    working_dir: /app
-    command: bash -c "pip install -q -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8001"
-    env_file: Backend-Cakery/.env          # DATABASE_URL (Neon), Midtrans, SERVICE_API_KEY
-    environment:
-      CHATBOT_URL: http://chatbot-service:8000   # tujuan push C4 "pesanan siap"
-    volumes:
-      - ./Backend-Cakery:/app
-      - pip-cache:/root/.cache/pip         # biar pip install cepat di start berikutnya
-    ports:
-      - "127.0.0.1:8001:8001"              # akses Swagger /docs dari host
-    restart: unless-stopped
+  # Backend TIDAK lagi dijalankan lokal — dipakai dari deployment Vercel
+  # (https://backend-cakery.vercel.app, lihat BACKEND_BASE_URL di .env).
+  # Kalau suatu saat perlu backend lokal lagi: clone Backend-Cakery, kembalikan
+  # service ini beserta env_file-nya, dan set BACKEND_BASE_URL=http://backend:8001.
 
   ollama:
     image: ollama/ollama:latest
@@ -65,8 +56,10 @@ services:
     container_name: toti-wwebjs
     environment:
       ENABLE_WEBHOOK: "true"
-      BASE_WEBHOOK_URL: http://chatbot-service:8000/webhook/whatsapp
-      API_KEY: ${WWEBJS_API_KEY:-change-me}
+      # The token is the webhook's only authentication — keep it in sync with
+      # WEBHOOK_TOKEN in .env (compose substitutes it from there).
+      BASE_WEBHOOK_URL: http://chatbot-service:8000/webhook/whatsapp/${WEBHOOK_TOKEN:?set WEBHOOK_TOKEN in .env - openssl rand -hex 24}
+      API_KEY: ${WWEBJS_API_KEY:?set WWEBJS_API_KEY in .env - openssl rand -hex 24}
       # We only need the `message` event; silence the rest to reduce noise.
       DISABLED_CALLBACKS: "message_create|message_revoke_everyone|message_reaction|media|group_join|group_leave|call"
     ports:
@@ -74,9 +67,6 @@ services:
     volumes:
       - ./whatsapp-gateway/sessions:/usr/src/app/sessions
     restart: unless-stopped
-
-volumes:
-  pip-cache:
 
 # Note: Chroma runs embedded inside chatbot-service (PersistentClient) writing to
 # the mounted ./chatbot-service/chroma_db volume — no separate container needed.

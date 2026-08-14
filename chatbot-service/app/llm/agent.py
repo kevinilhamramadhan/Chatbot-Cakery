@@ -13,13 +13,15 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.core.config import settings
 from app.llm.client import get_llm
-from app.llm.prompt import SYSTEM_PROMPT
+from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER
 from app.rag.store import retrieve
 from app.tools.registry import ALL_TOOLS, TOOLS_BY_NAME
 
 logger = logging.getLogger(__name__)
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+# "Rp50.000", "Rp 50000", "50.000 rupiah" — any money the model typed itself.
+_PRICE_RE = re.compile(r"(rp\s?\d|\d[\d.,]*\s*(rupiah|ribu\b))", re.IGNORECASE)
 
 OUT_OF_SCOPE_REPLY = (
     f"Maaf, aku hanya bisa membantu seputar {settings.store_name} ya — menu, pemesanan, "
@@ -60,29 +62,33 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         "RAG best_sim=%.3f in_scope=%s", retrieval.best_similarity, retrieval.in_scope
     )
 
-    system = SYSTEM_PROMPT
-    if rag_context:
-        system += (
-            "\n\nKONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\n" + rag_context
-        )
-
-    messages: list = [SystemMessage(content=system)]
+    # LATENCY, not cosmetics: Ollama reuses its KV cache only for the longest
+    # COMMON PREFIX of the prompt, and the system block (with the 9 tool
+    # definitions right behind it) is that prefix. The FAQ context used to be
+    # concatenated into this block, so it changed on every turn and invalidated
+    # the whole prefix — each turn re-prefilled ~2.5k tokens on CPU. Measured on
+    # this host: variable system block = 39-46s/turn, constant = 3-6s/turn.
+    # So the system block stays byte-identical and the retrieved context rides
+    # along with the question instead.
+    messages: list = [SystemMessage(content=SYSTEM_PROMPT)]
     for h in history:
         messages.append(
             HumanMessage(content=h["content"])
             if h["role"] == "user"
             else AIMessage(content=_history_view(h["content"]))
         )
-    # Routing reminder NEXT TO the question: small models weigh the nearest
-    # instruction far more than rules buried at the top of a long system prompt.
-    messages.append(SystemMessage(content=(
-        "INGAT ATURAN TOOL: kamu TIDAK hafal menu maupun harga — pengetahuanmu "
-        "tentang produk SELALU usang. Ditanya menu/daftar kue/harga -> WAJIB "
-        "panggil get_menu, JANGAN menjawab dari ingatan. Pesan yang menyebut "
-        "SATU produk dan menanyakannya (kayak gimana/seperti apa/foto/detail) "
-        "-> panggil get_product_detail. Jangan meniru pola jawaban sebelumnya."
-    )))
-    messages.append(HumanMessage(content=user_text))
+    # Routing reminder (see TOOL_REMINDER note in prompt.py: Ollama collates it
+    # into the top system block — the dataset/eval reproduce that placement).
+    messages.append(SystemMessage(content=TOOL_REMINDER))
+    question = user_text
+    if rag_context:
+        question = (
+            "KONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\n"
+            + rag_context
+            + "\n\nPertanyaan pelanggan: "
+            + user_text
+        )
+    messages.append(HumanMessage(content=question))
 
     llm = get_llm().bind_tools(ALL_TOOLS)
 
@@ -95,6 +101,19 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # 2) No tool call -> direct answer (FAQ / greeting / refusal).
     if not getattr(ai, "tool_calls", None):
         answer = _clean(ai.content)
+        # A price the model typed itself is a made-up price. Observed live, even
+        # on v4: "menu apa aja yang ada?" sometimes skips get_menu and answers
+        # "• Cupcakes isi 9 Vanilla — Rp120.000" — products and prices that do
+        # not exist. Spec rule: never invent harga/stok. So if a reply quotes
+        # money without a tool having produced it, throw it away and serve the
+        # real catalogue instead.
+        if answer and _PRICE_RE.search(answer):
+            logger.warning("Ungrounded price in a tool-less reply — substituting get_menu")
+            try:
+                return str(await TOOLS_BY_NAME["get_menu"].ainvoke({}))
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("get_menu substitution failed: %s", exc)
+                return "Maaf, daftar menu sedang tidak bisa diambil. Coba lagi sebentar ya 🙏"
         # Hard scope guard: out-of-scope and the model didn't use any on-topic
         # tool -> refuse rather than answer from general knowledge.
         if not rag_context and not answer:

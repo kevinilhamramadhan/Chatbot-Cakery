@@ -46,7 +46,7 @@ async def add_to_cart(items: list[dict]) -> str:
         )
 
     cart = await store.get_cart(wa)
-    added, not_found, unavailable, ambiguous = [], [], [], []
+    added, not_found, unavailable, ambiguous, below_min = [], [], [], [], []
     for raw in items:
         name_q = str(raw.get("product") or raw.get("nama") or "").strip()
         try:
@@ -73,6 +73,17 @@ async def add_to_cart(items: list[dict]) -> str:
         if harga is None:
             not_found.append(name_q)
             continue
+        # Backend exposes products.minimum_order but does NOT enforce it on
+        # POST /orders — if we don't check here, the customer gets an invoice
+        # for a quantity the store won't bake. Never silently bump the qty:
+        # ordering more than asked is worse than asking again.
+        min_order = max(1, int(p.get("minimum_order") or 1))
+        existing_qty = next(
+            (c["qty"] for c in cart if c.get("product_id") == p.get("id")), 0
+        )
+        if existing_qty + qty < min_order:
+            below_min.append(f"{product_label(p)} minimal {min_order} pcs")
+            continue
         # Merge with existing line if same product.
         existing = next((c for c in cart if c.get("product_id") == p.get("id")), None)
         if existing:
@@ -91,6 +102,12 @@ async def add_to_cart(items: list[dict]) -> str:
     await store.set_cart(wa, cart)
 
     if not added:
+        if below_min and not not_found and not unavailable and not ambiguous:
+            return (
+                "Untuk produk ini ada jumlah minimum pemesanan: "
+                + "; ".join(below_min)
+                + ". Mau kunaikkan jumlahnya?"
+            )
         if ambiguous and not not_found and not unavailable:
             return (
                 "Ada beberapa pilihan untuk " + "; ".join(ambiguous)
@@ -114,5 +131,7 @@ async def add_to_cart(items: list[dict]) -> str:
         msg += f"\n\n(Tidak ditemukan: {', '.join(not_found)})"
     if unavailable:
         msg += f"\n\n(Sedang tidak tersedia: {', '.join(unavailable)})"
+    if below_min:
+        msg += f"\n\n(Belum masuk karena minimum pemesanan: {'; '.join(below_min)})"
     msg += "\n\nSudah sesuai semua, atau mau nambah lagi? Ketik *sudah sesuai* untuk lanjut ya 😊"
     return msg

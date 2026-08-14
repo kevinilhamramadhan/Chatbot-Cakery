@@ -7,7 +7,7 @@ them freely without juggling a shared session.
 import json
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 
 from app.conversation.states import State
 from app.core.config import settings
@@ -155,6 +155,33 @@ async def update_pending_order(order_id: int, **fields) -> None:
         for k, v in fields.items():
             setattr(row, k, v)
         await db.commit()
+
+
+async def purge_old_data() -> tuple[int, int]:
+    """Delete stale personal data: old transcripts + identity blobs on finished
+    orders (nama/alamat/nomor HP). The backend keeps the authoritative order
+    record; this local DB is a working file and shouldn't age into an address
+    book. Returns (logs_deleted, orders_scrubbed).
+    """
+    days = settings.data_retention_days
+    if days <= 0:
+        return 0, 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    async with async_session_factory() as db:
+        res = await db.execute(
+            delete(ConversationLog).where(ConversationLog.created_at < cutoff)
+        )
+        scrub = await db.execute(
+            update(PendingOrder)
+            .where(
+                PendingOrder.created_at < cutoff,
+                PendingOrder.status.notin_(ACTIVE_ORDER_STATUSES),
+                PendingOrder.customer_json != "{}",
+            )
+            .values(customer_json="{}")
+        )
+        await db.commit()
+        return res.rowcount or 0, scrub.rowcount or 0
 
 
 async def list_orders_by_status(*statuses: str) -> list[PendingOrder]:

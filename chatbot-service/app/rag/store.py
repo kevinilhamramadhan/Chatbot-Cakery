@@ -32,8 +32,24 @@ class RetrievalResult:
     def in_scope(self) -> bool:
         return self.best_similarity >= settings.rag_similarity_threshold
 
+    @property
+    def relevant_documents(self) -> list[str]:
+        """Only the chunks that clear the threshold on their OWN score.
+
+        `retrieve()` always returns top_k chunks, so a question that matches one
+        FAQ well drags in the next two regardless of how weakly they match
+        (measured: "bisa dikirim ke luar kota?" -> pengiriman 0.404, but also
+        pembayaran 0.348 and halal 0.299). Feeding all three dilutes the context
+        and the small model then answers from the wrong one — or falls back to
+        repeating its previous reply. One good chunk beats three mixed ones.
+        """
+        threshold = settings.rag_similarity_threshold
+        return [
+            doc for doc, sim in zip(self.documents, self.similarities) if sim >= threshold
+        ]
+
     def context_text(self) -> str:
-        return "\n\n---\n\n".join(self.documents)
+        return "\n\n---\n\n".join(self.relevant_documents)
 
 
 _client = None

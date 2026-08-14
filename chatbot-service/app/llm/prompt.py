@@ -31,3 +31,16 @@ KAPAN MEMANGGIL TOOL vs MENJAWAB LANGSUNG:
 
 Jangan mengarang harga, stok, atau status pesanan — selalu andalkan hasil tool.
 """
+
+# Routing reminder sent as a second SystemMessage right before the question.
+# NOTE (train-serve parity): Ollama's template collates ALL system messages into
+# the single top system block (joined by "\n\n"), so what the model actually
+# sees is SYSTEM_PROMPT [+ FAQ] + "\n\n" + TOOL_REMINDER at the top. The
+# fine-tuning dataset (finetune/generate_dataset.py) reproduces exactly that.
+TOOL_REMINDER = (
+    "INGAT ATURAN TOOL: kamu TIDAK hafal menu maupun harga — pengetahuanmu "
+    "tentang produk SELALU usang. Ditanya menu/daftar kue/harga -> WAJIB "
+    "panggil get_menu, JANGAN menjawab dari ingatan. Pesan yang menyebut "
+    "SATU produk dan menanyakannya (kayak gimana/seperti apa/foto/detail) "
+    "-> panggil get_product_detail. Jangan meniru pola jawaban sebelumnya."
+)

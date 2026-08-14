@@ -1,0 +1,156 @@
+{
+  "model": "toti-qwen-1.7b",
+  "rows": 100,
+  "function_selection_acc": 0.9,
+  "param_exact_acc": 0.783,
+  "invalid_call_rate": 0.0,
+  "irrelevance_acc": 0.9,
+  "false_tool_rate": 0.1,
+  "per_type": {
+    "N1": {
+      "n": 11,
+      "sel": 0,
+      "param": 0,
+      "irrelevant_ok": 11,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "N2": {
+      "n": 3,
+      "sel": 0,
+      "param": 0,
+      "irrelevant_ok": 3,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "N3": {
+      "n": 6,
+      "sel": 0,
+      "param": 0,
+      "irrelevant_ok": 6,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "N4": {
+      "n": 8,
+      "sel": 0,
+      "param": 0,
+      "irrelevant_ok": 8,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "N5": {
+      "n": 7,
+      "sel": 0,
+      "param": 0,
+      "irrelevant_ok": 4,
+      "false_tool": 3,
+      "invalid": 0
+    },
+    "N6": {
+      "n": 5,
+      "sel": 0,
+      "param": 0,
+      "irrelevant_ok": 4,
+      "false_tool": 1,
+      "invalid": 0
+    },
+    "T1": {
+      "n": 9,
+      "sel": 7,
+      "param": 7,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T10": {
+      "n": 4,
+      "sel": 2,
+      "param": 0,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T11": {
+      "n": 2,
+      "sel": 2,
+      "param": 2,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T12": {
+      "n": 2,
+      "sel": 2,
+      "param": 2,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T2": {
+      "n": 4,
+      "sel": 4,
+      "param": 4,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T3": {
+      "n": 9,
+      "sel": 9,
+      "param": 6,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T4": {
+      "n": 5,
+      "sel": 5,
+      "param": 5,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T5": {
+      "n": 7,
+      "sel": 7,
+      "param": 7,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T6": {
+      "n": 4,
+      "sel": 4,
+      "param": 2,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T7": {
+      "n": 4,
+      "sel": 3,
+      "param": 3,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T8": {
+      "n": 6,
+      "sel": 5,
+      "param": 5,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    },
+    "T9": {
+      "n": 4,
+      "sel": 4,
+      "param": 4,
+      "irrelevant_ok": 0,
+      "false_tool": 0,
+      "invalid": 0
+    }
+  },
+  "seconds": 1554.4
+}

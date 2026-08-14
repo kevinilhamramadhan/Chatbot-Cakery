@@ -1,7 +1,7 @@
 """Real product reads against the backend.
 
 Backend field names are Indonesian: nama_produk, harga_jual, deskripsi, kategori
-(see Backend-Cakery/app/schemas/product.py).
+(see {BACKEND_BASE_URL}/openapi.json -> ProductOut).
 """
 
 import logging

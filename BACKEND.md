@@ -45,7 +45,7 @@ POST {CHATBOT_URL}/webhook/internal/orders/{order_id}/ready
 | Kapan dipanggil | Saat admin menandai order jadi siap (status → *siap/ready*) |
 | `order_id` | ID order dari database backend (`orders.id`) — sama dengan yang dikembalikan `POST /orders` |
 | Body | **Tidak perlu** (boleh kosong). Chatbot mengambil semua data dari `order_id` |
-| Header auth | **Tidak perlu**. `X-Service-Key` itu untuk arah sebaliknya (chatbot → backend) |
+| Header auth | ⚠️ **WAJIB** (baru, hasil audit keamanan): `X-Internal-Key: <INTERNAL_API_KEY chatbot>`. Nilainya dikirim privat oleh Kevin — simpan di env backend, jangan di-commit. Tanpa header ini balasannya `404` dan pesan WA tidak terkirim. Sebelumnya endpoint ini terbuka, jadi siapa pun yang bisa menjangkau chatbot bisa mem-blast "pesanan siap" ke pelanggan asli dari nomor WA resmi toko. `X-Service-Key` tetap untuk arah sebaliknya (chatbot → backend) |
 | Response 200 | `{"status": "ok", "order_id": 12}` → pesan WA sudah dikirim ke pelanggan |
 | Response 200 | `{"status": "not_found", "order_id": 12}` → order-nya tidak ada di sisi chatbot (mis. dibuat lewat website, bukan lewat WA). **Bukan error**, tidak usah di-retry terus |
 | Idempoten | Ya. Dipanggil berulang untuk order yang sama → pelanggan tetap hanya dikirimi pesan sekali |
@@ -59,7 +59,8 @@ Cek cepat:
 curl http://localhost:8000/health
 # -> {"status":"ok","service":"Toti Cakery Chatbot Service"}
 
-curl -X POST http://localhost:8000/webhook/internal/orders/12/ready
+curl -X POST http://localhost:8000/webhook/internal/orders/12/ready \
+     -H "X-Internal-Key: $INTERNAL_API_KEY"
 # -> {"status":"ok","order_id":12}   (atau "not_found" kalau order-nya bukan dari WA)
 ```
 
@@ -112,7 +113,7 @@ sendiri; di chatbot sudah diimplementasi (`BACKEND_BASE_URL` + path).
 | Gejala | Kemungkinan sebab |
 |---|---|
 | Push ready → `Connection refused` | Chatbot tidak jalan, atau backend ada di mesin lain (chatbot cuma listen di `127.0.0.1`) |
-| Push ready → `404 Not Found` | Salah path. Harus ada prefix `/webhook`: `/webhook/internal/orders/{id}/ready` |
+| Push ready → `404 Not Found` | Salah path (harus ada prefix `/webhook`: `/webhook/internal/orders/{id}/ready`), **atau** header `X-Internal-Key` hilang/salah — auth yang gagal sengaja dibalas `404`, bukan `401`, biar endpoint-nya tidak bisa dipetakan orang luar |
 | Push ready → `{"status":"not_found"}` | Bukan error transport. Order-nya memang bukan pesanan dari WhatsApp |
 | Chatbot dapat `401` dari backend | `SERVICE_API_KEY` vs `BACKEND_SERVICE_API_KEY` beda |
 | Dari dalam container tidak bisa connect ke `localhost` | Di dalam Docker, `localhost` = container itu sendiri. Pakai nama service: `chatbot-service`, `backend`, `ollama` |

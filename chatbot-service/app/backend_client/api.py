@@ -5,10 +5,12 @@ Replaces the old mock_backend. All calls send X-Service-Key. Customer/Order use
 """
 
 import logging
+from urllib.parse import quote
 
 import httpx
 
 from app.core.config import settings
+from app.core.security import valid_wa_number
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +57,21 @@ async def create_order(customer_id: int, items: list[dict], metode_pengiriman: s
                 "total_harga_pesanan": d.get("total_harga_pesanan"), "status": d.get("status")}
 
 
-async def create_payment(order_id, amount, channel: str = "bank_transfer") -> dict:
-    """Charge via backend -> Midtrans. channel: 'bank_transfer' (VA) | 'qris'."""
+async def create_payment(order_id, amount, channel: str = "bank_transfer",
+                         payment_type: str = "full") -> dict:
+    """Charge via backend -> Midtrans.
+
+    channel ('payment_method'): 'bank_transfer' (VA) | 'qris'.
+    payment_type: 'full' | 'dp' — the backend recomputes the expected amount
+    from the order for that type and rejects a mismatch with 400 (its
+    anti-tampering check), so `amount` must be derived the same way.
+    """
     async with httpx.AsyncClient(timeout=_WRITE_TIMEOUT) as c:
         r = await c.post(f"{_base()}/payments",
-                         json={"order_id": int(order_id), "payment_type": channel, "amount": float(amount)},
+                         json={"order_id": int(order_id),
+                               "payment_method": channel,
+                               "payment_type": payment_type,
+                               "amount": float(amount)},
                          headers=_headers())
         r.raise_for_status()
         return r.json()  # {payment_id, pg_transaction_id, va_number, qris_url, status}
@@ -90,10 +102,22 @@ async def cancel_order(order_id) -> dict:
         return r.json()
 
 
+def _path_number(wa_number: str) -> str:
+    """Guard before a phone number is interpolated into a backend URL path.
+
+    These requests carry X-Service-Key, so a crafted value must never be able to
+    steer them at another backend path.
+    """
+    if not valid_wa_number(wa_number):
+        raise ValueError(f"refusing backend call for malformed wa_number: {wa_number[:32]!r}")
+    return quote(wa_number, safe="")
+
+
 async def get_takeover_status(wa_number: str) -> dict | None:
     """C1 read: {nomor_wa, human_takeover_active, takeover_expires_at, is_expired}."""
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-        r = await c.get(f"{_base()}/customers/{wa_number}/takeover", headers=_headers())
+        r = await c.get(f"{_base()}/customers/{_path_number(wa_number)}/takeover",
+                        headers=_headers())
         if r.status_code == 404:
             return None
         r.raise_for_status()
@@ -102,7 +126,7 @@ async def get_takeover_status(wa_number: str) -> dict | None:
 
 async def set_takeover(wa_number: str, active: bool, expires_at: str | None) -> dict:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-        r = await c.post(f"{_base()}/customers/{wa_number}/takeover",
+        r = await c.post(f"{_base()}/customers/{_path_number(wa_number)}/takeover",
                          json={"active": active, "expires_at": expires_at}, headers=_headers())
         r.raise_for_status()
         return r.json()

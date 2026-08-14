@@ -83,6 +83,34 @@ async def test_agent_scope_guard_refuses_out_of_topic(monkeypatch):
     assert out == agent_mod.OUT_OF_SCOPE_REPLY
 
 
+async def test_agent_replaces_hallucinated_price_with_real_menu(monkeypatch):
+    """Live regression: the model sometimes answers menu questions itself with
+    invented products and prices instead of calling get_menu. Any money the
+    model typed without a tool is fabricated — serve the real catalogue."""
+    from app.backend_client import products as products_api
+
+    async def fake_list(only_active=True, kategori=None):
+        return FAKE_PRODUCTS
+    monkeypatch.setattr(products_api, "list_products", fake_list)
+
+    _mock_retrieval(monkeypatch, 0.0)
+    _mock_llm(monkeypatch, AIMessage(
+        content="Berikut menu Toti Cakery:\n• Cupcakes isi 9 Vanilla — Rp120.000"))
+
+    set_turn_context(TurnContext(wa_number=WA))
+    out = await agent_mod.run_agent(WA, "menu apa aja yang ada?", history=[])
+    assert "Cupcakes isi 9 Vanilla" not in out      # fabricated item dropped
+    assert "Brownies Coklat" in out and "Rp50.000" in out   # real catalogue served
+
+
+async def test_agent_leaves_price_free_answers_alone(monkeypatch):
+    _mock_retrieval(monkeypatch, 0.9)
+    _mock_llm(monkeypatch, AIMessage(content="Kami buka jam 09.00-19.00 WIB."))
+    set_turn_context(TurnContext(wa_number=WA))
+    out = await agent_mod.run_agent(WA, "jam buka?", history=[])
+    assert out == "Kami buka jam 09.00-19.00 WIB."
+
+
 async def test_agent_strips_think_tags(monkeypatch):
     _mock_retrieval(monkeypatch, 0.0)
     ai = AIMessage(content="<think>reasoning here</think>Halo! Ada yang bisa dibantu?")

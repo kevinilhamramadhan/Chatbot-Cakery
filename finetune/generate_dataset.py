@@ -6,6 +6,15 @@ mixing tool-call examples (single-pass: rows END at the assistant tool_calls
 turn) with conversational/refusal/clarification examples, using the REAL shop
 menu. Deterministic (seed 42): re-running produces byte-identical files.
 
+v4 (PROMPT_FINETUNE_V4.md §3 — pelajaran live WhatsApp 15-16 Jul 2026):
+- History assistant turns pass through the runtime `_history_view()` (markers
+  for menu/detail, truncation) — training context mirrors serving exactly.
+- TOOL_REMINDER is appended to the system content ("\n\n"-joined), exactly how
+  Ollama collates the runtime's second SystemMessage into the top system block.
+- Tool arguments are the customer's words VERBATIM (no canonicalization) —
+  the code-side resolver decides/asks; includes generic orders ("cupcake").
+- More product-detail phrasings; N5 reduced to truly-unforwardable cases.
+
 Run from repo root:  python finetune/generate_dataset.py
 Outputs: finetune/data/{train,validation,test}.jsonl + stats.json
 """
@@ -23,8 +32,8 @@ sys.path.insert(0, str(ROOT / "chatbot-service"))
 
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
 
-from app.llm.agent import OUT_OF_SCOPE_REPLY  # noqa: E402
-from app.llm.prompt import SYSTEM_PROMPT  # noqa: E402
+from app.llm.agent import OUT_OF_SCOPE_REPLY, _history_view  # noqa: E402
+from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER  # noqa: E402
 from app.tools.add_to_cart import cart_summary  # noqa: E402
 from app.tools.formatting import rupiah  # noqa: E402
 from app.tools.registry import ALL_TOOLS  # noqa: E402
@@ -35,6 +44,11 @@ DOC_SEP = "\n\n---\n\n"
 # Guard against drift: these literals must still exist in the runtime code.
 _agent_src = (ROOT / "chatbot-service/app/llm/agent.py").read_text()
 assert "KONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\\n" in _agent_src
+# v4: runtime must still send the reminder as a SystemMessage (Ollama collates
+# every system message into the TOP system block joined by "\n\n" — verified in
+# ollama v0.23.2 template/template.go collate(). The dataset reproduces that
+# final rendering: system content ends with "\n\n" + TOOL_REMINDER).
+assert "SystemMessage(content=TOOL_REMINDER)" in _agent_src
 _store_src = (ROOT / "chatbot-service/app/rag/store.py").read_text()
 assert '"\\n\\n---\\n\\n".join' in _store_src
 
@@ -294,7 +308,14 @@ T2_EN = ["{greet}what {cat} do you have?", "{greet}show me your {cat} options{pa
          "{greet}any {cat} on the menu?", "{greet}I want to see the {cat} list",
          "{greet}do you sell {cat}?"]
 
-T3_ID = ["{greet}{prod} itu kayak gimana{part}?", "{greet}{prod} itu apa sih{part}?",
+# v4: varian frasa detail diperbanyak (insiden live #2 — "bento cookies kayak
+# gimana ya?" salah routing ke get_menu). Template baru di DEPAN pool supaya
+# masuk regime main (train/val); slice test pool tetap di ekor.
+T3_ID = ["{greet}{prod} kayak gimana ya{part}?", "{greet}{prod} seperti apa{part}?",
+         "{greet}{prod} kaya apa sih{part}?", "{greet}bentuknya {prod} gimana{part}?",
+         "{greet}ada fotonya {prod} ga{part}?", "{greet}ceritain dong {prod}{part}",
+         "{greet}{prod} tuh yang kayak gimana{part}?",
+         "{greet}{prod} itu kayak gimana{part}?", "{greet}{prod} itu apa sih{part}?",
          "{greet}boleh liat foto {prod}{part}?", "{greet}deskripsi {prod}{part}",
          "{greet}{prod} rasanya kayak apa{part}?", "{greet}cerita tentang {prod}{part}",
          "{greet}{prod} cocok buat ulang tahun ga{part}?", "{greet}detail {prod}{part}",
@@ -302,7 +323,9 @@ T3_ID = ["{greet}{prod} itu kayak gimana{part}?", "{greet}{prod} itu apa sih{par
          "{greet}{prod} itu buat berapa orang{part}?", "{greet}liat penampakan {prod}{part}",
          "{greet}{prod} manis banget ga{part}?", "{greet}spill {prod}{part}",
          "{greet}info {prod}{part}?", "{greet}{prod} pakai topping apa{part}?"]
-T3_EN = ["{greet}what is the {prod} like?", "{greet}can I see a photo of the {prod}?",
+T3_EN = ["{greet}what does the {prod} look like?", "{greet}got a picture of the {prod}?",
+         "{greet}what's the {prod} like exactly?",
+         "{greet}what is the {prod} like?", "{greet}can I see a photo of the {prod}?",
          "{greet}tell me about the {prod}", "{greet}what does the {prod} taste like?",
          "{greet}how big is the {prod}?", "{greet}is the {prod} good for birthdays?",
          "{greet}details on the {prod}{part}", "{greet}what's on the {prod}?"]
@@ -318,6 +341,13 @@ T4_EN = ["{greet}which is better, the {prodA} or the {prodB}?",
          "{greet}compare the {prodA} and the {prodB}{part}",
          "{greet}should I get the {prodA} or the {prodB}?",
          "{greet}{prodA} vs {prodB}, which do you recommend?"]
+
+# v4 (§3.3, insiden live #4): surface generik utk order ambigu — model WAJIB
+# meneruskan kata pelanggan apa adanya ("cupcake", bukan mengarang "isi 6");
+# resolver kode (app/tools/formatting.py) yang menanyakan pilihan. Semua entri
+# di sini token-match >=1 produk nyata sehingga resolver menjawab opsi, bukan
+# "tidak ditemukan".
+GENERIC_SURFACES = ["cupcake", "cupcakes", "cake", "cookies"]
 
 T5_ID = ["{greet}mau pesan {prod} {qty}{unit}{part}", "{greet}aku mau {prod} {qty}{unit} ya{part}",
          "{greet}pesan {prod} {qty}{unit}{part}", "{greet}order {prod} {qty}{unit}{part}",
@@ -343,15 +373,16 @@ T6_EN = ["{greet}can I order {items}?", "{greet}I'd like {items}{part}",
          "{greet}I want to get {items}", "{greet}please add {items}",
          "{greet}order for me: {items}"]
 
+# v4: varian T7 "menu" ("yang kedua") DIHAPUS — daftar menu di history kini
+# penanda ringkas, urutan item tak terlihat lagi; kasusnya pindah ke N5
+# deictic_menu (tanya balik). Varian "detail" tetap: nama produk masih terbaca
+# di penanda detail, jadi follow-up bisa diteruskan ke add_to_cart.
 T7_DETAIL_ID = ["oke gas, {qty}{unit} ya{part}", "boleh, ambil {qty}{unit}{part}",
                 "yaudah pesan itu {qty}{unit}{part}", "oke mau yang itu {qty}{unit}{part}",
                 "sip, pesan {qty}{unit} ya{part}"]
-T7_MENU_ID = ["yang pertama {qty}{unit} ya{part}", "aku mau yang kedua {qty}{unit}{part}",
-              "yang nomor satu {qty}{unit}{part}", "ambil yang pertama aja {qty}{unit}{part}"]
 T7_ADD_ID = ["eh tambah {prod} {qty}{unit}{part}", "tambahin {prod} {qty}{unit} ya{part}",
              "sekalian {prod} {qty}{unit}{part}"]
 T7_DETAIL_EN = ["okay I'll take {qty}", "let's go with that, {qty} please", "sounds good, {qty} of those"]
-T7_MENU_EN = ["the first one please, {qty}", "I'll go with the second one, {qty}"]
 T7_ADD_EN = ["also add {qty} {prod}", "add {qty} {prod} as well", "and {qty} {prod} too please"]
 
 T8_ID = ["{greet}pesananku udah sampai mana{part}?", "{greet}orderanku gimana statusnya{part}?",
@@ -493,46 +524,39 @@ N4_REPLY_EN = ["Sorry, I can only help with Toti Cakery things — menu, orders,
                "That's outside my scope 🙏 I'm Toti Cakery's shop assistant, so I can help with cakes, orders, and payments. Want to see the menu?",
                "I can't answer that one — I only handle Toti Cakery matters 😊 Can I help you with our menu or an order instead?"]
 
+# v4 (§2.4/§3.3): kasus "produk DISEBUT tapi kurang spesifik" (dulu nosize/
+# noisi/nocookie/noflav) PINDAH ke T5 add_to_cart dgn argumen verbatim —
+# resolver kode yang bertanya. N5 tersisa kasus tanpa produk yang bisa
+# diteruskan: noprod (tidak ada kata produk), cmp1 (bandingkan tanpa objek),
+# deictic ("yang itu" tanpa referensi), deictic_menu ("yang kedua" setelah
+# history menu yang di produksi sudah jadi PENANDA — daftar tidak terlihat
+# lagi, model harus tanya nama, bukan menebak).
 N5_ID = [("{greet}mau pesan kue{part}", "noprod"), ("{greet}aku mau order{part}", "noprod"),
          ("{greet}mau beli buat ultah besok{part}", "noprod"), ("{greet}pengen kue nih{part}", "noprod"),
-         ("{greet}mau pesan cake {flav_s}{part}", "nosize"), ("{greet}cake {flav_s} satu ya{part}", "nosize"),
-         ("{greet}mau cake buat 10 orang{part}", "nosize"),
-         ("{greet}mau cupcakes {flav_s}{part}", "noisi"), ("{greet}pesan cupcake {flav_s} ya{part}", "noisi"),
-         ("{greet}mau cookies {cflav_s} dong{part}", "nocookie"),
-         ("{greet}mau pesan {prod_noflav} {qty}{unit}{part}", "noflav"),
-         ("{greet}{prod_noflav} nya {qty}{unit} ya{part}", "noflav"),
          ("{greet}bagusan mana ya kue-kuenya{part}?", "cmp1"), ("{greet}bandingin dong yang enak{part}", "cmp1"),
+         ("{greet}yang pertama {qty}{unit} ya{part}", "deictic_menu"),
+         ("{greet}aku mau yang kedua{part}", "deictic_menu"),
+         ("{greet}ambil yang nomor dua aja{part}", "deictic_menu"),
          ("{greet}yang itu {qty}{unit} ya{part}", "deictic"), ("{greet}yang tadi aja deh{part}", "deictic")]
 N5_EN = [("{greet}I want to order a cake{part}", "noprod"), ("{greet}I'd like to place an order", "noprod"),
-         ("{greet}I want a {flav_en_s} cake", "nosize"), ("{greet}can I get {flav_en_s} cupcakes?", "noisi"),
-         ("{greet}I'll order the {prod_noflav}, {qty} please", "noflav"),
-         ("{greet}which one is better?", "cmp1"), ("{greet}I'll take that one", "deictic"),
-         ("{greet}I want cookies please", "nocookie")]
+         ("{greet}which one is better?", "cmp1"),
+         ("{greet}the first one please, {qty}", "deictic_menu"),
+         ("{greet}I'll go with the second one", "deictic_menu"),
+         ("{greet}I'll take that one", "deictic")]
 N5_REPLY = {
     ("noprod", "id"): ["Boleh kak! Mau kue yang mana — cupcakes, cake, atau cookies? Ketik *lihat menu* kalau mau lihat pilihannya dulu 😊",
                        "Siap! Kue apa yang mau dipesan kak? Kalau mau lihat pilihan lengkapnya dulu, bilang aja 'menu' ya 😊"],
-    ("nosize", "id"): ["Cake-nya mau ukuran berapa kak — 10cm, 15cm, 18cm, 20cm, atau 22cm? 😊",
-                       "Boleh! Untuk cake, ukurannya mau yang berapa cm kak?"],
-    ("noisi", "id"): ["Cupcakes-nya mau yang isi berapa kak — isi 4, isi 6, isi 9, atau cupcakes tart isi 7? 😊",
-                      "Siap! Mau cupcakes yang isi berapa ya kak?"],
-    ("nocookie", "id"): ["Cookies-nya mau yang mana kak — mini cookies, bento cookies, atau giant cookies? 😊",
-                         "Boleh! Mau mini, bento, atau giant cookies kak?"],
-    ("noflav", "id"): ["Siap! Mau flavour apa kak — cokelat atau vanilla? 😊",
-                       "Boleh kak, tinggal pilih flavournya: cokelat atau vanilla?"],
     ("cmp1", "id"): ["Boleh kubantu bandingkan kak — mau membandingkan kue yang mana saja ya? 😊",
                      "Mau bandingkan yang mana dengan yang mana kak?"],
     ("deictic", "id"): ["Maaf kak, yang dimaksud kue yang mana ya? 😊",
                         "Hehe, aku belum nangkep yang mana kak — boleh sebutkan nama kuenya?"],
+    ("deictic_menu", "id"): ["Biar nggak salah pilih, boleh sebutkan nama kuenya kak? 😊",
+                             "Siap! Yang mana ya kak — boleh tulis nama kuenya? 😊"],
     ("noprod", "en"): ["Sure! Which one would you like — cupcakes, cake, or cookies? 😊"],
-    ("nosize", "en"): ["Which size would you like for the cake — 10cm, 15cm, 18cm, 20cm, or 22cm? 😊"],
-    ("noisi", "en"): ["Which cupcake set would you like — 4, 6, 9 pieces, or the 7-piece cupcake tart? 😊"],
-    ("nocookie", "en"): ["Which cookies would you like — mini, bento, or giant? 😊"],
-    ("noflav", "en"): ["Sure — which flavour would you like, chocolate or vanilla? 😊"],
     ("cmp1", "en"): ["Happy to compare — which two items should I compare? 😊"],
     ("deictic", "en"): ["Sorry, which item do you mean? 😊"],
+    ("deictic_menu", "en"): ["To make sure I get it right — which cake is that? Please type its name 😊"],
 }
-# noflav templates use cupcake/cake products (flavour is the missing slot)
-N5_NOFLAV_PRODUCTS = [p for p, (c, _) in MENU.items() if c in ("cupcake", "cake")]
 
 N6_ID = [("{greet}kemarin aku beli {prod} {qty}{unit}, enak banget{part}!", "past"),
          ("{greet}dulu pernah nyobain {prod} di sini, masih sama enaknya ga ya{part}?", "past"),
@@ -576,23 +600,29 @@ N6_REPLY = {
 # v3 (2026-07-06): T5 60->90 (single-item add_to_cart when flavour IS given ->
 # add directly, don't over-clarify), T11 12->30 & T12 13->30 (owner reports were
 # 0/3 in the v2 wired eval — thin slice under-taught). Test split stays frozen.
-TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 70, "T4": 40, "T5": 90, "T6": 35, "T7": 35,
+# v4 (2026-07-16, PROMPT_FINETUNE_V4 §3): T3 70->90 (insiden #2, frasa detail),
+# T5 90->140 (termasuk order generik verbatim — insiden #4; menyerap eks-N5
+# nosize/noisi/nocookie/noflav), N5 110->70 (tersisa noprod/cmp1/deictic),
+# T7 35->25 (varian "menu" dihapus: daftar menu di history kini penanda, pilihan
+# "yang kedua" tak bisa di-resolve -> jadi N5 deictic_menu). MT naik di T1/T3/T5
+# utk melatih history tercemar penanda (insiden #3). Test split TETAP dibekukan.
+TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 90, "T4": 40, "T5": 140, "T6": 35, "T7": 25,
                 "T8": 50, "T9": 30, "T10": 60, "T11": 30, "T12": 30,
-                "N1": 90, "N2": 25, "N3": 50, "N4": 60, "N5": 110, "N6": 80}
-VAL_COUNTS = {"T1": 7, "T2": 3, "T3": 7, "T4": 4, "T5": 9, "T6": 4, "T7": 3,
+                "N1": 90, "N2": 25, "N3": 50, "N4": 60, "N5": 70, "N6": 80}
+VAL_COUNTS = {"T1": 7, "T2": 3, "T3": 9, "T4": 4, "T5": 14, "T6": 4, "T7": 3,
               "T8": 5, "T9": 3, "T10": 6, "T11": 3, "T12": 3,
-              "N1": 9, "N2": 3, "N3": 5, "N4": 6, "N5": 11, "N6": 8}
+              "N1": 9, "N2": 3, "N3": 5, "N4": 6, "N5": 7, "N6": 8}
 TEST_COUNTS = {"T1": 9, "T2": 4, "T3": 9, "T4": 5, "T5": 7, "T6": 4, "T7": 4,
                "T8": 6, "T9": 4, "T10": 4, "T11": 2, "T12": 2,
                "N1": 11, "N2": 3, "N3": 6, "N4": 8, "N5": 7, "N6": 5}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
             "T8": .2, "T9": .2, "T10": .2, "T11": .25, "T12": .25,
             "N1": .25, "N2": .2, "N3": .25, "N4": .25, "N5": .2, "N6": .2}
-MT_SHARE = {"T1": .2, "T2": .2, "T3": .3, "T4": .25, "T5": .2, "T6": .2, "T7": 1.0,
+MT_SHARE = {"T1": .35, "T2": .2, "T3": .45, "T4": .25, "T5": .3, "T6": .2, "T7": 1.0,
             "T8": .3, "T9": .4, "T10": .3, "T11": .1, "T12": .1,
             "N1": .3, "N2": .2, "N3": .3, "N4": .25, "N5": .3, "N6": .4}
 
-assert sum(TRAIN_COUNTS.values()) == 985 and sum(VAL_COUNTS.values()) == 99
+assert sum(TRAIN_COUNTS.values()) == 1005 and sum(VAL_COUNTS.values()) == 102
 assert sum(TEST_COUNTS.values()) == 100
 
 
@@ -731,6 +761,9 @@ class Gen:
                 ps = [self.canonical(self.pick_product("train"), self.rng.choice(CUP_FLAV))
                       for _ in range(2)]
                 pair = self.h_menu(ps)
+            elif kind == "detail":
+                p = self.pick_product("train")
+                pair = self.h_detail(self.canonical(p, self.rng.choice(MENU[p][1][:2])))
             elif kind == "chat":
                 pair = self.h_chat()
             else:
@@ -758,7 +791,16 @@ class Gen:
 
     def make_row(self, split, rtype, lang, history, user_text, final_turn, system=SYSTEM_PROMPT,
                  noised=False):
-        messages = [{"role": "system", "content": system}] + history
+        # v4 §3.4 — history meniru produksi: balasan bot lama masuk konteks
+        # lewat _history_view() runtime (menu/detail -> penanda ringkas, teks
+        # panjang dipotong). Satu titik jepit utk semua tipe baris.
+        history = [m if m["role"] == "user"
+                   else {"role": "assistant", "content": _history_view(m["content"])}
+                   for m in history]
+        # v4 §3.5 — reminder menempel di ujung system content, PERSIS seperti
+        # yang dilihat model di serving (Ollama meng-collate semua system
+        # message ke blok teratas, digabung "\n\n").
+        messages = [{"role": "system", "content": system + "\n\n" + TOOL_REMINDER}] + history
         messages.append({"role": "user", "content": user_text})
         messages.append(final_turn)
         meta = {"type": rtype, "lang": lang, "multi_turn": bool(history), "noised": noised}
@@ -826,8 +868,14 @@ class Gen:
 
     def _hist_for(self, rtype, lang):
         n = self.rng.choices([1, 2, 3], weights=[0.6, 0.3, 0.1])[0]
+        # v4: "menu"/"detail" = history tercemar penanda (insiden #3) — dibiaskan
+        # kuat di T1/T3/T5: model harus TETAP memanggil tool walau penanda bilang
+        # data pernah ditampilkan.
         kind_pool = {"T9": ["status", "chat"], "N6": ["menu", "chat"],
                      "N1": ["chat"], "N3": ["chat"], "N4": ["chat"], "N2": ["chat"],
+                     "T1": ["menu", "menu", "chat", "status"],
+                     "T3": ["menu", "detail", "detail", "chat"],
+                     "T5": ["menu", "detail", "chat"],
                      }.get(rtype, ["chat", "menu", "status"])
         return self.history(kind_pool, n)
 
@@ -876,12 +924,13 @@ class Gen:
                 tpl = self.pick_tpl(f"T3u{lang}", pool, P["regime"], total_count)
                 p = self.pick_product(split)
                 fl = self.pick_flavour(p, split) if rng.random() < 0.5 else None
+                surf = self.surface(p, fl, lang)  # v4 §3.3: argumen = kata pelanggan
                 text = self.maybe_noise(
-                    render(tpl, prod=self.surface(p, fl, lang), **self.slots(lang)), lang, noise)
-                return text, self.canonical(p, fl)
-            text, canon = uniq(build)
+                    render(tpl, prod=surf, **self.slots(lang)), lang, noise)
+                return text, surf
+            text, surf = uniq(build)
             return self.make_row(split, rtype, lang, history, text,
-                                 self.tool_turn("get_product_detail", {"product": canon}), noised=noise)
+                                 self.tool_turn("get_product_detail", {"product": surf}), noised=noise)
 
         if rtype == "T4":
             pool = sel(T4_EN if lang == "en" else T4_ID)
@@ -889,21 +938,21 @@ class Gen:
             def build():
                 tpl = self.pick_tpl(f"T4u{lang}", pool, P["regime"], total_count)
                 n = 3 if "{prodC}" in tpl else 2
-                prods, canons = [], []
+                prods, picked = [], []
                 for _ in range(n):
-                    p = self.pick_product(split, exclude=tuple(c.rsplit(" ", 1)[0] for c in canons))
+                    p = self.pick_product(split, exclude=tuple(picked))
+                    picked.append(p)
                     fl = self.pick_flavour(p, split) if rng.random() < 0.3 else None
-                    prods.append(self.surface(p, fl, lang))
-                    canons.append(self.canonical(p, fl))
+                    prods.append(self.surface(p, fl, lang))  # v4 §3.3: verbatim
                 sl = dict(self.slots(lang))
                 sl.update({"prodA": prods[0], "prodB": prods[1]})
                 if n == 3:
                     sl["prodC"] = prods[2]
                 text = self.maybe_noise(render(tpl, **sl), lang, noise)
-                return text, canons
-            text, canons = uniq(build)
+                return text, prods
+            text, prods = uniq(build)
             return self.make_row(split, rtype, lang, history, text,
-                                 self.tool_turn("compare_products", {"products": canons}), noised=noise)
+                                 self.tool_turn("compare_products", {"products": prods}), noised=noise)
 
         if rtype == "T5":
             pool_full = T5_EN if lang == "en" else T5_ID
@@ -913,10 +962,20 @@ class Gen:
             def build():
                 tpl = self.pick_tpl(f"T5u{lang}", pool, P["regime"], total_count)
                 idx = pool_full.index(tpl)
-                p = self.pick_product(split)
-                fl = self.pick_flavour(p, split)  # flavour REQUIRED for orders
+                # v4 §3.3 (insiden #4): argumen = kata pelanggan APA ADANYA.
+                # ~25% order generik ("beli 4 cupcake" -> product:"cupcake"),
+                # ~15% produk tanpa flavour, sisanya lengkap dgn flavour —
+                # semuanya verbatim; resolver kode yang memutuskan/bertanya.
+                r = rng.random()
+                if r < 0.25:
+                    surf = rng.choice(GENERIC_SURFACES)
+                elif r < 0.40:
+                    surf = self.surface(self.pick_product(split), None, lang)
+                else:
+                    p = self.pick_product(split)
+                    surf = self.surface(p, self.pick_flavour(p, split), lang)
                 sl = dict(self.slots(lang))
-                sl["prod"] = self.surface(p, fl, lang)
+                sl["prod"] = surf
                 if idx in noqty:
                     q = 1
                 else:
@@ -924,10 +983,10 @@ class Gen:
                     sl["qty"] = qs
                     sl["unit"] = rng.choice(UNITS_ID) if lang == "id" else ""
                 text = self.maybe_noise(render(tpl, **sl), lang, noise)
-                return text, self.canonical(p, fl), q
-            text, canon, q = uniq(build)
+                return text, surf, q
+            text, surf, q = uniq(build)
             return self.make_row(split, rtype, lang, history, text,
-                                 self.tool_turn("add_to_cart", {"items": [{"product": canon, "qty": q}]}),
+                                 self.tool_turn("add_to_cart", {"items": [{"product": surf, "qty": q}]}),
                                  noised=noise)
 
         if rtype == "T6":
@@ -943,11 +1002,12 @@ class Gen:
                     seen.add(p)
                     fl = self.pick_flavour(p, split)
                     qs, q = self.qty(lang)
+                    surf = self.surface(p, fl, lang)  # v4 §3.3: verbatim
                     if lang == "id":
-                        parts.append(f"{self.surface(p, fl, lang)} {qs}")
+                        parts.append(f"{surf} {qs}")
                     else:
-                        parts.append(f"{qs} {self.surface(p, fl, lang)}")
-                    items.append({"product": self.canonical(p, fl), "qty": q})
+                        parts.append(f"{qs} {surf}")
+                    items.append({"product": surf, "qty": q})
                 items_str = ""
                 for j, part in enumerate(parts):
                     items_str += part if j == 0 else rng.choice(conns) + part
@@ -958,7 +1018,7 @@ class Gen:
                                  self.tool_turn("add_to_cart", {"items": items}), noised=noise)
 
         if rtype == "T7":
-            variant = rng.choice(["detail", "menu", "add"])
+            variant = rng.choice(["detail", "add"])
             p = self.pick_product(split)
             fl = self.pick_flavour(p, split)
             canon = self.canonical(p, fl)
@@ -971,18 +1031,9 @@ class Gen:
                 hist = lead + [{"role": "user", "content": self.h_detail(canon)[0]},
                                {"role": "assistant", "content": self.h_detail(canon)[1]}]
                 tpl = self.pick_tpl(f"T7d{lang}", pool, P["regime"], total_count)
+                # nama produk tersedia di penanda detail history — model
+                # meneruskan nama itu, bukan mengarang varian lain (v4 §3.3)
                 items = [{"product": canon, "qty": q}]
-            elif variant == "menu":
-                pool = sel(T7_MENU_EN if lang == "en" else T7_MENU_ID)
-                p2 = self.pick_product(split, exclude=(p,))
-                canon2 = self.canonical(p2, self.pick_flavour(p2, split))
-                u, a = self.h_menu([canon, canon2])
-                hist = lead + [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
-                tpl = self.pick_tpl(f"T7m{lang}", pool, P["regime"], total_count)
-                if "kedua" in tpl or "second" in tpl:
-                    items = [{"product": canon2, "qty": q}]
-                else:
-                    items = [{"product": canon, "qty": q}]
             else:
                 pool = sel(T7_ADD_EN if lang == "en" else T7_ADD_ID)
                 pnew = self.pick_product(split, exclude=(p,))
@@ -990,8 +1041,9 @@ class Gen:
                 u, a = self.h_cart([(canon, rng.choice([1, 2]))])
                 hist = lead + [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
                 tpl = self.pick_tpl(f"T7a{lang}", pool, P["regime"], total_count)
-                sl["prod"] = self.surface(pnew, flnew, lang)
-                items = [{"product": self.canonical(pnew, flnew), "qty": q}]
+                surf_new = self.surface(pnew, flnew, lang)  # v4 §3.3: verbatim
+                sl["prod"] = surf_new
+                items = [{"product": surf_new, "qty": q}]
 
             def build():
                 text = self.maybe_noise(render(tpl, **sl), lang, noise)
@@ -1123,13 +1175,6 @@ class Gen:
             def build():
                 tpl, kind = self.pick_tpl(f"N5u{lang}", pool, P["regime"], total_count)
                 sl = dict(self.slots(lang))
-                sl["flav_s"] = rng.choice(["coklat", "vanilla"])
-                sl["flav_en_s"] = rng.choice(["chocolate", "vanilla"])
-                sl["cflav_s"] = rng.choice(["red velvet", "brown sugar", "original"])
-                if "{prod_noflav}" in tpl:
-                    p = rng.choice([x for x in N5_NOFLAV_PRODUCTS
-                                    if split == "test" or x not in HOLDOUT_PRODUCTS])
-                    sl["prod_noflav"] = rng.choice(BASE_SURFACES[p])
                 if "{qty}" in tpl:
                     qs, _ = self.qty(lang)
                     sl["qty"] = qs
@@ -1137,10 +1182,15 @@ class Gen:
                 text = self.maybe_noise(render(tpl, **sl), lang, noise)
                 return text, kind
             text, kind = uniq(build)
-            # deictic rows must NOT have resolving history
-            hist = self.history(["chat"], 1) if (mt and kind != "deictic") else []
-            if mt and kind == "deictic":
-                hist = self.history(["chat"], 1)
+            if kind == "deictic_menu":
+                # WAJIB ber-history penanda menu: item tak terlihat lagi, "yang
+                # kedua" tak bisa di-resolve siapa pun -> tanya nama (insiden #3/#4)
+                hist = self.history(["menu"], 1)
+            elif kind == "deictic":
+                # deictic polos: history apa pun TIDAK boleh me-resolve rujukan
+                hist = self.history(["chat"], 1) if mt else []
+            else:
+                hist = self.history(["chat"], 1) if mt else []
             reply = rng.choice(N5_REPLY[(kind, lang)])
             assert reply.count("?") == 1, f"N5 reply must have exactly one '?': {reply!r}"
             return self.make_row(split, rtype, lang, hist, text,
@@ -1197,27 +1247,57 @@ def _validate_args(name: str, obj: dict) -> None:
 
 def self_check(rows_by_split):
     for split, rows in rows_by_split.items():
+        # test dibekukan dari v1 (format lama: tanpa reminder, history literal,
+        # argumen kanonik) — aturan v4 hanya berlaku utk train/validation.
+        v4 = split != "test"
         for row in rows:
             msgs = row["messages"]
-            assert msgs[0]["role"] == "system" and msgs[0]["content"].startswith(SYSTEM_PROMPT)
-            extra = msgs[0]["content"][len(SYSTEM_PROMPT):]
-            assert extra == "" or extra.startswith(FAQ_HEADER)
+            sysc = msgs[0]["content"]
+            assert msgs[0]["role"] == "system" and sysc
+            if v4:
+                assert sysc.startswith(SYSTEM_PROMPT)
+                suffix = "\n\n" + TOOL_REMINDER
+                assert sysc.endswith(suffix), (split, sysc[-80:])
+                mid = sysc[len(SYSTEM_PROMPT):-len(suffix)]
+                assert mid == "" or mid.startswith(FAQ_HEADER)
+            # test beku menyimpan system prompt era v1 (prompt produksi sudah
+            # dipatch sejak itu) — harness merakit ulang dari SYSTEM_PROMPT
+            # terkini saat replay, jadi di sini cukup cek struktur.
             body = msgs[1:]
             assert len(body) % 2 == 0 and len(body) <= 8
             for j, m in enumerate(body):
                 assert m["role"] == ("user" if j % 2 == 0 else "assistant"), (split, j)
+            if v4:
+                # §3.1/§3.4: balasan bot lama di history harus sudah jadi penanda/
+                # potongan _history_view — menu literal & blok harga DILARANG.
+                for m in body[:-1]:
+                    if m["role"] == "assistant":
+                        c = m["content"]
+                        assert "Berikut menu" not in c and "Harga:" not in c, (split, c[:60])
             final = body[-1]
             if "tool_calls" in final:
                 assert final["content"] == "" and len(final["tool_calls"]) == 1
                 fn = final["tool_calls"][0]["function"]
-                _validate_args(fn["name"], json.loads(fn["arguments"]))
+                obj = json.loads(fn["arguments"])
+                _validate_args(fn["name"], obj)
+                # §3.3: argumen produk = kata-kata yang benar-benar ada di
+                # percakapan (teks user atau penanda history) — bukan karangan.
+                # Baris noised dikecualikan (typo mengubah substring).
+                if v4 and not row["meta"]["noised"]:
+                    hay = " ".join(m["content"] for m in body
+                                   if isinstance(m.get("content"), str)).lower()
+                    prods = ([it["product"] for it in obj.get("items", [])]
+                             + ([obj["product"]] if "product" in obj else [])
+                             + list(obj.get("products", [])))
+                    for s in prods:
+                        assert s.lower() in hay, (split, s, hay[:120])
             else:
                 assert final["content"] and not PRICE_RE.search(final["content"]), final
-            # holdout products/flavour never outside test (canonical args + meta scope)
+            # holdout products/flavour never outside test (args + meta scope)
             if split != "test" and "tool_calls" in final:
-                args = final["tool_calls"][0]["function"]["arguments"]
+                args_l = final["tool_calls"][0]["function"]["arguments"].lower()
                 for hp in HOLDOUT_PRODUCTS | {HOLDOUT_FLAVOUR}:
-                    assert hp not in args, (split, args)
+                    assert hp.lower() not in args_l, (split, args_l)
 
 
 def stats(rows_by_split):

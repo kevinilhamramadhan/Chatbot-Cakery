@@ -13,8 +13,8 @@ model's decision against the gold label:
 - false_tool_rate    : share of non-tool rows where a tool was called anyway
 
 Usage (Ollama running locally, model pulled):
-    python finetune/eval_tool_calling.py --model qwen3.5:0.8b
-    python finetune/eval_tool_calling.py --model toti-qwen   # after fine-tune
+    python finetune/eval_tool_calling.py --model qwen3:1.7b        # base
+    python finetune/eval_tool_calling.py --model toti-qwen-1.7b-v4 # after fine-tune
 
 Writes finetune/results_<model>.json. Compare the two side by side for the
 baseline-vs-finetuned verdict.
@@ -30,51 +30,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "chatbot-service"))
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # noqa: E402
 from langchain_ollama import ChatOllama  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
 from app.tools.registry import ALL_TOOLS  # noqa: E402
 
-
-def to_lc_messages(messages: list[dict]):
-    out = []
-    for m in messages:
-        if m["role"] == "system":
-            out.append(SystemMessage(content=m["content"]))
-        elif m["role"] == "user":
-            out.append(HumanMessage(content=m["content"]))
-        else:
-            out.append(AIMessage(content=m.get("content") or ""))
-    return out
-
-
-def gold_of(row: dict):
-    final = row["messages"][-1]
-    if "tool_calls" in final:
-        fn = final["tool_calls"][0]["function"]
-        return fn["name"], json.loads(fn["arguments"])
-    return None, None
-
-
-def canon_args(obj):
-    """Normalize for exact-match comparison (key order, int-ish qty)."""
-    if isinstance(obj, dict):
-        return {k: canon_args(v) for k, v in sorted(obj.items())}
-    if isinstance(obj, list):
-        return [canon_args(v) for v in obj]
-    if isinstance(obj, str) and obj.isdigit():
-        return obj  # keep strings as-is; qty type mismatch should count as wrong
-    return obj
+# v4: rakitan pesan paritas-runtime (marker history + reminder) & skor argumen
+# yang netral-kebijakan (verbatim vs kanonik dinilai lewat resolusi produk).
+from eval_common import args_match, gold_of, to_lc_messages  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", required=True, help="Ollama model name, e.g. qwen3.5:0.8b")
+    ap.add_argument("--model", required=True, help="Ollama model name, e.g. toti-qwen-1.7b-v4")
     ap.add_argument("--data", default=str(ROOT / "finetune/data/test.jsonl"))
     ap.add_argument("--limit", type=int, default=0, help="only first N rows (0 = all)")
-    ap.add_argument("--num-ctx", type=int, default=8192,
-                    help="context window for eval (prompts are ~2.5k tokens; smaller = faster on CPU)")
+    ap.add_argument("--out", default="", help="path output JSON (default: results_<model>.json)")
+    ap.add_argument("--num-ctx", type=int, default=settings.llm_num_ctx,
+                    help="context window; default ikut config produksi (paritas §5). "
+                         "Prompt hanya ~2.5k token — turunkan (mis. 8192) kalau butuh cepat")
     args = ap.parse_args()
 
     rows = [json.loads(l) for l in open(args.data, encoding="utf-8")]
@@ -89,7 +63,7 @@ def main():
         temperature=settings.llm_temperature,
         top_p=settings.llm_top_p,
         num_ctx=args.num_ctx,
-        num_predict=768,  # hard cap: no runaway generations on CPU
+        num_predict=settings.llm_num_predict,  # hard cap: no runaway generations on CPU
     ).bind_tools(ALL_TOOLS)
 
     per_type = defaultdict(lambda: {"n": 0, "sel": 0, "param": 0, "irrelevant_ok": 0,
@@ -118,7 +92,7 @@ def main():
                 st["invalid"] += 1
             if calls and calls[0]["name"] == gname:
                 st["sel"] += 1
-                if canon_args(calls[0]["args"]) == canon_args(gargs):
+                if args_match(gname, calls[0]["args"], gargs):
                     st["param"] += 1
         if (i + 1) % 5 == 0:
             print(f"  {i + 1}/{len(rows)} rows ({time.time() - t0:.0f}s)", flush=True)
@@ -140,7 +114,8 @@ def main():
         "seconds": round(time.time() - t0, 1),
     }
 
-    out = ROOT / "finetune" / f"results_{args.model.replace(':', '_').replace('/', '_')}.json"
+    out = Path(args.out) if args.out else (
+        ROOT / "finetune" / f"results_{args.model.replace(':', '_').replace('/', '_')}.json")
     out.write_text(json.dumps(agg, indent=2))
     print(json.dumps({k: v for k, v in agg.items() if k != "per_type"}, indent=2))
     print("\nper-type (n / correct-tool / exact-args | non-tool: ok / false-call):")

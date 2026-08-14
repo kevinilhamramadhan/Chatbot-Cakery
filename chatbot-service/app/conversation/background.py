@@ -17,6 +17,7 @@ from app.backend_client import api as backend
 from app.conversation import store
 from app.conversation.states import State
 from app.core.config import settings
+from app.core.security import mask_phone
 from app.tools.formatting import rupiah
 from app.whatsapp_client.client import whatsapp_client
 
@@ -30,7 +31,7 @@ async def _notify(wa_number: str, text: str) -> None:
         await whatsapp_client.send_text(wa_number, text)
         await store.log_message(wa_number, "out", text, intent="proactive")
     except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to notify %s: %s", wa_number, exc)
+        logger.error("Failed to notify %s: %s", mask_phone(wa_number), exc)
 
 
 def _aware(dt: datetime) -> datetime:
@@ -99,14 +100,37 @@ async def notify_ready(order_id: int) -> bool:
     return True
 
 
+_PURGE_EVERY_SECONDS = 24 * 60 * 60
+
+
+async def _purge_if_due(last_purge: float) -> float:
+    """Run the personal-data purge at most once a day, on the same worker."""
+    now = asyncio.get_running_loop().time()
+    if now - last_purge < _PURGE_EVERY_SECONDS:
+        return last_purge
+    try:
+        logs, orders = await store.purge_old_data()
+        if logs or orders:
+            logger.info(
+                "Retention purge: %s transcript rows deleted, %s order identity "
+                "snapshots cleared (older than %s days)",
+                logs, orders, settings.data_retention_days,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Retention purge failed: %s", exc)
+    return now
+
+
 async def _loop() -> None:
     interval = settings.payment_check_interval_seconds
     logger.info("Payment background worker started (interval=%ss)", interval)
+    last_purge = 0.0
     while True:
         try:
             await _check_once()
         except Exception as exc:  # noqa: BLE001
             logger.exception("Background check error: %s", exc)
+        last_purge = await _purge_if_due(last_purge)
         await asyncio.sleep(interval)
 
 

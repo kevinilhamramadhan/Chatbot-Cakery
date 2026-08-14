@@ -1,7 +1,80 @@
 ==============================================================================
  TO-DO BACKEND — dari Kevin (Chatbot/AI)
 ==============================================================================
- STATUS: SEMUA SELESAI. 🎉🎉🎉 Tidak ada lagi yang ditunggu chatbot.
+ STATUS (13 Agu 2026): 4 item BARU dari audit keamanan + tes end-to-end
+ chatbot terhadap deployment Vercel. Yang lama semua sudah beres ✅ (termasuk
+ X-Internal-Key dan validasi amount di commit 3409fc7 — terima kasih, sudah
+ kutes live: order 14 DP Rp25.000 lolos, mismatch ditolak).
+
+------------------------------------------------------------------------------
+ #1 🚨 MENDESAK — endpoint /products/ bisa diubah SIAPA SAJA tanpa login
+------------------------------------------------------------------------------
+ Di app/api/routes/product.py, empat route ini tidak punya dependency auth
+ sama sekali, dan deployment Vercel-nya publik:
+
+     @router.post("/")                    -> bikin produk
+     @router.put("/{product_id}")         -> edit produk
+     @router.delete("/{product_id}")      -> HAPUS produk + resep + riwayat harga
+     @router.patch("/{product_id}/price") -> UBAH HARGA JUAL
+
+ Artinya siapa pun di internet cukup satu curl untuk mengubah semua harga
+ atau menghapus seluruh katalog. Aku menemukannya waktu mau menonaktifkan
+ produk contoh — ternyata bisa tanpa kredensial apa pun.
+
+ Bandingkan dengan router lain yang sudah benar: /orders, /customers,
+ /payments, /reports semuanya dipagari require_service_key. Yang bolong cuma
+ products (kecuali POST /{id}/image yang sudah pakai require_admin_or_owner).
+
+ Usul: tambahkan dependencies=[Depends(require_admin_or_owner)] pada keempat
+ route tulis itu. GET /products/ dan GET /products/{id} biarkan publik —
+ chatbot & Buyer Site butuh baca tanpa login.
+
+------------------------------------------------------------------------------
+ #2 Foto produk hilang di Vercel (filesystem serverless bersifat ephemeral)
+------------------------------------------------------------------------------
+     GET https://backend-cakery.vercel.app/static/products/20.png -> 404
+
+ products.image_url menunjuk /static milik backend, tapi di Vercel folder itu
+ hilang setiap redeploy — foto yang di-upload dari Admin Site tidak bertahan.
+ Dulu tidak kelihatan karena backend jalan lokal dengan folder ter-mount.
+
+ Efeknya ke chatbot: fitur "kirim foto kue" mati total. Sementara ini chatbot
+ mengecek URL-nya dulu dan melewati gambar yang 404 (teksnya tetap terkirim),
+ tapi itu cuma menutup gejala.
+
+ Yang dibutuhkan: host foto di storage persisten (Vercel Blob / S3 / Cloudinary)
+ dan simpan URL absolutnya di products.image_url. Chatbot sudah mendukung URL
+ absolut maupun path relatif, jadi tidak perlu perubahan di sisiku.
+
+ 15 foto produk yang asli ada padaku (dari volume backend lokal sebelum folder
+ itu kuhapus) — bilang saja, langsung kukirim untuk di-upload ulang.
+
+------------------------------------------------------------------------------
+ #3 Katalog produksi berisi produk uji coba, tampil ke pelanggan
+------------------------------------------------------------------------------
+ get_menu menampilkan ini ke pelanggan WhatsApp:
+
+    id 40  "Test lagi"        Rp10.000   deskripsi "Test"
+    id 31  "cookies contoh"   Rp40.000   deskripsi "contoh"
+    id 29  "ex cake 1"        Rp30.000   deskripsi "contoh"
+    id 32  "Cake with bahan"  Rp40.000   deskripsi "contoh"
+    id 27  "cake strawberry"  Rp50.000   deskripsi "vanilla" (?)
+    id 26  "cake vanilla"     Rp40.000
+    id 25  "cupcake vanilla"  Rp40.000
+
+ Tolong hapus atau set is_active=false dari Admin Site. Kalau 25-27 ternyata
+ produk beneran, biarkan saja — tiga itu yang paling kuragukan.
+
+------------------------------------------------------------------------------
+ #4 minimum_order tidak divalidasi di POST /orders
+------------------------------------------------------------------------------
+ Kolomnya ada di ProductOut dan sudah kupakai, tapi POST /orders menerima
+ jumlah berapa pun. Chatbot sekarang menolak di sisiku ("Mini Cookies 7cm
+ minimal 5 pcs"), jadi tidak mendesak — tapi Buyer Site kemungkinan punya
+ lubang yang sama, dan aturan bisnisnya lebih tepat ditegakkan di backend.
+==============================================================================
+ (ARSIP) Yang sudah selesai — tidak perlu dikerjakan lagi
+==============================================================================
  Terima kasih banyak — kerjamu rapi dan cepat!
 
  TERVERIFIKASI LIVE oleh Kevin (2026-07-03, backend commit 8670242):
@@ -28,42 +101,20 @@
        * Dites live: user level Admin ditolak 403 (require_owner bekerja).
          Toggle penuh tinggal dites pakai akun Owner (level 1).
 
-==============================================================================
- PERMINTAAN BARU: foto produk di-host BACKEND + bisa diedit dari Admin Site
-==============================================================================
- Fitur: Admin upload/ganti foto menu dari Admin Site -> foto tampil di Buyer
- Site DAN otomatis dikirim chatbot saat pelanggan tanya detail kue. (Jalur
- kirim foto di chatbot SUDAH jadi & sudah support skema path relatif ini;
- kolom products.image_url juga sudah ada.)
+------------------------------------------------------------------------------
+ ✅ SELESAI — foto produk di-host backend + bisa diedit dari Admin Site
+    (backend commit 339430e: POST /products/{id}/image, require_admin_or_owner,
+     app.mount("/static", ...), image_url disimpan sebagai path relatif)
 
- ATURAN PENTING — SIMPAN PATH RELATIF, BUKAN URL ABSOLUT:
-   Kolom image_url diisi HANYA path:  /static/products/12.jpg
-   JANGAN http://localhost:8001/... atau http://backend:8001/... — alamat
-   host itu beda-beda tergantung pemanggil (browser vs container wwebjs vs
-   production). Tiap konsumen mem-prefix base URL-nya sendiri:
-     - chatbot  -> BACKEND_BASE_URL + path   (sudah diimplementasi)
-     - Buyer/Admin Site -> base URL API + path (kabari tim frontend)
-
- Yang dikerjakan:
-   1) Serving statis (1 baris di app/main.py):
-        app.mount("/static", StaticFiles(directory="static"), name="static")
-      (folder static/products/ dibuat sekali; di deployment nanti folder ini
-       di-mount volume + ikut backup.)
-   2) Endpoint upload (aksi Admin/Owner, JWT):
-        POST /products/{product_id}/image     (multipart/form-data, field "file")
-          - Validasi: content-type image/jpeg|png|webp, ukuran <= 5 MB.
-          - Simpan ke static/products/{product_id}.{ext}
-            (nama file = id produk -> ganti foto otomatis menimpa; tambahkan
-             query versi kalau mau cache-bust, mis. ?v=timestamp).
-          - Set products.image_url = "/static/products/{product_id}.{ext}"
-          - Response 200: ProductOut (image_url terisi path relatif).
-   3) (Opsional, 1 baris) image_url: Optional[str] di ProductUpdate — berguna
-      buat menghapus foto (set null) atau koreksi manual.
-
- SELESAI JIKA: upload foto via POST /products/12/image ->
-   GET  {base}/static/products/12.jpg  tampil di browser, dan
-   GET  /products/12 -> image_url == "/static/products/12.jpg", lalu
-   tanya "cake 10cm kayak gimana?" ke chatbot -> foto masuk di WhatsApp.
+ ⚠️ TAPI SKEMANYA SUDAH TIDAK BERLAKU SETELAH PINDAH KE VERCEL — lihat #2
+    di atas. Aturan lama "SIMPAN PATH RELATIF /static/products/12.jpg" itu
+    dibuat waktu backend jalan lokal dengan folder ter-mount. Di Vercel folder
+    static hilang tiap redeploy, jadi path relatif ke /static tidak lagi bisa
+    diandalkan. Yang berlaku sekarang: simpan URL ABSOLUT ke storage persisten.
+    Chatbot menerima dua-duanya (path relatif di-prefix BACKEND_BASE_URL, URL
+    absolut dipakai apa adanya), jadi perubahan ini tidak menuntut apa pun
+    dariku — cukup ubah apa yang diisi ke kolom image_url.
+------------------------------------------------------------------------------
 
  CATATAN KECIL (bukan bug):
    - revenue di /reports/summary hanya menghitung payments berstatus
@@ -74,6 +125,20 @@
      (kebalikan persis dari pemotongan di create, locking aman). Belum
      kutes live hanya karena produk tesku tidak punya resep — begitu ada
      produk ber-resep, tes: buat order -> stok turun -> cancel -> stok balik.
+     (13 Agu: cancel-nya sendiri sudah kutes live di order 14 dan berhasil,
+      status jadi "cancelled"; yang belum teruji khusus bagian stok resep.)
+
+ CATATAN — FAQ: chatbot TIDAK membaca GET /faq milikmu
+   FYI biar tidak salah sangka: isi FAQ yang dijawab bot datang dari 5 file
+   teks lokal di Chatbot Service yang di-embed ke ChromaDB, BUKAN dari
+   endpoint /faq. Jadi kalau admin menambah/mengubah FAQ dari Admin Site,
+   jawaban bot tidak ikut berubah. Sekarang isinya juga beda jauh:
+     /faq backend  -> 1 entri ("Cara pesan?")
+     RAG chatbot   -> 5 entri (jam buka, kue custom, pengiriman, pembayaran,
+                      halal & ketahanan)
+   Ini PR-ku, bukan PR-mu — endpoint /faq-mu sudah cukup, tinggal sisi
+   chatbot yang menariknya. Kutulis di sini supaya kamu tidak bingung kalau
+   suatu saat mengedit FAQ dan bot tetap menjawab yang lama.
 
 ==============================================================================
  KONTRAK YANG CHATBOT ANDALKAN — JANGAN DIUBAH TANPA KABAR-KABARI
@@ -81,7 +146,18 @@
  - CustomerOut/OrderOut pakai field `id`; nomor invoice nested di
    OrderOut.invoice.nomor_invoice
  - GET /orders/latest?nomor_wa=  (nomor dalam format lengkap 628...@c.us)
- - POST /payments body: {order_id, payment_type: bank_transfer|qris, amount}
+ - POST /payments body (BERUBAH di backend commit 3409fc7 — chatbot sudah
+   ikut menyesuaikan):
+     {order_id, payment_method: bank_transfer|qris, payment_type: full|dp,
+      amount}
+   ✅ SELESAI (permintaan audit keamanan): backend sekarang menghitung
+   sendiri nominal yang sah (full = total_harga_pesanan, dp = 50% total,
+   quantize 0.01) dan menolak 400 kalau `amount` tidak cocok.
+   CATATAN buat chatbot: DP dipatok backend TEPAT 50%, jadi
+   DOWN_PAYMENT_PERCENTAGE di .env tidak boleh diubah dari 0.50 — kalau
+   diubah, semua checkout DP kena 400 (config.validate_runtime memperingatkan
+   saat start). Nominal DP dikirim 2 desimal, bukan dibulatkan ke rupiah
+   utuh, biar cocok dengan quantize di backend.
  - GET /payments/{order_id}/status: {order_id, invoice_status, amount_paid,
    amount_due, payments[]}
  - GET /admin/takeover-handlers: {"numbers": [...]}
@@ -89,6 +165,17 @@
    top_products[{product_id, nama_produk, qty, revenue}]}
  - Push C4: POST {CHATBOT_URL}/webhook/internal/orders/{id}/ready
    (env CHATBOT_URL harus menunjuk ke Chatbot Service, mis. localhost:8000)
+   ⚠️ BERUBAH (audit keamanan) — endpoint ini SEKARANG BUTUH HEADER:
+       X-Internal-Key: <nilai INTERNAL_API_KEY milik chatbot>
+   Tanpa header itu balasannya 404 dan pesan "pesanan siap" TIDAK terkirim.
+   Alasannya: sebelumnya siapa pun yang bisa menjangkau chatbot bisa
+   menembak /ready untuk order id 1..N dan mengirim blast "pesanan siap"
+   ke pelanggan asli dari nomor WA resmi toko.
+   ✅ SELESAI di backend commit 3409fc7 (settings.chatbot_internal_key
+   dikirim sebagai header; default chatbot_url juga sudah dibetulkan dari
+   :8001 ke :8000). Yang tersisa: pastikan CHATBOT_INTERNAL_KEY di env
+   backend/Vercel berisi nilai INTERNAL_API_KEY chatbot — kalau kosong,
+   push-nya kena 404.
  - Semua endpoint chatbot pakai header X-Service-Key = SERVICE_API_KEY
    (nilai production disepakati privat, jangan di-commit)
 

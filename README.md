@@ -1,9 +1,9 @@
 # Toti Cakery — WhatsApp Chatbot Service
 
 RAG + tool-calling WhatsApp chatbot for Toti Cakery (a bakery). Built with FastAPI,
-LangChain, Ollama (`qwen3:1.7b`), ChromaDB, and the `avoylenko/wwebjs-api` WhatsApp
+LangChain, Ollama (`toti-qwen-1.7b-v4`), ChromaDB, and the `avoylenko/wwebjs-api` WhatsApp
 gateway. This repo is **only** the chatbot + WhatsApp integration — the main backend
-(`Backend-Cakery/`, reference-only) and the React frontends are owned by teammates.
+(deployed at `https://backend-cakery.vercel.app`) and the React frontends are owned by teammates.
 
 > Scope, rules, and the full conversation flow live in
 > `PROMPT_CLAUDE_CODE_TOTI_CAKERY_CHATBOT.md`. Endpoints the backend still owes us
@@ -16,7 +16,7 @@ gateway. This repo is **only** the chatbot + WhatsApp integration — the main b
 ```
 Customer (WhatsApp)
    ▼
-wwebjs-api (Docker) ──webhook──▶ chatbot-service /webhook/whatsapp
+wwebjs-api (Docker) ──webhook──▶ chatbot-service /webhook/whatsapp/$WEBHOOK_TOKEN
                                        │  orchestrator (state machine)
               ┌────────────────────────┼─────────────────────────┐
               ▼                         ▼                          ▼
@@ -38,9 +38,9 @@ wwebjs-api (Docker) ──webhook──▶ chatbot-service /webhook/whatsapp
 |---|---|
 | **Docker + Docker Compose v2** | The whole stack runs as containers. `docker compose version` should print v2.x |
 | **Ollama installed on the host** | The `ollama` container mounts the host's model store (`/usr/share/ollama/.ollama`), so models you already pulled are reused instead of re-downloaded |
-| **~6 GB free RAM** | `toti-qwen-1.7b` + `qwen3-embedding:0.6b` stay resident (`OLLAMA_KEEP_ALIVE=-1`). CPU-only inference works; a reply takes a few seconds |
+| **~6 GB free RAM** | `toti-qwen-1.7b-v4` + `qwen3-embedding:0.6b` stay resident (`OLLAMA_KEEP_ALIVE=-1`). CPU-only inference works; a reply takes a few seconds |
 | **A spare WhatsApp number** | Linking scans a QR from *WhatsApp → Linked devices*. Use a number you don't mind having a bot on |
-| **`Backend-Cakery/.env`** | The backend container reads it (`DATABASE_URL`, Midtrans keys, `SERVICE_API_KEY`). Ask the backend engineer for it. The chatbot still starts without a working backend — product/order tools just reply "sedang tidak bisa diambil" |
+| **`BACKEND_SERVICE_API_KEY`** | Must equal the backend's `SERVICE_API_KEY` (ask the backend engineer). The chatbot still starts without a reachable backend — product/order tools just reply "sedang tidak bisa diambil" |
 
 ## Setup — step by step
 
@@ -54,7 +54,10 @@ ollama pull qwen3-embedding:0.6b  # embeddings for RAG (must match EMBEDDING_MOD
 ollama list                       # verify both appear
 ```
 
-`LLM_MODEL` defaults to **`toti-qwen-1.7b`** — the fine-tuned model, not the base.
+`LLM_MODEL` defaults to **`toti-qwen-1.7b-v4`** — the fine-tuned model, not the base.
+Do not fall back to v3 (`toti-qwen-1.7b`): tested live against the current catalogue
+it invents product names ("Brownies 10cm Cokelat") and answers menu questions
+without calling `get_menu`.
 Build it once from the GGUF + Modelfile as described in `finetune/README.md`, then
 confirm with `ollama list`. If you'd rather run the plain base model for now, set
 `LLM_MODEL=qwen3:1.7b` in `.env` (quality on tool-calling will be noticeably worse).
@@ -74,33 +77,32 @@ Then edit the values that are *not* safe to leave at their defaults:
 | `ADMIN_WA_NUMBER` | The admin's number in `628…` form — receives human-takeover escalations |
 | `OWNER_WA_NUMBERS` | Comma-separated `628…` numbers allowed to ask for financial reports |
 | `STORE_NAME` / `STORE_ADDRESS` | Real store name + address; they're pasted into "your order is ready" messages |
-| `LLM_MODEL` | `toti-qwen-1.7b` (see step 1) |
+| `LLM_MODEL` | `toti-qwen-1.7b-v4` (see step 1) |
 
-`BACKEND_BASE_URL`, `OLLAMA_BASE_URL`, and `WWEBJS_BASE_URL` are **overridden in
-`docker-compose.yml`** with container names, so their `.env` values only matter when
-you run the service outside Docker (see the last section).
+`OLLAMA_BASE_URL` and `WWEBJS_BASE_URL` are **overridden in `docker-compose.yml`**
+with container names, so their `.env` values only matter when you run the service
+outside Docker (see the last section). `BACKEND_BASE_URL` is **not** overridden —
+the backend is the Vercel deployment, same URL from inside and outside Docker.
 
 ### 3. Start the stack
 
 ```bash
 docker compose up --build -d
-docker compose ps          # all four should be "running"
+docker compose ps          # all three should be "running"
 ```
 
-Four containers come up:
+Three containers come up:
 
 | Container | Port | Notes |
 |---|---|---|
-| `toti-chatbot` | `127.0.0.1:8000` | This service. Localhost-only on purpose — `/webhook/*` has no auth |
-| `cakery-backend` | `127.0.0.1:8001` | The teammate's FastAPI, Swagger at `/docs` |
+| `toti-chatbot` | `127.0.0.1:8000` | This service. Localhost-only as defence in depth; `/webhook/*` is authenticated too |
 | `toti-wwebjs` | `127.0.0.1:3000` | WhatsApp gateway |
 | `toti-ollama` | — | No published port; only reachable inside the compose network |
 
 Chroma is **not** a container — it runs embedded inside chatbot-service and persists
 to `chatbot-service/chroma_db/`.
 
-First boot is slow: the backend container installs its requirements, and
-chatbot-service preloads both models (`WARMUP_ON_STARTUP=true`, ~1 min on CPU).
+First boot is slow: chatbot-service preloads both models (`WARMUP_ON_STARTUP=true`, ~1 min on CPU).
 Watch it finish with:
 
 ```bash
@@ -207,11 +209,13 @@ python -m scripts.chat_cli             # then just chat; /state to inspect, /qui
   the bot proactively confirms payment.
 - **Mark order ready (proactive pickup/delivery msg):**
   ```bash
-  curl -X POST http://localhost:8000/webhook/internal/orders/<id>/ready
+  curl -X POST http://localhost:8000/webhook/internal/orders/<id>/ready \
+       -H "X-Internal-Key: $INTERNAL_API_KEY"
   ```
 - **End human takeover (manual):**
   ```bash
-  curl -X POST http://localhost:8000/webhook/internal/takeover/<phone>/deactivate
+  curl -X POST http://localhost:8000/webhook/internal/takeover/<phone>/deactivate \
+       -H "X-Internal-Key: $INTERNAL_API_KEY"
   ```
 
 ## Unit tests
@@ -242,18 +246,30 @@ service fails in confusing ways (Ollama calls hang / RAG silently returns nothin
 OLLAMA_BASE_URL=http://localhost:11434 \
 BACKEND_BASE_URL=http://localhost:8001 \
 WWEBJS_BASE_URL=http://localhost:3000 \
+$(grep -E '^(WEBHOOK_TOKEN|INTERNAL_API_KEY|WWEBJS_API_KEY)=' ../.env | xargs) \
 uvicorn app.main:app --reload --port 8000
 ```
 
+The service **refuses to start** without `WEBHOOK_TOKEN`, `INTERNAL_API_KEY` and
+`WWEBJS_API_KEY` (they authenticate the webhook, the internal endpoints, and the
+WhatsApp session) — hence the `grep` line above, which pulls them out of the root
+`.env` that `uvicorn` doesn't read from `chatbot-service/`. The error message on
+startup tells you which one is missing.
+
 Same applies to any script you run on the host (`ingest.py`, `scripts/chat_cli.py`,
 the fine-tune eval harness). If wwebjs-api is still running in Docker, point its
-`BASE_WEBHOOK_URL` at `http://host.docker.internal:8000/webhook/whatsapp` (or just
+`BASE_WEBHOOK_URL` at `http://host.docker.internal:8000/webhook/whatsapp/$WEBHOOK_TOKEN` (or just
 use the CLI in *Testing it* and skip WhatsApp entirely).
 
 ## Key configuration (`.env`)
 
 | Var | Meaning |
 |---|---|
+| `WEBHOOK_TOKEN` | **Required.** Secret path segment that authenticates wwebjs-api's callbacks (`/webhook/whatsapp/<token>`) — the gateway can't send headers. Without it anyone reaching the service can forge a message from any customer's number. `openssl rand -hex 24` |
+| `INTERNAL_API_KEY` | **Required.** `X-Internal-Key` for `/webhook/internal/*` (end takeover, push "pesanan siap"). Backend must send it too — see `BACKEND.md` |
+| `WWEBJS_API_KEY` | **Required.** Protects the logged-in WhatsApp session. No default — the service refuses to start on a placeholder |
+| `LOG_MESSAGE_BODIES` | Log customer message text (default `false`; metadata is logged either way, phone numbers masked) |
+| `DATA_RETENTION_DAYS` | Transcripts older than this are purged and identity snapshots on finished orders cleared (default 90, `0` = off) |
 | `BACKEND_BASE_URL` | Base URL of the main backend (paths resolved defensively) |
 | `BACKEND_SERVICE_API_KEY` | Sent as `X-Service-Key`; must equal the backend's `SERVICE_API_KEY` |
 | `OLLAMA_BASE_URL` | Ollama endpoint (LLM + embeddings) |
