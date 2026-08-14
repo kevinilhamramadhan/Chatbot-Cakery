@@ -1,7 +1,7 @@
 ==============================================================================
  TO-DO BACKEND — dari Kevin (Chatbot/AI)
 ==============================================================================
- STATUS (13 Agu 2026): 4 item BARU dari audit keamanan + tes end-to-end
+ STATUS (13 Agu 2026): 5 item BARU dari audit keamanan + tes end-to-end
  chatbot terhadap deployment Vercel. Yang lama semua sudah beres ✅ (termasuk
  X-Internal-Key dan validasi amount di commit 3409fc7 — terima kasih, sudah
  kutes live: order 14 DP Rp25.000 lolos, mismatch ditolak).
@@ -72,6 +72,29 @@
  jumlah berapa pun. Chatbot sekarang menolak di sisiku ("Mini Cookies 7cm
  minimal 5 pcs"), jadi tidak mendesak — tapi Buyer Site kemungkinan punya
  lubang yang sama, dan aturan bisnisnya lebih tepat ditegakkan di backend.
+------------------------------------------------------------------------------
+ #5 ⚠️ Push "pesanan siap" (C4) TIDAK AKAN SAMPAI setelah backend pindah Vercel
+------------------------------------------------------------------------------
+ Arahnya sekarang timpang:
+   chatbot -> backend  : OK, chatbot memanggil https://backend-cakery.vercel.app
+   backend -> chatbot  : PUTUS. Chatbot jalan di mesin Kevin, port-nya di-bind
+                         ke 127.0.0.1:8000 (tidak terbuka ke internet, memang
+                         disengaja demi keamanan). Vercel ada di internet publik
+                         dan tidak punya jalan masuk ke sana.
+
+ Akibatnya: PATCH /orders/{id}/status -> "ready" tetap kamu kirim, tapi
+ requestnya gagal connect, dan pelanggan TIDAK pernah menerima pesan
+ "Pesananmu sudah siap 🎉". Fitur ini praktis mati sejak pindah Vercel.
+ (Kode push-mu sendiri tidak salah — ini soal topologi, bukan bug.)
+
+ TIDAK ADA yang perlu kamu ubah sekarang. Ini PR-ku: chatbot akan mendeteksi
+ status "ready" dengan polling (background worker-nya sudah polling
+ GET /payments/{id}/status tiap 30 detik untuk deteksi pembayaran — tinggal
+ ikut membaca status ordernya). Kalau nanti Chatbot Service di-deploy ke
+ alamat publik, push-mu langsung berguna lagi tanpa perubahan kode.
+
+ Yang KUBUTUHKAN darimu: jangan hapus kode push C4-nya. Cukup pastikan
+ CHATBOT_URL di env Vercel diisi kalau/ketika chatbot sudah punya URL publik.
 ==============================================================================
  (ARSIP) Yang sudah selesai — tidak perlu dikerjakan lagi
 ==============================================================================
@@ -143,6 +166,35 @@
 ==============================================================================
  KONTRAK YANG CHATBOT ANDALKAN — JANGAN DIUBAH TANPA KABAR-KABARI
 ==============================================================================
+ DAFTAR LENGKAP endpoint yang dipanggil chatbot (semua kirim X-Service-Key).
+ Kalau salah satu berubah bentuk, chatbot langsung rusak — kabari dulu ya.
+ (POST /payments pernah berubah tanpa kabar di commit 3409fc7 dan checkout mati
+  total sampai kubetulkan; makanya sekarang kudaftar semuanya, bukan sebagian.)
+
+ BACA (paling sering dipakai, tiap pesan pelanggan bisa memicunya):
+ - GET /products/?only_active=true[&kategori=]   -> dipakai get_menu,
+   compare_products, resolve nama produk, DAN cek ulang harga tepat sebelum
+   charge. Field yang diandalkan kode chatbot:
+       id, nama_produk, harga_jual, deskripsi, kategori,
+       is_available, image_url, minimum_order
+   ⚠️ Nama-nama field ini JANGAN diubah/di-rename. Commit "Flatter Product"
+   sempat mengubah struktur produk; kebetulan kedelapan field ini selamat.
+   Menambah field baru aman — chatbot mengabaikan yang tidak dikenal.
+ - GET /products/{id}                            -> resolve produk by id
+ - GET /faq                                      -> TIDAK dipakai (lihat catatan
+                                                    FAQ di arsip)
+
+ TULIS / TRANSAKSI:
+ - POST /customers        body {nomor_wa, nama, alamat} -> balasan harus punya
+                          `id` (dipakai sebagai customer_id di POST /orders)
+ - POST /orders           body {customer_id, metode_pengiriman: pickup|delivery,
+                          created_via: "chatbot", items:[{product_id, jumlah}]}
+                          -> balasan: id, total_harga_pesanan, invoice.nomor_invoice
+ - POST /orders/{id}/cancel
+ - GET  /customers/{nomor_wa}/takeover  -> {nomor_wa, human_takeover_active,
+                                            takeover_expires_at, is_expired}
+ - POST /customers/{nomor_wa}/takeover  body {active, expires_at}
+
  - CustomerOut/OrderOut pakai field `id`; nomor invoice nested di
    OrderOut.invoice.nomor_invoice
  - GET /orders/latest?nomor_wa=  (nomor dalam format lengkap 628...@c.us)
@@ -181,4 +233,14 @@
 
  Log percakapan chatbot sengaja disimpan lokal di Chatbot Service — tidak
  perlu tabel chatbot_conversations / endpoint-nya di backend.
+
+------------------------------------------------------------------------------
+ CATATAN PERFORMA (bukan permintaan, FYI saja)
+------------------------------------------------------------------------------
+ Cold start Vercel sering >10 detik. Timeout chatbot dulu 10s, jadi pelanggan
+ melihat "Maaf, daftar menu sedang tidak bisa diambil" padahal backend cuma
+ sedang bangun. Sudah kunaikkan ke 30 detik + 1x retry otomatis untuk GET,
+ jadi dari sisiku sudah aman. Kutulis kalau-kalau kamu melihat request
+ pertama setelah idle terasa lambat juga di Admin/Buyer Site — itu memang
+ sifat serverless, bukan kodemu.
 ==============================================================================
