@@ -1,0 +1,31 @@
+# Overlay OPSIONAL: buka backend ke internet lewat HTTPS.
+# Belum dipakai selama frontend belum jalan — stack default tetap localhost-only.
+#
+# Cara pakai (setelah punya domain yang A record-nya sudah menunjuk ke IP VPS):
+#   1. isi DOMAIN=api.domainmu.com di .env
+#   2. buka firewall port 80 + 443
+#   3. docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+#
+# Caddy mengurus sertifikat Let's Encrypt sendiri (perlu port 80 untuk
+# verifikasi). Yang diekspos HANYA backend — chatbot & wwebjs tetap tertutup,
+# karena webhook-nya cuma butuh network internal.
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: toti-caddy
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env, mis. api.domainmu.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # sertifikat — jangan dihapus, ada rate limit LE
+      - caddy_config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

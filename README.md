@@ -5,6 +5,10 @@ LangChain, Ollama (`toti-qwen-1.7b-v4`), ChromaDB, and the `avoylenko/wwebjs-api
 gateway. This repo is **only** the chatbot + WhatsApp integration — the main backend
 (deployed at `https://backend-cakery.vercel.app`) and the React frontends are owned by teammates.
 
+> **Deploying to a VPS?** `DEPLOY_VPS.md` is the one to follow — there the whole
+> stack (chatbot + backend + PostgreSQL) runs as containers on your own box.
+> This README covers the laptop setup, where the backend is the Vercel deployment.
+
 > Scope, rules, and the full conversation flow live in
 > `PROMPT_CLAUDE_CODE_TOTI_CAKERY_CHATBOT.md`. Endpoints the backend still owes us
 > are in `BACKEND_TODO.txt`. What the **backend** side has to configure to talk to
@@ -37,8 +41,8 @@ wwebjs-api (Docker) ──webhook──▶ chatbot-service /webhook/whatsapp/$WE
 | Need | Why / notes |
 |---|---|
 | **Docker + Docker Compose v2** | The whole stack runs as containers. `docker compose version` should print v2.x |
-| **Ollama installed on the host** | The `ollama` container mounts the host's model store (`/usr/share/ollama/.ollama`), so models you already pulled are reused instead of re-downloaded |
-| **~6 GB free RAM** | `toti-qwen-1.7b-v4` + `qwen3-embedding:0.6b` stay resident (`OLLAMA_KEEP_ALIVE=-1`). CPU-only inference works; a reply takes a few seconds |
+| **The fine-tuned GGUF** | `toti-qwen-1.7b-v4` isn't on the Ollama registry. `scripts/bootstrap.sh` builds it into the `ollama_models` Docker volume from `finetune/*.gguf.v4`, or downloads it from the private HF repo when `HF_TOKEN` is set. No host Ollama needed |
+| **~8 GB free RAM** | Measured: the LLM takes **5.2 GB** at the default `LLM_NUM_CTX=32768` (**2.4 GB** at 8192) and embeddings **1.4 GB**, both kept resident by `OLLAMA_KEEP_ALIVE=-1`; the other four containers add ~1.5 GB. CPU-only inference works; a reply takes a few seconds |
 | **A spare WhatsApp number** | Linking scans a QR from *WhatsApp → Linked devices*. Use a number you don't mind having a bot on |
 | **`BACKEND_SERVICE_API_KEY`** | Must equal the backend's `SERVICE_API_KEY` (ask the backend engineer). The chatbot still starts without a reachable backend — product/order tools just reply "sedang tidak bisa diambil" |
 
@@ -46,21 +50,25 @@ wwebjs-api (Docker) ──webhook──▶ chatbot-service /webhook/whatsapp/$WE
 
 Every command is run from the repo root unless stated otherwise.
 
-### 1. Pull the models into Ollama
+### 1. Build the models into the Ollama volume
+
+Models live in a Docker volume (`ollama_models`), not in a host Ollama install —
+so this step is the same on a laptop and on a VPS. `scripts/bootstrap.sh` (step 3)
+does it for you; run it by hand only if you want the model ready first:
 
 ```bash
-ollama pull qwen3:1.7b            # base model
-ollama pull qwen3-embedding:0.6b  # embeddings for RAG (must match EMBEDDING_MODEL)
-ollama list                       # verify both appear
+docker compose up -d ollama
+docker compose exec ollama ollama pull qwen3-embedding:0.6b   # embeddings for RAG
+docker compose exec ollama ollama list                        # verify
 ```
 
 `LLM_MODEL` defaults to **`toti-qwen-1.7b-v4`** — the fine-tuned model, not the base.
 Do not fall back to v3 (`toti-qwen-1.7b`): tested live against the current catalogue
 it invents product names ("Brownies 10cm Cokelat") and answers menu questions
-without calling `get_menu`.
-Build it once from the GGUF + Modelfile as described in `finetune/README.md`, then
-confirm with `ollama list`. If you'd rather run the plain base model for now, set
-`LLM_MODEL=qwen3:1.7b` in `.env` (quality on tool-calling will be noticeably worse).
+without calling `get_menu`. Building it needs the GGUF — put
+`finetune/toti-qwen-1.7b.Q4_K_M.gguf.v4` in place (or set `HF_TOKEN`) and let
+bootstrap run `ollama create`. If you'd rather run the plain base model for now,
+set `LLM_MODEL=qwen3:1.7b` in `.env` (quality on tool-calling will be noticeably worse).
 
 ### 2. Create `.env`
 
@@ -91,11 +99,13 @@ docker compose up --build -d
 docker compose ps          # all three should be "running"
 ```
 
-Three containers come up:
+Five containers come up:
 
 | Container | Port | Notes |
 |---|---|---|
 | `toti-chatbot` | `127.0.0.1:8000` | This service. Localhost-only as defence in depth; `/webhook/*` is authenticated too |
+| `toti-backend` | `127.0.0.1:8001` | The teammate's FastAPI, built from a pinned commit of `Nicholl2/Backend-Cakery` (`BACKEND_REF`). We never edit it — only build it |
+| `toti-postgres` | — | Backend's database. Schema is auto-created on start; **no seed data** — see `DEPLOY_VPS.md` §7 |
 | `toti-wwebjs` | `127.0.0.1:3000` | WhatsApp gateway |
 | `toti-ollama` | — | No published port; only reachable inside the compose network |
 
@@ -132,8 +142,9 @@ drop their vectors. Re-run it **whenever you edit a FAQ file**.
 # 1. start the session (session id comes from WWEBJS_SESSION_ID, default "toti")
 curl "http://localhost:3000/session/start/toti" -H "x-api-key: $WWEBJS_API_KEY"
 
-# 2. open the QR and scan it: WhatsApp → Settings → Linked devices → Link a device
-xdg-open "http://localhost:3000/session/qr/toti/image?x-api-key=$WWEBJS_API_KEY"
+# 2. save the QR and scan it: WhatsApp → Settings → Linked devices → Link a device
+#    (the key MUST go in the header — this gateway rejects ?x-api-key= with 403)
+curl -H "x-api-key: $WWEBJS_API_KEY" "http://localhost:3000/session/qr/toti/image" -o qr.png && xdg-open qr.png
 
 # 3. confirm the pairing worked
 curl "http://localhost:3000/session/status/toti" -H "x-api-key: $WWEBJS_API_KEY"
@@ -181,7 +192,7 @@ docker compose logs -f --tail=100 chatbot-service
 | Bot silent on WhatsApp | Session not `CONNECTED` (step 5), or `WWEBJS_API_KEY` in `.env` ≠ the gateway's |
 | Every FAQ answer is "di luar topik" | Step 4 never ran, or `EMBEDDING_MODEL` ≠ the model used at ingest time — re-ingest after changing it |
 | Product/order tools say "sedang tidak bisa diambil" | Backend down, or `BACKEND_SERVICE_API_KEY` ≠ the backend's `SERVICE_API_KEY` (`401`) |
-| `model "…" not found` in the logs | `LLM_MODEL` isn't in `ollama list` on the host (step 1) |
+| `model "…" not found` in the logs | `LLM_MODEL` isn't in the volume: `docker compose exec ollama ollama list` — re-run `./scripts/bootstrap.sh` |
 | Very slow first reply, then fast | Normal: cold model load. `OLLAMA_KEEP_ALIVE=-1` keeps it resident afterwards |
 
 ## Testing it

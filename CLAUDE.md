@@ -9,9 +9,14 @@ This is Kevin's working directory for the **Toti Cakery WhatsApp Chatbot** (a 3-
 1. **`PROMPT_CLAUDE_CODE_TOTI_CAKERY_CHATBOT.md` is the authoritative spec.** Read it before doing chatbot work. It defines the full scope, rules, architecture, conversation flow, and a list of open questions (its section 17) that must be confirmed with Kevin before implementing the affected parts.
 2. **The chatbot service is built and fully wired to the real backend** (`chatbot-service/`, `whatsapp-gateway/`, `docker-compose.yml`). The spec's folder layout (spec §3) predates some cleanups: the mock `services/payment-gateway/` was deleted once the real Midtrans flow moved into the main backend.
 
-## The backend is a remote service — do not modify it
+## The backend is someone else's code — build it, never modify it
 
-The teammate's FastAPI + PostgreSQL backend runs at **`https://backend-cakery.vercel.app`** (`BACKEND_BASE_URL`). Its source lives in its own repo (github.com/Nicholl2/Backend-Cakery) and is **no longer checked out in this workspace** — the chatbot talks to the deployment over HTTP only. **Never edit the backend, and never add endpoints to it.** Building chatbot code is the entire job here.
+The teammate's FastAPI + PostgreSQL backend lives in its own repo (github.com/Nicholl2/Backend-Cakery). Two ways it reaches us, both read-only:
+
+- **Vercel deployment** `https://backend-cakery.vercel.app` — the laptop default (`BACKEND_BASE_URL` in `.env`).
+- **As a container** — `backend/Dockerfile` clones the repo at a pinned commit (`BACKEND_REF`) at build time and runs it against a local `postgres` service. This is what `docker-compose.yml` wires up (`BACKEND_BASE_URL` is overridden to `http://backend:8000`) and what a VPS deploy uses. See `DEPLOY_VPS.md`.
+
+Containerizing it is **not** editing it: no file of theirs is ever changed, the clone is pinned and `.git` is stripped from the image. **Never edit the backend, and never add endpoints to it.** Building chatbot code is the entire job here.
 
 Need to read backend source (schemas, route auth)? Clone it somewhere outside this workspace, or read `{BACKEND_BASE_URL}/openapi.json`.
 
@@ -43,9 +48,12 @@ Python 3.11+ / FastAPI, LangChain, Ollama (`qwen3:1.7b` LLM + `qwen3-embedding:0
 The chatbot service has no code yet, so it has no build/test commands. Once scaffolded, the spec expects:
 
 ```bash
-docker-compose up                       # whole stack: chatbot-service, chroma, wwebjs-api (+ollama if needed)
-python chatbot-service/knowledge_base/ingest.py   # (re)embed FAQ files into ChromaDB (idempotent)
+./scripts/bootstrap.sh                  # first run: build model into the ollama volume, start stack, ingest FAQ (idempotent)
+docker compose up -d                    # afterwards: postgres, backend, chatbot-service, ollama, wwebjs-api
+docker compose exec chatbot-service python knowledge_base/ingest.py   # (re)embed FAQ files into ChromaDB
 ```
+
+Ollama models live in the `ollama_models` Docker volume (not the host's `/usr/share/ollama`), and the fine-tuned `toti-qwen-1.7b-v4` is built from `finetune/*.gguf.v4` — the GGUF is gitignored and its HF repo (`LasagnaS/toti-qwen-gguf`) is private, so a fresh machine needs either the file or `HF_TOKEN`.
 
 Verifying real backend endpoints:
 

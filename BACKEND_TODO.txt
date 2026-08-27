@@ -1,10 +1,17 @@
 ==============================================================================
  TO-DO BACKEND — dari Kevin (Chatbot/AI)
 ==============================================================================
- STATUS (13 Agu 2026): 5 item BARU dari audit keamanan + tes end-to-end
- chatbot terhadap deployment Vercel. Yang lama semua sudah beres ✅ (termasuk
- X-Internal-Key dan validasi amount di commit 3409fc7 — terima kasih, sudah
- kutes live: order 14 DP Rp25.000 lolos, mismatch ditolak).
+ STATUS (27 Agu 2026): seluruh stack sekarang jalan sebagai container di SATU
+ host — chatbot, backend, dan PostgreSQL dalam satu docker compose. Dua item
+ lama tertutup gara-gara perpindahan itu (#2 foto produk, #5 push "pesanan
+ siap"); keduanya sudah kuhapus dari daftar ini. Yang tersisa: 3 item lama (#1-#3)
+ + 4 temuan baru (#4-#7) dari uji pembayaran ulang dan audit hari ini.
+
+ Kabar baiknya, alur pembayaranmu SEHAT — kuuji lagi di stack container pakai
+ Midtrans sandbox: charge Rp85.000 -> VA BCA terbit, webhook settlement ->
+ invoice paid + order otomatis in_process, amount dimanipulasi ditolak 400,
+ tanda tangan palsu ditolak 400. Catatan #4 soal jalur notifikasinya, bukan
+ soal logikanya.
 
 ------------------------------------------------------------------------------
  #1 🚨 MENDESAK — endpoint /products/ bisa diubah SIAPA SAJA tanpa login
@@ -30,27 +37,7 @@
  chatbot & Buyer Site butuh baca tanpa login.
 
 ------------------------------------------------------------------------------
- #2 Foto produk hilang di Vercel (filesystem serverless bersifat ephemeral)
-------------------------------------------------------------------------------
-     GET https://backend-cakery.vercel.app/static/products/20.png -> 404
-
- products.image_url menunjuk /static milik backend, tapi di Vercel folder itu
- hilang setiap redeploy — foto yang di-upload dari Admin Site tidak bertahan.
- Dulu tidak kelihatan karena backend jalan lokal dengan folder ter-mount.
-
- Efeknya ke chatbot: fitur "kirim foto kue" mati total. Sementara ini chatbot
- mengecek URL-nya dulu dan melewati gambar yang 404 (teksnya tetap terkirim),
- tapi itu cuma menutup gejala.
-
- Yang dibutuhkan: host foto di storage persisten (Vercel Blob / S3 / Cloudinary)
- dan simpan URL absolutnya di products.image_url. Chatbot sudah mendukung URL
- absolut maupun path relatif, jadi tidak perlu perubahan di sisiku.
-
- 15 foto produk yang asli ada padaku (dari volume backend lokal sebelum folder
- itu kuhapus) — bilang saja, langsung kukirim untuk di-upload ulang.
-
-------------------------------------------------------------------------------
- #3 Katalog produksi berisi produk uji coba, tampil ke pelanggan
+ #2 Katalog produksi berisi produk uji coba, tampil ke pelanggan
 ------------------------------------------------------------------------------
  get_menu menampilkan ini ke pelanggan WhatsApp:
 
@@ -66,85 +53,154 @@
  produk beneran, biarkan saja — tiga itu yang paling kuragukan.
 
 ------------------------------------------------------------------------------
- #4 minimum_order tidak divalidasi di POST /orders
+ #3 minimum_order tidak divalidasi di POST /orders
 ------------------------------------------------------------------------------
  Kolomnya ada di ProductOut dan sudah kupakai, tapi POST /orders menerima
  jumlah berapa pun. Chatbot sekarang menolak di sisiku ("Mini Cookies 7cm
  minimal 5 pcs"), jadi tidak mendesak — tapi Buyer Site kemungkinan punya
  lubang yang sama, dan aturan bisnisnya lebih tepat ditegakkan di backend.
 ------------------------------------------------------------------------------
- #5 ⚠️ Push "pesanan siap" (C4) TIDAK AKAN SAMPAI setelah backend pindah Vercel
+ #4 Status pembayaran HANYA bisa berubah lewat webhook /payments/notify
 ------------------------------------------------------------------------------
- Arahnya sekarang timpang:
-   chatbot -> backend  : OK, chatbot memanggil https://backend-cakery.vercel.app
-   backend -> chatbot  : PUTUS. Chatbot jalan di mesin Kevin, port-nya di-bind
-                         ke 127.0.0.1:8000 (tidak terbuka ke internet, memang
-                         disengaja demi keamanan). Vercel ada di internet publik
-                         dan tidak punya jalan masuk ke sana.
+ Kutemukan waktu menguji ulang pembayaran di stack container (Midtrans sandbox):
 
- Akibatnya: PATCH /orders/{id}/status -> "ready" tetap kamu kirim, tapi
- requestnya gagal connect, dan pelanggan TIDAK pernah menerima pesan
- "Pesananmu sudah siap 🎉". Fitur ini praktis mati sejak pindah Vercel.
- (Kode push-mu sendiri tidak salah — ini soal topologi, bukan bug.)
+   POST /payments             -> 201, VA BCA terbit dari Midtrans asli ✅
+   GET  /payments/{id}/status -> membaca tabel payments di DB sendiri,
+                                 TIDAK bertanya ke Midtrans
+   POST /payments/notify      -> satu-satunya yang mengubah status
+                                 (signature SHA512 diverifikasi — mantap ✅)
 
- TIDAK ADA yang perlu kamu ubah sekarang. Ini PR-ku: chatbot akan mendeteksi
- status "ready" dengan polling (background worker-nya sudah polling
- GET /payments/{id}/status tiap 30 detik untuk deteksi pembayaran — tinggal
- ikut membaca status ordernya). Kalau nanti Chatbot Service di-deploy ke
- alamat publik, push-mu langsung berguna lagi tanpa perubahan kode.
+ Konsekuensinya: kalau Midtrans tidak bisa menjangkau /payments/notify, status
+ pembayaran selamanya "Pending" — invoice tidak pernah paid, order tidak pernah
+ in_process, dan chatbot tidak pernah mengabari pelanggan. Di Vercel ini tidak
+ terasa karena URL-nya publik; di VPS backend defaultnya tertutup, jadi endpoint
+ itu harus kuekspos lewat domain + HTTPS. Itu urusanku dan sudah kutangani —
+ jadi ini BUKAN blocker untukmu.
 
- Yang KUBUTUHKAN darimu: jangan hapus kode push C4-nya. Cukup pastikan
- CHATBOT_URL di env Vercel diisi kalau/ketika chatbot sudah punya URL publik.
-==============================================================================
- (ARSIP) Yang sudah selesai — tidak perlu dikerjakan lagi
-==============================================================================
- Terima kasih banyak — kerjamu rapi dan cepat!
+ Usul (opsional, kalau sempat): tambahkan fallback di GET /payments/{order_id}/
+ status — kalau payment masih Pending, tanya sekali ke Midtrans
+ GET {midtrans_api_url}/{order_id_midtrans}/status, lalu perbarui DB memakai
+ mapping status yang sama dengan webhook. Untungnya: pembayaran tetap terdeteksi
+ walau notifikasi hilang atau telat (chatbot sudah polling endpoint ini tiap 30
+ detik), dan backend tidak wajib punya alamat publik. Tanpa itu, satu notifikasi
+ yang gagal = pesanan menggantung tanpa ada yang tahu.
 
- TERVERIFIKASI LIVE oleh Kevin (2026-07-03, backend commit 8670242):
-   - B1: Customers          -> GET /customers?nomor_wa= , POST /customers
-   - B2: Create order        -> POST /orders (cek + kurangi stok resep,
-                                optimistic locking)
-   - B3: Status pesanan      -> GET /orders/latest?nomor_wa=
-   - B4: Cancel order        -> POST /orders/{order_id}/cancel
-                                + SEKARANG MENGEMBALIKAN STOK ✅ (fix #2)
-   - B5: Payment + Midtrans  -> POST /payments , GET /payments/{order_id}/status ,
-                                POST /payments/notify (charge Midtrans asli)
-   - C1: Human takeover      -> POST & GET /customers/{nomor_wa}/takeover
-   - C2: Takeover handlers   -> GET /admin/takeover-handlers {"numbers":[...]}
-   - C3: is_available        -> di ProductOut + POST /orders tolak stok kurang
-   - C4: Push "ready"        -> POST {CHATBOT_URL}/webhook/internal/orders/{id}/ready
-   - C5: PATCH /orders/{id}/status -> SEKARANG BALAS 200 + OrderOut LENGKAP ✅
-                                (fix #1 — dites live: order 4, items+invoice ikut)
-   - REPORTS: GET /reports/summary?start_date&end_date ✅ (endpoint #4)
-       * Dites live: angka cocok dengan isi Neon (order_count, top_products,
-         avg). Tanpa X-Service-Key -> 401. Format tanggal salah -> 400.
-       * Tool chatbot financial_report & business_analytics SUDAH tersambung
-         dan dites live — fitur laporan Owner via WA resmi HIDUP.
-   - USERS: PATCH /users/{user_id}/takeover-handler ✅ (item #5)
-       * Dites live: user level Admin ditolak 403 (require_owner bekerja).
-         Toggle penuh tinggal dites pakai akun Owner (level 1).
+ ➜ CARA MEMPERBAIKI (sudah kuverifikasi endpoint-nya jalan)
+   Midtrans punya Get Status API, dan dia menerima transaction_id — persis yang
+   sudah kausimpan di payments.pg_transaction_id. Kutes barusan dengan kunci
+   sandbox kita:
+
+     GET https://api.sandbox.midtrans.com/v2/{pg_transaction_id}/status
+     Authorization: Basic base64("<server_key>:")      <- password kosong
+     -> {"transaction_status":"pending","order_id":"INV-...","gross_amount":...}
+
+   Langkahnya tiga:
+
+   1. Pecah bagian bawah process_midtrans_webhook() (mulai dari mapping
+      status_map sampai blok "ATURAN OTOMASI") jadi satu fungsi dipakai bersama,
+      supaya webhook dan polling tidak pernah beda perilaku:
+
+        async def _apply_transaction_status(db, payment, payload) -> Payment:
+            # ... status_map + set payment.payment_status
+            # ... kalau Success: invoice.status = paid, order.status = in_process
+
+      process_midtrans_webhook() tinggal: verifikasi signature -> cari payment
+      -> panggil _apply_transaction_status().
+
+   2. Tambah fungsi baru di payment_service.py:
+
+        async def refresh_if_pending(db, payment):
+            if payment.payment_status != PaymentStatusEnum.pending:
+                return payment
+            url = f"{settings.midtrans_api_url}/{payment.pg_transaction_id}/status"
+            try:
+                async with httpx.AsyncClient(timeout=10) as c:
+                    r = await c.get(url, auth=(settings.midtrans_server_key, ""),
+                                    headers={"Accept": "application/json"})
+                if r.status_code != 200:
+                    return payment          # Midtrans lagi rewel -> jangan gagalkan
+                return await _apply_transaction_status(db, payment, r.json())
+            except httpx.HTTPError:
+                return payment
+
+   3. Panggil refresh_if_pending() untuk tiap payment berstatus Pending di dalam
+      GET /payments/{order_id}/status sebelum menyusun response.
+
+   Setelah itu pembayaran tetap terdeteksi walau webhook hilang, karena chatbot
+   sudah memanggil endpoint status itu tiap 30 detik. Webhook tetap dipakai
+   (lebih cepat) — ini cuma jaring pengaman.
 
 ------------------------------------------------------------------------------
- ✅ SELESAI — foto produk di-host backend + bisa diedit dari Admin Site
-    (backend commit 339430e: POST /products/{id}/image, require_admin_or_owner,
-     app.mount("/static", ...), image_url disimpan sebagai path relatif)
-
- ⚠️ TAPI SKEMANYA SUDAH TIDAK BERLAKU SETELAH PINDAH KE VERCEL — lihat #2
-    di atas. Aturan lama "SIMPAN PATH RELATIF /static/products/12.jpg" itu
-    dibuat waktu backend jalan lokal dengan folder ter-mount. Di Vercel folder
-    static hilang tiap redeploy, jadi path relatif ke /static tidak lagi bisa
-    diandalkan. Yang berlaku sekarang: simpan URL ABSOLUT ke storage persisten.
-    Chatbot menerima dua-duanya (path relatif di-prefix BACKEND_BASE_URL, URL
-    absolut dipakai apa adanya), jadi perubahan ini tidak menuntut apa pun
-    dariku — cukup ubah apa yang diisi ke kolom image_url.
+ #5 Tidak ada endpoint untuk membuat user internal (Owner/Admin/Staff)
 ------------------------------------------------------------------------------
+ app/api/routes/user.py cuma punya PATCH /{id}/takeover-handler. Tidak ada
+ POST /users di mana pun, dan /auth cuma punya login (register-nya khusus
+ buyer). Artinya di database yang masih kosong TIDAK ADA cara membuat user
+ pertama lewat API — aku terpaksa INSERT manual ke tabel users + roles lewat
+ psql, lengkap dengan hash bcrypt yang kubikin sendiri.
+
+ Efeknya bukan cuma waktu deploy: Admin Site juga tidak punya jalan untuk
+ menambah staf baru. Usul: POST /users (dibatasi require_owner) + satu perintah
+ seed/bootstrap untuk user pertama saat tabel users masih kosong.
+
+------------------------------------------------------------------------------
+ #6 OTP buyer masih kode mati '7777'
+------------------------------------------------------------------------------
+ app/services/buyer_auth_service.py: "Generate and store mock OTP code ('7777')
+ for development". Selama masih begini, siapa pun yang tahu nomor WA pelanggan
+ bisa masuk sebagai dia di Buyer Site cukup dengan mengetik 7777 — dan riwayat
+ pesanan pelanggan ikut terbuka.
+
+ Tiga hal yang salah, urut dari yang paling gawat:
+
+   1. Kodenya konstan. Bukan cuma bisa ditebak — sudah pasti, tertulis di source
+      code. Tidak ada tahap "menebak" sama sekali.
+   2. Tidak ada batas percobaan. Tabel otp_codes cuma punya is_used dan
+      expires_at, tidak ada penghitung percobaan gagal. Jadi walaupun nanti
+      kodenya diacak, 6 digit tetap jebol kalau boleh dicoba tanpa batas.
+   3. Tidak ada batas pengiriman. Satu nomor bisa diminta OTP berkali-kali tanpa
+      jeda — begitu pengirim WA/email betulan dipasang, itu jadi jalur spam
+      (dan biaya) atas nama toko.
+
+ Chatbot tidak memakai jalur OTP ini sama sekali, jadi tidak mendesak untukku —
+ aku cuma tidak mau Buyer Site go-live dengan kondisi ini. Cara memperbaikinya
+ kuserahkan ke kamu; kalau butuh jalur kirim lewat WhatsApp, bilang saja.
+
+------------------------------------------------------------------------------
+ #7 CORS: allow_origins ["*"] bersama allow_credentials=True
+------------------------------------------------------------------------------
+ Di app/main.py, origins berisi "*" sekaligus allow_credentials=True. Browser
+ menolak kombinasi itu untuk request ber-credential, jadi selain longgar, ini
+ juga tidak bekerja seperti yang diharapkan. Begitu domain frontend sudah pasti,
+ daftarkan origin-nya secara eksplisit dan buang "*"-nya.
+
+ ➜ CARA MEMPERBAIKI
+   Pindahkan daftarnya ke env supaya tiap environment (lokal, Vercel, VPS) punya
+   origin sendiri tanpa ubah kode:
+
+     # app/core/config.py
+     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+     # app/main.py
+     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+     app.add_middleware(
+         CORSMiddleware,
+         allow_origins=origins,          # tanpa "*"
+         allow_credentials=True,
+         allow_methods=["*"],
+         allow_headers=["*"],
+     )
+
+   Kalau suatu saat memang butuh benar-benar terbuka untuk endpoint publik,
+   pasangannya harus allow_credentials=False — "*" + credentials adalah kombinasi
+   yang ditolak browser, jadi sekarang efektifnya malah tidak berfungsi.
 
  CATATAN KECIL (bukan bug):
    - revenue di /reports/summary hanya menghitung payments berstatus
      'Success' — di sandbox, payment baru jadi Success setelah webhook
      /payments/notify dipanggil Midtrans (atau simulator). Kalau angka
      revenue 0 padahal ada order, itu sebabnya.
-   - Fix #2 (cancel mengembalikan stok) kodenya sudah kubaca & benar
+   - Cancel yang mengembalikan stok: kodenya sudah kubaca & benar
      (kebalikan persis dari pemotongan di create, locking aman). Belum
      kutes live hanya karena produk tesku tidak punya resep — begitu ada
      produk ber-resep, tes: buat order -> stok turun -> cancel -> stok balik.
@@ -202,8 +258,7 @@
    ikut menyesuaikan):
      {order_id, payment_method: bank_transfer|qris, payment_type: full|dp,
       amount}
-   ✅ SELESAI (permintaan audit keamanan): backend sekarang menghitung
-   sendiri nominal yang sah (full = total_harga_pesanan, dp = 50% total,
+   Backend menghitung sendiri nominal yang sah (full = total_harga_pesanan, dp = 50% total,
    quantize 0.01) dan menolak 400 kalau `amount` tidak cocok.
    CATATAN buat chatbot: DP dipatok backend TEPAT 50%, jadi
    DOWN_PAYMENT_PERCENTAGE di .env tidak boleh diubah dari 0.50 — kalau
@@ -223,24 +278,12 @@
    Alasannya: sebelumnya siapa pun yang bisa menjangkau chatbot bisa
    menembak /ready untuk order id 1..N dan mengirim blast "pesanan siap"
    ke pelanggan asli dari nomor WA resmi toko.
-   ✅ SELESAI di backend commit 3409fc7 (settings.chatbot_internal_key
-   dikirim sebagai header; default chatbot_url juga sudah dibetulkan dari
-   :8001 ke :8000). Yang tersisa: pastikan CHATBOT_INTERNAL_KEY di env
-   backend/Vercel berisi nilai INTERNAL_API_KEY chatbot — kalau kosong,
-   push-nya kena 404.
+   Di stack container, CHATBOT_URL dan CHATBOT_INTERNAL_KEY diisi otomatis
+   oleh docker compose dari .env yang sama, jadi tidak ada yang perlu kamu
+   set manual — sudah kutes: 200 dengan key, 404 tanpa key.
  - Semua endpoint chatbot pakai header X-Service-Key = SERVICE_API_KEY
    (nilai production disepakati privat, jangan di-commit)
 
  Log percakapan chatbot sengaja disimpan lokal di Chatbot Service — tidak
  perlu tabel chatbot_conversations / endpoint-nya di backend.
-
-------------------------------------------------------------------------------
- CATATAN PERFORMA (bukan permintaan, FYI saja)
-------------------------------------------------------------------------------
- Cold start Vercel sering >10 detik. Timeout chatbot dulu 10s, jadi pelanggan
- melihat "Maaf, daftar menu sedang tidak bisa diambil" padahal backend cuma
- sedang bangun. Sudah kunaikkan ke 30 detik + 1x retry otomatis untuk GET,
- jadi dari sisiku sudah aman. Kutulis kalau-kalau kamu melihat request
- pertama setelah idle terasa lambat juga di Admin/Buyer Site — itu memang
- sifat serverless, bukan kodemu.
 ==============================================================================

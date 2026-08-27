@@ -1,12 +1,75 @@
-# Toti Cakery Chatbot — full stack, satu perintah:
+# Toti Cakery — full stack, satu perintah:
 #
-#   docker compose up --build -d
+#   ./scripts/bootstrap.sh      (pertama kali: siapkan model + DB + ingest)
+#   docker compose up -d        (selanjutnya)
 #
-# Menjalankan 3 container: chatbot, Ollama, wwebjs-api.
-# (Backend dipakai dari Vercel, bukan container lokal.)
+# 5 container: postgres, backend, chatbot, ollama, wwebjs-api.
 # Semua saling memanggil lewat nama service di network internal compose.
+# Langkah deploy VPS lengkap: DEPLOY_VPS.md
+#
+# Backend diekspos ke internet? Jangan buka portnya — pakai overlay Caddy:
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
 
 services:
+  # ── Database backend ────────────────────────────────────────────────────────
+  # Skema dibuat otomatis oleh backend saat start (Base.metadata.create_all +
+  # ensure_*_columns di app/main.py). Tidak ada seed: katalog produk/FAQ/user
+  # admin harus diisi sendiri — lihat DEPLOY_VPS.md §6.
+  postgres:
+    image: postgres:16-alpine
+    container_name: toti-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-toti}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env - openssl rand -hex 24}
+      POSTGRES_DB: ${POSTGRES_DB:-toti}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-toti} -d ${POSTGRES_DB:-toti}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    # Tidak publish port: hanya backend yang memakainya, lewat network compose.
+
+  # ── Backend (repo teammate, di-build dari commit yang dipin) ────────────────
+  backend:
+    build:
+      context: ./backend
+      args:
+        BACKEND_REF: ${BACKEND_REF:-3409fc7ba5dcdc53b22f1a8d57599839e61413c3}
+    container_name: toti-backend
+    environment:
+      # Password dari .env dipakai apa adanya di URL — generate hex (openssl rand
+      # -hex 24) supaya tidak ada karakter @ : / yang merusak parsing URL.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-toti}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-toti}
+      SECRET_KEY: ${BACKEND_SECRET_KEY:?set BACKEND_SECRET_KEY in .env - openssl rand -hex 32}
+      # Satu-satunya sumber kebenaran untuk key chatbot<->backend: kalau dua
+      # sisi dibaca dari variabel .env yang sama, mismatch 401 jadi mustahil.
+      SERVICE_API_KEY: ${BACKEND_SERVICE_API_KEY:?set BACKEND_SERVICE_API_KEY in .env}
+      # Arah sebaliknya: backend memanggil chatbot (akhiri takeover, push
+      # "pesanan siap") dengan X-Internal-Key.
+      CHATBOT_URL: http://chatbot-service:8000
+      CHATBOT_INTERNAL_KEY: ${INTERNAL_API_KEY:?set INTERNAL_API_KEY in .env - openssl rand -hex 24}
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-}
+      MIDTRANS_IS_PRODUCTION: ${MIDTRANS_IS_PRODUCTION:-false}
+    ports:
+      - "127.0.0.1:8001:8000"   # localhost-only; publik lewat Caddy kalau perlu
+    volumes:
+      - backend_static:/app/static   # upload foto produk
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Backend tidak punya /health — /openapi.json cukup membuktikan app hidup.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/openapi.json')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── Chatbot (service ini) ───────────────────────────────────────────────────
   chatbot-service:
     build: ./chatbot-service
     container_name: toti-chatbot
@@ -15,8 +78,7 @@ services:
       # Topologi antar-container (menimpa nilai .env):
       WWEBJS_BASE_URL: http://wwebjs-api:3000
       OLLAMA_BASE_URL: http://ollama:11434
-      # BACKEND_BASE_URL sengaja TIDAK di-override: backend sekarang dipakai dari
-      # deployment Vercel (nilainya di .env), bukan container lokal.
+      BACKEND_BASE_URL: http://backend:8000
     ports:
       # Bound to localhost as defense in depth. Auth itself is in the app:
       # /webhook/whatsapp/<WEBHOOK_TOKEN> (secret in the path, because
@@ -27,14 +89,12 @@ services:
       - ./chatbot-service/chroma_db:/app/chroma_db      # persistent vector store
       - ./chatbot-service/toti_chatbot.db:/app/toti_chatbot.db
     depends_on:
+      # service_started, bukan service_healthy: chatbot sengaja tetap jalan saat
+      # backend/ollama belum siap (tool-nya balas "sedang tidak bisa diambil").
       - wwebjs-api
       - ollama
+      - backend
     restart: unless-stopped
-
-  # Backend TIDAK lagi dijalankan lokal — dipakai dari deployment Vercel
-  # (https://backend-cakery.vercel.app, lihat BACKEND_BASE_URL di .env).
-  # Kalau suatu saat perlu backend lokal lagi: clone Backend-Cakery, kembalikan
-  # service ini beserta env_file-nya, dan set BACKEND_BASE_URL=http://backend:8001.
 
   ollama:
     image: ollama/ollama:latest
@@ -44,12 +104,16 @@ services:
       # then pays ~15s of model reload on top of inference. Keep it resident.
       OLLAMA_KEEP_ALIVE: "-1"
     volumes:
-      # Pakai model yang SUDAH ada di host (toti-qwen-1.7b, qwen3-embedding, dll)
-      # — tidak perlu pull/import ulang. Host ini CPU-only, jadi tanpa config GPU.
-      - /usr/share/ollama/.ollama:/root/.ollama
+      # Named volume, bukan path host: VPS cukup punya Docker, tidak perlu
+      # install Ollama di host. Isi model store dibangun oleh scripts/bootstrap.sh.
+      - ollama_models:/root/.ollama
+      # GGUF hasil fine-tune dibaca read-only dari sini oleh `ollama create`.
+      # Setelah model jadi, Ollama simpan blob-nya sendiri di ollama_models —
+      # file di ./finetune boleh dihapus kalau disk VPS sempit.
+      - ./finetune:/finetune:ro
     restart: unless-stopped
     # Tidak publish port: hanya dipanggil chatbot dari dalam network compose.
-    # Kelola model: docker exec -it toti-ollama ollama list
+    # Kelola model: docker compose exec ollama ollama list
 
   wwebjs-api:
     image: avoylenko/wwebjs-api:latest
@@ -66,7 +130,15 @@ services:
       - "127.0.0.1:3000:3000"   # only needed from this host (QR scan / debug)
     volumes:
       - ./whatsapp-gateway/sessions:/usr/src/app/sessions
+    # Chromium (Puppeteer) crash dengan /dev/shm default 64 MB — gejalanya
+    # gateway restart-loop atau sesi WhatsApp mati sendiri.
+    shm_size: 512m
     restart: unless-stopped
+
+volumes:
+  pgdata:          # data PostgreSQL backend — ini yang wajib di-backup
+  backend_static:  # upload foto produk
+  ollama_models:   # model store Ollama (LLM fine-tune + embedding)
 
 # Note: Chroma runs embedded inside chatbot-service (PersistentClient) writing to
 # the mounted ./chatbot-service/chroma_db volume — no separate container needed.

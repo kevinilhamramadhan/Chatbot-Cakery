@@ -43,3 +43,6 @@ qr.png
 finetune/gguf_dl/
 # transient local backups
 *.v1.json
+
+# Modelfile hasil generate bootstrap (path GGUF absolut untuk container)
+finetune/Modelfile.generated

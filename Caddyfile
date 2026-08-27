@@ -1,0 +1,6 @@
+# Dipakai hanya oleh docker-compose.caddy.yml (overlay opsional).
+# {$DOMAIN} diisi dari .env.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy backend:8000
+}
