@@ -108,7 +108,131 @@ absolut (`http://localhost:8001/...`) — alamat host beda-beda tergantung peman
 (browser vs container chatbot vs production). Tiap konsumen mem-prefix base URL-nya
 sendiri; di chatbot sudah diimplementasi (`BACKEND_BASE_URL` + path).
 
-## 6. Kalau ada yang aneh
+## 6. Verifikasi nomor WhatsApp untuk Buyer Site (baru — perlu dibangun)
+
+Menggantikan OTP `'7777'`. **Tidak ada kode yang dikirim ke pelanggan.** Buktinya
+dibalik: pelanggan yang mengirim pesan berisi kode ke nomor toko, dan WhatsApp
+sendiri yang menjamin nomor pengirimnya asli. Tidak ada pesan keluar ke nomor
+asing, jadi tidak ada risiko nomor toko dianggap spam.
+
+### Alurnya
+
+```
+Buyer Site                    Backend                       Chatbot (WA)
+    |  user isi nomor 0812...     |                                |
+    |---- POST verify/wa/start -->|  simpan nonce + nomor (10 mnt) |
+    |<--- {nonce, deeplink} ------|                                |
+    |                                                              |
+    |  user tekan tombol -> WhatsApp terbuka, pesan sudah terisi:   |
+    |      "VERIFIKASI 7KQ3FA"  ------------------------------->    |
+    |                             |<-- POST verify/wa/confirm ------|
+    |                             |    {nonce, phone dari pengirim} |
+    |                             |--- 200 / 409 mismatch --------->|
+    |                             |                     bot membalas ke pelanggan
+    |---- GET verify/wa/status -->|                                |
+    |<--- {verified, verify_token}|                                |
+    |  lanjut POST /auth/buyer/register pakai verify_token          |
+```
+
+### Yang perlu dibangun di backend
+
+**1. `POST /auth/buyer/verify/wa/start`** — dipanggil Buyer Site
+
+```
+req : {"phone": "0812-3456-7890"}        # apa adanya dari form
+200 : {"nonce": "7KQ3FA",
+       "deeplink": "https://wa.me/628…?text=VERIFIKASI%207KQ3FA%0A%0A…",
+       "expires_in": 600}
+400 : nomor tidak valid setelah dinormalkan
+429 : terlalu sering minta kode (usul: maks 5 per nomor per jam)
+```
+
+Nonce disimpan bersama **nomor hasil normalisasi** — inilah yang membuat kode
+tidak bisa dipakai dari nomor lain. Nomor toko diambil dari env backend
+(`STORE_WA_NUMBER`) supaya deeplink dirakit di satu tempat saja.
+
+**2. `POST /auth/buyer/verify/wa/confirm`** — dipanggil **chatbot**, kirim `X-Service-Key`
+
+```
+req : {"nonce": "7KQ3FA", "phone": "6281234567890"}   # phone = pengirim WA
+200 : {"status": "ok"}
+404 : {"detail": "nonce_not_found"}    # tidak ada / kedaluwarsa / sudah dipakai
+409 : {"detail": "phone_mismatch", "attempts_left": 2}
+423 : {"detail": "too_many_attempts"}  # 3x salah -> nonce dimatikan
+```
+
+**3. `GET /auth/buyer/verify/wa/status?nonce=7KQ3FA`** — dipoll Buyer Site
+
+```
+200 : {"state": "pending"|"verified"|"mismatch"|"expired"|"locked",
+       "attempts_left": 2,
+       "verify_token": "…"}            # hanya diisi saat state = verified
+```
+
+`verify_token` itu token yang sudah dipakai `POST /auth/buyer/register` sekarang,
+jadi alur pendaftarannya tidak berubah — cuma cara mendapatkannya yang baru.
+
+### Aturan nonce
+
+| Hal | Nilai |
+|---|---|
+| Panjang | 6 karakter |
+| Alfabet | `23456789ABCDEFGHJKMNPQRSTUVWXYZ` — tanpa `0/O` dan `1/I/L` supaya tidak salah ketik di jalur desktop |
+| TTL | 10 menit |
+| Sekali pakai | ya, hangus setelah verifikasi berhasil |
+| Salah nomor | nonce **tetap hidup** sampai TTL, cuma percobaan dihitung (maks 3) — supaya orang yang punya 2 WhatsApp bisa kirim ulang tanpa minta kode baru |
+| Penyimpanan | boleh pakai tabel `otp_codes` yang sudah ada (`code_hash`, `expires_at`, `is_used`), tambah kolom nomor terikat + `attempts` |
+
+### Normalisasi nomor — WAJIB sama persis di kedua sisi
+
+Ini penentu gagal/berhasilnya pendaftaran, jadi aturannya dikunci di sini:
+
+```
+1. buang semua karakter selain angka (spasi, -, (), +, dan suffix @c.us)
+2. hasil diawali "0"   -> ganti awalan jadi "62"
+3. hasil diawali "620" -> jadi "62"        (kasus "+62 0812…")
+4. tidak diawali "62"  -> tolak (kita hanya melayani nomor Indonesia)
+5. panjang akhir di luar 10–15 digit -> tolak
+```
+
+| Ditulis user | Hasil kanonik |
+|---|---|
+| `0812-3456-7890` | `6281234567890` |
+| `+62 812 3456 7890` | `6281234567890` |
+| `62 0812 3456 7890` | `6281234567890` |
+| `6281234567890@c.us` (dari WhatsApp) | `6281234567890` |
+
+### Yang dikerjakan chatbot (tidak perlu kamu pikirkan)
+
+Mencocokkan pesan berpola `VERIFIKASI <kode>` pada baris pertama (huruf besar/kecil
+bebas), menormalkan nomor pengirim, memanggil `confirm`, lalu membalas pelanggan
+sesuai hasilnya. Chatbot **tidak menyimpan nonce sama sekali** — sumber kebenaran
+ada di backend. Ada juga rem sendiri: maksimal 10 percobaan verifikasi per nomor
+per jam.
+
+### Prasyarat
+
+`VERIFIED_TOKENS` di `app/services/buyer_auth_service.py` masih `dict` di memori
+proses. Alur ini membuat dua service berbeda menyentuh satu verifikasi, jadi token
+itu harus pindah ke database dulu — kalau tidak, hasil verifikasi bisa hilang saat
+restart atau tidak terlihat oleh worker lain. Detailnya di `BACKEND_TODO.txt` #4.
+
+### Yang dikerjakan Buyer Site
+
+1. Saat halaman verifikasi dibuka: `POST verify/wa/start` → simpan `nonce`.
+2. Tombol **"Verifikasi lewat WhatsApp"** → `href` = `deeplink` dari response.
+3. Di bawah tombol, selalu tampilkan jalur cadangan untuk pengguna desktop:
+   *"Atau kirim pesan ini ke 0812-3456-7890 dari HP-mu"* + kode + tombol salin.
+4. Poll `GET verify/wa/status` tiap 2 detik (batas 10 menit), lalu:
+   - `verified` → lanjut ke `POST /auth/buyer/register` dengan `verify_token`
+   - `mismatch` → tampilkan "nomor pengirim berbeda" + dua tombol:
+     **kirim ulang** (kode sama, cukup lanjut polling) dan **ubah nomor**
+     (panggil `start` lagi dengan nomor baru)
+   - `expired` / `locked` → tombol minta kode baru
+5. Jangan pernah menampilkan nomor toko sebagai teks yang bisa dikira nomor CS —
+   sertakan keterangan bahwa ini nomor bot pemesanan.
+
+## 7. Kalau ada yang aneh
 
 | Gejala | Kemungkinan sebab |
 |---|---|

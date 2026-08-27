@@ -5,7 +5,8 @@
  host — chatbot, backend, dan PostgreSQL dalam satu docker compose. Dua item
  lama tertutup gara-gara perpindahan itu (#2 foto produk, #5 push "pesanan
  siap"); keduanya sudah kuhapus dari daftar ini. Yang tersisa: 3 item lama (#1-#3)
- + 4 temuan baru (#4-#7) dari uji pembayaran ulang dan audit hari ini.
+ + 4 temuan baru (#4-#7) dari uji pembayaran ulang dan audit hari ini,
+ plus satu permintaan baru (#8: verifikasi nomor WA untuk Buyer Site).
 
  Kabar baiknya, alur pembayaranmu SEHAT — kuuji lagi di stack container pakai
  Midtrans sandbox: charge Rp85.000 -> VA BCA terbit, webhook settlement ->
@@ -194,6 +195,49 @@
    Kalau suatu saat memang butuh benar-benar terbuka untuk endpoint publik,
    pasangannya harus allow_credentials=False — "*" + credentials adalah kombinasi
    yang ditolak browser, jadi sekarang efektifnya malah tidak berfungsi.
+
+------------------------------------------------------------------------------
+ #8 PERMINTAAN BARU: verifikasi nomor WhatsApp Buyer Site (pengganti OTP)
+------------------------------------------------------------------------------
+ Ini pengganti OTP '7777' di #6, dan sekaligus menghapus kebutuhan pengirim OTP.
+ Idenya dibalik: BUKAN kita yang mengirim kode ke pelanggan, tapi pelanggan yang
+ mengirim kode ke nomor toko lewat tombol di Buyer Site. WhatsApp sendiri yang
+ menjamin nomor pengirimnya asli, jadi tidak ada satu pun pesan keluar ke nomor
+ asing — dan itu penting, karena nomor toko dipakai chatbot juga; kalau kena
+ banned gara-gara blast OTP, bot ikut mati.
+
+ Alurnya:
+   1. user isi nomor di Buyer Site -> POST verify/wa/start -> dapat kode+deeplink
+   2. user tekan tombol -> WhatsApp terbuka dengan pesan "VERIFIKASI 7KQ3FA"
+   3. chatbot terima pesan -> POST verify/wa/confirm {nonce, nomor pengirim}
+   4. Buyer Site polling GET verify/wa/status -> dapat verify_token -> register
+
+ ATURAN yang diminta Kevin: kalau nomor pengirim BEDA dengan yang diketik saat
+ registrasi, verifikasi GAGAL dan pendaftaran tidak boleh lanjut. Kode tetap
+ hidup sampai TTL (10 menit) supaya user bisa kirim ulang dari nomor yang benar
+ atau mengganti nomornya, dengan batas 3 kali percobaan.
+
+ KONTRAK LENGKAP (3 endpoint, aturan nonce, aturan normalisasi nomor, dan bagian
+ yang dikerjakan Buyer Site) ada di BACKEND.md §6 — sengaja ditulis di sana
+ supaya frontend ikut membacanya. Ringkasnya:
+
+   POST /auth/buyer/verify/wa/start     {phone}  -> {nonce, deeplink, expires_in}
+   POST /auth/buyer/verify/wa/confirm   [X-Service-Key] {nonce, phone}
+                                        -> 200 | 404 nonce | 409 mismatch | 423
+   GET  /auth/buyer/verify/wa/status?nonce=
+                                        -> {state, attempts_left, verify_token}
+
+ Tabel otp_codes yang sudah ada bisa dipakai ulang (code_hash, expires_at,
+ is_used); tambahannya cuma kolom nomor terikat + attempts. Nomor toko diambil
+ dari env backend (STORE_WA_NUMBER) supaya deeplink dirakit di satu tempat.
+
+ PRASYARAT: #4-nya dulu — VERIFIED_TOKENS masih dict di memori proses. Alur ini
+ membuat dua service menyentuh satu verifikasi, jadi kalau token itu hilang saat
+ restart atau tak terlihat worker lain, gejalanya "kadang berhasil kadang tidak".
+
+ Sisi chatbot sudah kukerjakan (intercept pesan, normalisasi nomor, rem 10
+ percobaan/jam/nomor, balasan ke pelanggan) — tidak ada yang perlu kamu urus di
+ sana. Yang kutunggu darimu cuma tiga endpoint di atas.
 
  CATATAN KECIL (bukan bug):
    - revenue di /reports/summary hanya menghitung payments berstatus
