@@ -110,6 +110,18 @@ class Settings(BaseSettings):
     # Decision: phone auto-fills from the sender's WhatsApp number, overridable.
     autofill_phone_from_wa: bool = True
 
+    # ── Verifikasi nomor WhatsApp (pendaftaran Buyer Site) ───────────────────
+    # Pelanggan menekan tombol di Buyer Site -> WhatsApp terbuka dengan pesan
+    # "VERIFIKASI <kode>" -> chatbot meneruskan {kode, nomor pengirim} ke backend.
+    # Default MATI: endpointnya belum dibangun backend, dan 404 "route tidak
+    # ada" tidak bisa dibedakan dari 404 "kode tidak dikenal" — pelanggan akan
+    # dapat balasan membingungkan. Nyalakan (true) begitu backend siap; selama
+    # mati, pesan verifikasi diperlakukan sebagai percakapan biasa.
+    wa_verification_enabled: bool = False
+    wa_verification_keyword: str = "VERIFIKASI"
+    # Rem brute-force di sisi kita; backend tetap punya batasnya sendiri.
+    wa_verification_max_per_hour: int = 10
+
     # ── Admin / human takeover ────────────────────────────────────────────────
     # Decision: single fixed admin number for now.
     admin_wa_number: str = ""

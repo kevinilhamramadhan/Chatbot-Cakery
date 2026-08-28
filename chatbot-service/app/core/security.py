@@ -28,6 +28,26 @@ def wa_digits(wa_number: str) -> str:
     return "".join(c for c in (wa_number or "") if c.isdigit())
 
 
+def canonical_wa_number(wa_number: str) -> str | None:
+    """Satukan semua cara orang menulis nomor Indonesia jadi satu bentuk: `62…`.
+
+    Dipakai untuk membandingkan nomor pengirim WhatsApp (`628…@c.us`) dengan
+    nomor yang diketik pelanggan di form (`0812…`, `+62 812…`). Aturannya harus
+    sama persis dengan yang dipakai backend — kalau tidak, verifikasi gagal
+    padahal nomornya benar, dan pelanggan tidak akan melapor, dia cuma pergi.
+
+    None kalau bentuknya tidak masuk akal sebagai nomor Indonesia.
+    """
+    d = wa_digits(wa_number)
+    if d.startswith("620"):      # "+62 0812…" — cek sebelum cabang "0"
+        d = "62" + d[3:]
+    elif d.startswith("0"):
+        d = "62" + d[1:]
+    if not d.startswith("62"):
+        return None
+    return d if 10 <= len(d) <= 15 else None
+
+
 def mask_phone(wa_number: str) -> str:
     """`628123456789@c.us` -> `62***6789`. For logs: identifiable enough to
     correlate a session, not enough to harvest a customer list.

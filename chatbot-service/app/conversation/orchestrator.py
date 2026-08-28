@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass, field
 
 from app.backend_client import api as backend
-from app.conversation import checkout, store
+from app.conversation import checkout, store, verification
 from app.conversation.context import OutboundMedia, TurnContext, set_turn_context
 from app.conversation.states import State, text_is_cancel, text_is_confirm
 from app.core.config import settings
@@ -47,7 +47,19 @@ def _valid_phone(s: str) -> bool:
 async def handle_message(wa_number: str, text: str) -> Reply:
     text = (text or "").strip()
 
-    # 0) Human takeover: log inbound, do NOT auto-reply (PROMPT §12).
+    # 0) Verifikasi nomor untuk pendaftaran Buyer Site ("VERIFIKASI <kode>").
+    # Ditaruh paling atas, sebelum takeover: pelanggan sedang menunggu di halaman
+    # pendaftaran, jadi verifikasi tidak boleh ikut dibungkam hanya karena admin
+    # kebetulan sedang menangani chat ini. Balasannya deterministik, tidak lewat
+    # LLM — status verifikasi bukan hal yang boleh diimprovisasi model.
+    code = verification.extract_code(text)
+    if code:
+        await store.log_message(wa_number, "in", text, intent="wa_verification")
+        reply_text = await verification.handle(wa_number, code)
+        await store.log_message(wa_number, "out", reply_text)
+        return Reply(text=reply_text)
+
+    # 1) Human takeover: log inbound, do NOT auto-reply (PROMPT §12).
     if await store.is_takeover_active(wa_number):
         # Backend is the source of truth — Admin may have ended the takeover
         # from the Admin Site, which the local cache can't see. Only checked

@@ -224,14 +224,36 @@
  payload-nya kamu yang tentukan — bilang saja kontraknya, nanti kusesuaikan dan
  kucatat di BACKEND.md.
 
- Dua hal yang perlu kamu putuskan dan kabari:
-   - satu titik masuk untuk chatbot (dilindungi X-Service-Key seperti endpoint
-     lain), dan format nomor yang kamu harapkan — chatbot menerima nomor dari
-     WhatsApp dalam bentuk "6281234567890@c.us", jadi kita perlu sepakat satu
-     bentuk kanonik supaya "0812…", "+62 812…", dan "62812…" tidak dianggap
-     nomor yang berbeda. Ini bagian yang paling gampang bikin pendaftaran gagal
-     padahal nomornya benar.
-   - apakah ini menggantikan #6 sepenuhnya, atau OTP tetap dipakai untuk email.
+ USULAN KONTRAK ada di BACKEND.md §6 — tiga endpoint, aturan kode, dan aturan
+ normalisasi nomor, lengkap dengan alasannya. Itu USULAN, bukan keputusan: kalau
+ bentuk lain lebih pas dengan struktur backend-mu, pakai punyamu, chatbot yang
+ menyesuaikan. Ringkasannya:
+
+   POST /auth/buyer/verify/wa/start     {phone}  -> {nonce, deeplink, expires_in}
+   POST /auth/buyer/verify/wa/confirm   [X-Service-Key] {nonce, phone}
+                                        -> 200 | 404 nonce | 409 mismatch | 423
+   GET  /auth/buyer/verify/wa/status?nonce=
+                                        -> {state, attempts_left, verify_token}
+
+ Tabel otp_codes yang sudah ada bisa dipakai ulang (code_hash, expires_at,
+ is_used); tambahannya kolom nomor terikat + attempts. Nomor toko sebaiknya dari
+ env backend supaya deeplink dirakit di satu tempat.
+
+ Dua hal yang WAJIB kita sepakati apa pun bentuk akhirnya:
+   - satu titik masuk untuk chatbot, dilindungi X-Service-Key seperti endpoint
+     lain
+   - satu bentuk kanonik nomor telepon. Chatbot menerima nomor dari WhatsApp
+     sebagai "6281234567890@c.us", sedangkan user bisa mengetik "0812…",
+     "+62 812…", atau "62812…". Kalau dua sisi menormalkan dengan aturan berbeda,
+     verifikasi gagal padahal nomornya benar — dan user tidak akan lapor, dia
+     cuma pergi. Aturan yang kupakai di sisi chatbot ada di BACKEND.md §6.
+
+ Dan satu yang perlu kamu putuskan: apakah ini menggantikan #6 sepenuhnya, atau
+ OTP tetap dipakai untuk jalur email.
+
+ Sisi chatbot sudah kusiapkan (intercept pesan verifikasi, normalisasi nomor,
+ rem percobaan, balasan ke pelanggan) dan bisa kusesuaikan dalam hitungan menit
+ begitu bentuk endpoint-mu final.
 
  PRASYARAT (berlaku untuk solusi apa pun): #4 dulu — VERIFIED_TOKENS masih dict
  di memori proses. Alur verifikasi apa pun yang melibatkan dua service akan

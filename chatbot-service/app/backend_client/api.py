@@ -162,3 +162,31 @@ async def get_takeover_admin_numbers() -> list[str]:
             return r.json().get("numbers", [])
     except Exception:  # noqa: BLE001
         return []
+
+
+async def confirm_wa_verification(code: str, phone: str) -> dict:
+    """Teruskan bukti verifikasi ke backend: kode ini datang dari nomor ini.
+
+    Chatbot tidak menyimpan apa pun soal verifikasi — backend yang memutuskan.
+    Status non-200 di sini bukan error sistem melainkan jawaban yang sah, jadi
+    dipetakan jadi hasil biasa supaya pemanggilnya tidak perlu menangkap
+    exception untuk alur yang normal.
+
+    Kontrak nyata backend (commit 59a5d11): POST /auth/verify/wa/confirm dengan
+    {nonce, sender_phone}, balasan 200 / 409 mismatch / 429 percobaan habis /
+    404 nonce tidak dikenal-kedaluwarsa-sudah dipakai.
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        r = await c.post(f"{_base()}/auth/verify/wa/confirm",
+                         json={"nonce": code, "sender_phone": phone},
+                         headers=_headers())
+    if r.status_code == 200:
+        return {"status": "ok"}
+    if r.status_code == 404:      # kode tidak dikenal / kedaluwarsa / sudah dipakai
+        return {"status": "not_found"}
+    if r.status_code == 409:      # nomor pengirim != nomor yang didaftarkan
+        return {"status": "mismatch"}
+    if r.status_code in (423, 429):   # percobaan habis, kode dikunci
+        return {"status": "locked"}
+    r.raise_for_status()
+    return {"status": "unknown"}
