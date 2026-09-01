@@ -46,3 +46,49 @@ finetune/gguf_dl/
 
 # Modelfile hasil generate bootstrap (path GGUF absolut untuk container)
 finetune/Modelfile.generated
+
+# ── Hasil backup & arsip ─────────────────────────────────────────────────────
+# DEPLOY_VPS.md §11 menyuruh menjalankan pg_dump / tar dari dalam folder repo,
+# jadi berkas hasilnya gampang tidak sengaja ikut ter-commit.
+*.dump
+*.sql
+*.sql.gz
+*.tgz
+*.tar
+*.tar.gz
+*.zip
+*.bundle
+sessions-*.tgz
+static.tgz
+
+# ── Berkas sementara & sisa merge/patch ──────────────────────────────────────
+*.bak
+*.orig
+*.rej
+*.tmp
+*.part
+nohup.out
+
+# ── Cache alat Python (selain yang sudah di atas) ────────────────────────────
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+
+# ── Node (wwebjs-api dikonfigurasi, bukan dibangun di sini — tapi jaga-jaga) ──
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ── Editor & OS ──────────────────────────────────────────────────────────────
+*.swp
+*.swo
+*~
+Thumbs.db
+desktop.ini
+.Trash-*
+
+# Catatan: `*.log` sengaja TIDAK diabaikan — log eval fine-tune (finetune/*.log)
+# memang bagian dari catatan kerja dan ikut di-commit.
+
