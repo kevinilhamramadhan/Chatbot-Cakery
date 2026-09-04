@@ -71,7 +71,16 @@ services:
 
   # ── Chatbot (service ini) ───────────────────────────────────────────────────
   chatbot-service:
-    build: ./chatbot-service
+    build:
+      context: ./chatbot-service
+      args:
+        # UID/GID proses di dalam container. Harus sama dengan pemilik
+        # chroma_db/ dan toti_chatbot.db di host (di-bind-mount di bawah),
+        # kalau tidak prosesnya tidak bisa menulis ke sana. Default 1000 =
+        # user pertama di Linux, cocok untuk laptop maupun user `toti` di VPS;
+        # mesin dengan UID lain tinggal set APP_UID/APP_GID di .env.
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
     container_name: toti-chatbot
     env_file: .env
     environment:

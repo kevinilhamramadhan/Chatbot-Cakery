@@ -1,0 +1,197 @@
+# CI chatbot-service: tes → validasi compose → build image → smoke → push GHCR.
+#
+# Repo ini menghasilkan satu image (chatbot-service). Backend dan frontend punya
+# repo dan image sendiri; repo deploy hanya berisi compose yang menarik ketiganya.
+#
+#   pull request  → tes + build (tanpa push), memastikan Dockerfile tetap sehat
+#   push ke main  → tambah push tag :main dan :sha-<commit>
+#   tag v*        → tambah push tag semver (:v1.2.3, :1.2, :latest)
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Push beruntun ke branch yang sama: batalkan run lama, yang dinilai run terbaru.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 1. Tes unit ─────────────────────────────────────────────────────────────
+  # Suite-nya hermetis (tests/conftest.py memaksa semua env + SQLite sementara,
+  # backend/Ollama diarahkan ke host .invalid), jadi tidak butuh service apa pun.
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chatbot-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.11 = versi yang dipakai image runtime. Jangan naikkan di sini saja;
+          # naikkan bareng FROM di chatbot-service/Dockerfile.
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: chatbot-service/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q
+
+  # ── 2. Validasi compose ─────────────────────────────────────────────────────
+  # Menangkap typo YAML/variabel wajib sebelum ketahuan di VPS. Nilai env di sini
+  # dummy — hanya untuk memenuhi ${VAR:?} saat interpolasi.
+  compose:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_PASSWORD: ci-dummy
+      BACKEND_SECRET_KEY: ci-dummy
+      BACKEND_SERVICE_API_KEY: ci-dummy
+      INTERNAL_API_KEY: ci-dummy
+      WEBHOOK_TOKEN: ci-dummy
+      WWEBJS_API_KEY: ci-dummy
+      DOMAIN: ci.example.com   # hanya dipakai overlay Caddy
+    steps:
+      - uses: actions/checkout@v4
+
+      # compose punya `env_file: .env` untuk chatbot-service; file itu tidak
+      # ikut di-commit, jadi tanpa ini `config` gagal "env file not found".
+      # Nilai wajib tetap diambil dari env job di atas (env shell > file .env).
+      - name: Seed dummy .env
+        run: cp .env.example .env
+
+      - name: Validate docker-compose.yml
+        run: docker compose -f docker-compose.yml config --quiet
+
+      - name: Validate Caddy overlay
+        run: docker compose -f docker-compose.yml -f docker-compose.caddy.yml config --quiet
+
+  # ── 3. Build image + smoke + push ───────────────────────────────────────────
+  image:
+    name: build & push image
+    runs-on: ubuntu-latest
+    needs: [test, compose]
+    permissions:
+      contents: read
+      packages: write   # dibutuhkan untuk push ke GHCR pakai GITHUB_TOKEN
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # GHCR hanya menerima nama image huruf kecil, sedangkan nama repo ini
+      # mengandung kapital (kevinilhamramadhan/Chatbot-Cakery) — dipakai apa
+      # adanya, push-nya ditolak "repository name must be lowercase".
+      - name: Resolve image name
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.img.outputs.name }}
+          # Konvensi tag disamakan dengan repo Backend-Cakery dan toti-cakery-fe,
+          # karena repo deploy memilih ketiganya lewat pola yang sama:
+          #   :latest        -> selalu commit terakhir di main (default .env deploy)
+          #   :sha-<full>    -> penunjuk tetap untuk rollback
+          #   :v1.2.0/:1.2   -> hanya kalau ada git tag v*, untuk menyematkan versi
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Satu kali build saja: image dimuat ke daemon lokal, di-smoke, lalu tag
+      # yang sama itu yang di-push. Tidak ada build kedua.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./chatbot-service
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Bukti image benar-benar hidup, bukan cuma berhasil di-build. Volume-nya
+      # dibuat persis seperti repo deploy (chatbot_data:/app/data +
+      # chroma_data:/app/chroma_db) supaya masalah kepemilikan named volume
+      # ketahuan di sini, bukan di VPS. WARMUP_ON_STARTUP=false karena tidak ada
+      # Ollama di runner.
+      - name: Smoke test /health
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          TAG=$(echo "$TAGS" | head -n1)
+          docker run -d --name toti-chatbot-ci -p 8000:8000 \
+            -v ci_chatbot_data:/app/data \
+            -v ci_chroma_data:/app/chroma_db \
+            -e DATABASE_URL=sqlite+aiosqlite:////app/data/toti_chatbot.db \
+            -e WEBHOOK_TOKEN=ci-smoke-token \
+            -e INTERNAL_API_KEY=ci-smoke-internal \
+            -e WWEBJS_API_KEY=ci-smoke-wwebjs \
+            -e WARMUP_ON_STARTUP=false \
+            "$TAG"
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health | grep -q '"status":"ok"'; then
+              echo "sehat setelah ${i} detik"
+              # SQLite harus benar-benar tertulis ke named volume, bukan cuma
+              # /health yang menjawab: itu yang gagal kalau volume milik root.
+              docker exec toti-chatbot-ci test -s /app/data/toti_chatbot.db \
+                || { echo "::error::DB tidak terbuat di /app/data"; docker logs toti-chatbot-ci; exit 1; }
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::/health tidak pernah menjawab ok"
+          docker logs toti-chatbot-ci
+          exit 1
+
+      - name: Log container & bersihkan
+        if: always()
+        run: |
+          docker logs toti-chatbot-ci 2>&1 | tail -50 || true
+          docker rm -f toti-chatbot-ci >/dev/null 2>&1 || true
+          docker volume rm -f ci_chatbot_data ci_chroma_data >/dev/null 2>&1 || true
+
+      # PR dari fork tidak punya izin tulis package — push hanya untuk push/tag.
+      - name: Login ke GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        if: github.event_name != 'pull_request'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "$TAGS" | while read -r tag; do
+            # if-fi, bukan "[ -n ] && ...": step run: jalan dengan `set -e`,
+            # jadi baris kosong di akhir daftar tag akan menggagalkan step.
+            if [ -n "$tag" ]; then
+              docker push "$tag"
+            fi
+          done

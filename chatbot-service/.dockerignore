@@ -1,9 +1,36 @@
+# Konteks build = ./chatbot-service. Semua yang tidak dibutuhkan runtime
+# dikeluarkan: makin kecil konteks, makin jarang cache layer COPY ikut batal.
+
+# Virtualenv & cache Python (venv host Python 3.14 — jangan sampai masuk image 3.11)
 .venv/
 venv/
 __pycache__/
-*.pyc
+**/__pycache__/
+*.py[cod]
 .pytest_cache/
-chroma_db/
-*.db
-*.sqlite3
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Rahasia & data lokal — .env di-inject compose/CI saat run, bukan di-bake
 .env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# Vector store dibangun ulang di runtime (knowledge_base/ingest.py), bukan di-bake:
+# isi Chroma harus mengikuti FAQ terbaru, bukan snapshot saat build.
+chroma_db/
+
+# Artefak & catatan yang tidak dipakai proses
+*.log
+*.bak
+*.orig
+*.rej
+*.tmp
+.git/
+.github/
+.DS_Store
