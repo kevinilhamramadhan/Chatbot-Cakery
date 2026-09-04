@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     # Scope guard: retrieval similarity below this => out-of-scope, refuse to
     # answer from the LLM's general knowledge. Start reasonable, tune later.
     rag_similarity_threshold: float = 0.40
+    # Batas sabar `ingest.py --boot` menunggu model embedding siap di Ollama.
+    # Unduhan pertama di VPS (~600 MB embedding, di belakang ~1,1 GB LLM) bisa
+    # lama; ini batas atas, bukan target.
+    ingest_wait_timeout_seconds: int = 1800
 
     # ── WhatsApp gateway (wwebjs-api) ─────────────────────────────────────────
     wwebjs_base_url: str = "http://wwebjs-api:3000"
