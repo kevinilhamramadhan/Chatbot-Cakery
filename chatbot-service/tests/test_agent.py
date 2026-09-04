@@ -83,16 +83,14 @@ async def test_agent_scope_guard_refuses_out_of_topic(monkeypatch):
     assert out == agent_mod.OUT_OF_SCOPE_REPLY
 
 
-async def test_agent_replaces_hallucinated_price_with_real_menu(monkeypatch):
+async def test_agent_drops_a_hallucinated_price(monkeypatch):
     """Live regression: the model sometimes answers menu questions itself with
     invented products and prices instead of calling get_menu. Any money the
-    model typed without a tool is fabricated — serve the real catalogue."""
-    from app.backend_client import products as products_api
+    model typed without a tool is fabricated, so the sentence is dropped.
 
-    async def fake_list(only_active=True, kategori=None):
-        return FAKE_PRODUCTS
-    monkeypatch.setattr(products_api, "list_products", fake_list)
-
+    What replaces it is a fixed, groundable line — NOT a guess at what the
+    customer wanted. Classifying the question here ("looks like a menu ask ->
+    serve the menu") answered "udah aku bayar kok" with the whole price list."""
     _mock_retrieval(monkeypatch, 0.0)
     _mock_llm(monkeypatch, AIMessage(
         content="Berikut menu Toti Cakery:\n• Cupcakes isi 9 Vanilla — Rp120.000"))
@@ -100,7 +98,8 @@ async def test_agent_replaces_hallucinated_price_with_real_menu(monkeypatch):
     set_turn_context(TurnContext(wa_number=WA))
     out = await agent_mod.run_agent(WA, "menu apa aja yang ada?", history=[])
     assert "Cupcakes isi 9 Vanilla" not in out      # fabricated item dropped
-    assert "Brownies Coklat" in out and "Rp50.000" in out   # real catalogue served
+    assert "Rp120.000" not in out                   # fabricated price dropped
+    assert "menu" in out.lower()                    # points at the real route
 
 
 async def test_agent_leaves_price_free_answers_alone(monkeypatch):

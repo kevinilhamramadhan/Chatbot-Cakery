@@ -8,6 +8,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.conversation.states import State
 from app.core.config import settings
@@ -23,20 +24,35 @@ ACTIVE_ORDER_STATUSES = ("pending", "paid", "ready")
 async def get_or_create_session(wa_number: str) -> ChatSession:
     async with async_session_factory() as db:
         row = await db.scalar(select(ChatSession).where(ChatSession.wa_number == wa_number))
-        if row is None:
-            row = ChatSession(wa_number=wa_number, state=State.IDLE)
-            db.add(row)
+        if row is not None:
+            return row
+
+    # WhatsApp customers routinely fire two or three messages in a row and the
+    # webhook handles each in its own task, so the SELECT above can miss for all
+    # of them at once. The loser of the INSERT race has to read the winner's row
+    # instead of raising: live, two of three opening messages got no reply at
+    # all (UNIQUE constraint failed: sessions.wa_number, swallowed in the log).
+    async with async_session_factory() as db:
+        row = ChatSession(wa_number=wa_number, state=State.IDLE)
+        db.add(row)
+        try:
             await db.commit()
-            await db.refresh(row)
+        except IntegrityError:
+            await db.rollback()
+            return await db.scalar(
+                select(ChatSession).where(ChatSession.wa_number == wa_number)
+            )
+        await db.refresh(row)
         return row
 
 
 async def update_session(wa_number: str, **fields) -> None:
+    # Same race as above, one layer up: create through the guarded helper.
+    await get_or_create_session(wa_number)
     async with async_session_factory() as db:
         row = await db.scalar(select(ChatSession).where(ChatSession.wa_number == wa_number))
-        if row is None:
-            row = ChatSession(wa_number=wa_number)
-            db.add(row)
+        if row is None:  # deleted underneath us; nothing to update
+            return
         for k, v in fields.items():
             setattr(row, k, v)
         await db.commit()
@@ -107,8 +123,18 @@ async def log_message(
         await db.commit()
 
 
-async def recent_history(wa_number: str, limit: int = 6) -> list[dict]:
-    """Return recent turns as chat messages (oldest first) for LLM context."""
+async def recent_history(
+    wa_number: str, limit: int = 6, exclude_last_user: str | None = None
+) -> list[dict]:
+    """Return recent turns as chat messages (oldest first) for LLM context.
+
+    `exclude_last_user` drops a trailing user row with exactly that text. The
+    orchestrator logs an inbound message BEFORE it routes, so without this the
+    customer's current message comes back as the last history entry and the
+    model sees it twice — two user turns in a row, a shape the fine-tuning data
+    never contains. Measured on toti-qwen-1.7b-v5, that duplication alone flips
+    "mau order cupcake dong" from add_to_cart 10/10 to escalate_to_admin 10/10.
+    """
     async with async_session_factory() as db:
         rows = (
             await db.scalars(
@@ -119,10 +145,14 @@ async def recent_history(wa_number: str, limit: int = 6) -> list[dict]:
             )
         ).all()
     rows = list(reversed(rows))
-    return [
+    msgs = [
         {"role": "user" if r.direction == "in" else "assistant", "content": r.content}
         for r in rows
     ]
+    if exclude_last_user and msgs and msgs[-1]["role"] == "user" \
+            and msgs[-1]["content"] == exclude_last_user:
+        msgs.pop()
+    return msgs
 
 
 # ── Pending orders ────────────────────────────────────────────────────────────

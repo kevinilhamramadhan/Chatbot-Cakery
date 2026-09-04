@@ -7,6 +7,7 @@ from app.tools.escalate import escalate_to_admin
 from app.tools.get_menu import get_menu
 from app.tools.get_product_detail import get_product_detail
 from app.tools.order_status import get_order_status
+from app.tools.payment_status import check_payment_status
 from app.tools.reports import business_analytics, financial_report
 
 ALL_TOOLS = [
@@ -15,6 +16,7 @@ ALL_TOOLS = [
     compare_products,
     add_to_cart,
     get_order_status,
+    check_payment_status,
     cancel_order,
     escalate_to_admin,
     financial_report,

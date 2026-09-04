@@ -45,13 +45,27 @@ async def _check_once() -> None:
     for order in pending:
         # 1) Timeout -> auto-cancel + notify.
         if now >= _aware(order.expires_at):
+            # Cancel upstream too. Marking only the local row "expired" left the
+            # order pending forever in the backend and on Admin Site, while the
+            # customer had already been told it was cancelled.
+            cancelled = True
+            try:
+                await backend.cancel_order(order.order_ref)
+            except Exception as exc:  # noqa: BLE001
+                cancelled = False
+                logger.warning("could not cancel expired order %s upstream: %s",
+                               order.order_ref, exc)
             await store.update_pending_order(order.id, status="expired")
             await store.set_state(order.wa_number, State.IDLE)
-            await _notify(
-                order.wa_number,
-                f"Pesanan *{order.order_ref}* dibatalkan otomatis karena melewati "
-                "batas waktu pembayaran. Silakan pesan lagi kapan saja ya 🙏",
-            )
+            if cancelled:
+                text = (f"Pesanan *{order.order_ref}* dibatalkan otomatis karena "
+                        "melewati batas waktu pembayaran. Silakan pesan lagi "
+                        "kapan saja ya 🙏")
+            else:
+                text = (f"Batas waktu pembayaran pesanan *{order.order_ref}* sudah "
+                        "lewat, jadi pesanannya tidak kami proses. Kalau kamu "
+                        "terlanjur membayar, hubungi admin ya 🙏")
+            await _notify(order.wa_number, text)
             continue
 
         # 2) Poll backend payment status (invoice: unpaid|partial|paid|refunded).

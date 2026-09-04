@@ -9,7 +9,26 @@ from langchain_core.tools import tool
 from app.conversation import store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State
+from app.core.config import settings
 from app.tools.formatting import options_line, product_label, resolve_product, rupiah
+
+
+def _parse_qty(raw) -> int | None:
+    """A whole positive number, or None meaning "ask, don't guess".
+
+    The old `min(max(1, int(qty)), 100)` rewrote every bad quantity in silence:
+    1000 became 100 (an Rp8.5jt cart nobody asked for), -5 became +1 on top of
+    what was already there, and 0.5 from "setengah" became 1.
+    """
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, float) and not raw.is_integer():
+        return None
+    try:
+        qty = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return qty if qty > 0 else None
 
 
 def cart_summary(cart: list[dict]) -> str:
@@ -47,15 +66,14 @@ async def add_to_cart(items: list[dict]) -> str:
 
     cart = await store.get_cart(wa)
     added, not_found, unavailable, ambiguous, below_min = [], [], [], [], []
+    bulk, unclear_qty = [], []
     for raw in items:
         name_q = str(raw.get("product") or raw.get("nama") or "").strip()
-        try:
-            # ponytail: hard cap 100/item guards against LLM/typo garbage qty
-            # creating absurd real orders; raise if the store ever needs more.
-            qty = min(max(1, int(raw.get("qty", 1))), 100)
-        except (TypeError, ValueError):
-            qty = 1
         if not name_q:
+            continue
+        qty = _parse_qty(raw.get("qty", 1))
+        if qty is None:
+            unclear_qty.append(name_q)
             continue
         p, options = await resolve_product(name_q)
         if p is None and options:
@@ -72,6 +90,11 @@ async def add_to_cart(items: list[dict]) -> str:
         harga = p.get("harga_jual")
         if harga is None:
             not_found.append(name_q)
+            continue
+        # Never quietly shrink a large order into a plausible one — the customer
+        # would see a total they never asked for. Hand bulk to a human instead.
+        if qty > settings.max_self_service_qty:
+            bulk.append(f"{product_label(p)} x{qty}")
             continue
         # Backend exposes products.minimum_order but does NOT enforce it on
         # POST /orders — if we don't check here, the customer gets an invoice
@@ -102,6 +125,17 @@ async def add_to_cart(items: list[dict]) -> str:
     await store.set_cart(wa, cart)
 
     if not added:
+        if bulk and not (not_found or unavailable or ambiguous or below_min or unclear_qty):
+            return (
+                "Jumlah sebanyak itu (" + "; ".join(bulk) + ") aku teruskan ke admin ya — "
+                "pesanan besar perlu dijadwalkan minimal H-2. Mau kusambungkan ke admin, "
+                "atau mau kuubah jumlahnya?"
+            )
+        if unclear_qty and not (not_found or unavailable or ambiguous or below_min):
+            return (
+                "Jumlahnya belum jelas untuk " + ", ".join(unclear_qty)
+                + ". Boleh sebutkan jumlahnya dalam angka utuh, mis. 2? 😊"
+            )
         if below_min and not not_found and not unavailable and not ambiguous:
             return (
                 "Untuk produk ini ada jumlah minimum pemesanan: "
@@ -133,5 +167,10 @@ async def add_to_cart(items: list[dict]) -> str:
         msg += f"\n\n(Sedang tidak tersedia: {', '.join(unavailable)})"
     if below_min:
         msg += f"\n\n(Belum masuk karena minimum pemesanan: {'; '.join(below_min)})"
+    if bulk:
+        msg += (f"\n\n(Belum masuk karena jumlahnya besar: {'; '.join(bulk)} — "
+                "pesanan sebanyak itu lewat admin ya)")
+    if unclear_qty:
+        msg += f"\n\n(Jumlahnya belum jelas: {', '.join(unclear_qty)})"
     msg += "\n\nSudah sesuai semua, atau mau nambah lagi? Ketik *sudah sesuai* untuk lanjut ya 😊"
     return msg

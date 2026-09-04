@@ -53,7 +53,16 @@ class Settings(BaseSettings):
     embedding_model: str = "qwen3-embedding:0.6b"
     llm_temperature: float = 0.7
     llm_top_p: float = 0.8
-    llm_num_ctx: int = 32768
+    # 8192, bukan 32768. Ollama memesan KV cache sebesar num_ctx saat model
+    # dimuat, dan itu dibayar terus-menerus karena OLLAMA_KEEP_ALIVE=-1 menahan
+    # model di RAM. Terukur pada toti-qwen-1.7b (Q4_K_M, bobot 1,1 GB):
+    #   4096 -> 1,6 GB   8192 -> 2,2 GB   16384 -> 3,1 GB   32768 -> 5,0 GB
+    # Prompt terpanjang di seluruh dataset = 2.232 token (system + 10 skema tool
+    # + history + FAQ), plus llm_num_predict di bawah. 8192 menyisakan >5k token
+    # kelebihan untuk pesan pelanggan yang panjang. JANGAN turunkan sampai mepet:
+    # kalau konteks meluap, Ollama memotong token TERTUA — yaitu blok system
+    # berisi definisi tool — dan tool calling rusak tanpa satu pun pesan error.
+    llm_num_ctx: int = 8192
     # Hard cap on generated tokens per reply, and the main lever on the latency
     # TAIL. CPU generation runs ~10 tok/s here, so 768 tokens = ~77s — measured:
     # a rambling turn hit 120s. 384 keeps the worst case near 40s and is still
@@ -109,6 +118,10 @@ class Settings(BaseSettings):
     # ── Checkout / identity ───────────────────────────────────────────────────
     # Decision: phone auto-fills from the sender's WhatsApp number, overridable.
     autofill_phone_from_wa: bool = True
+    # Above this many pieces of one product the chatbot stops taking the order
+    # itself and hands over to an admin: the FAQ asks for H-2 on bulk orders,
+    # and a mistyped quantity used to be silently clamped into a real invoice.
+    max_self_service_qty: int = 20
 
     # ── Verifikasi nomor WhatsApp (pendaftaran Buyer Site) ───────────────────
     # Pelanggan menekan tombol di Buyer Site -> WhatsApp terbuka dengan pesan

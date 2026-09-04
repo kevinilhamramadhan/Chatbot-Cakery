@@ -6,6 +6,7 @@ out-of-scope and the caller must refuse to answer from general LLM knowledge.
 """
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -53,23 +54,32 @@ class RetrievalResult:
 
 
 _client = None
+# retrieve() runs in a worker thread (see agent.run_agent), so three WhatsApp
+# messages arriving together really do enter this module in parallel. Building
+# the PersistentClient twice at once killed one of them with "Could not connect
+# to tenant default_tenant" and that customer got no reply at all. Reentrant
+# because get_collection() holds it across get_client().
+_client_lock = threading.RLock()
 
 
 def get_client():
     global _client
     if _client is None:
-        import chromadb  # lazy: heavy import
+        with _client_lock:
+            if _client is None:
+                import chromadb  # lazy: heavy import
 
-        _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
+                _client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
     return _client
 
 
 def get_collection():
-    return get_client().get_or_create_collection(
-        name=settings.chroma_collection,
-        embedding_function=get_embedding_function(),
-        metadata={"hnsw:space": "cosine"},
-    )
+    with _client_lock:
+        return get_client().get_or_create_collection(
+            name=settings.chroma_collection,
+            embedding_function=get_embedding_function(),
+            metadata={"hnsw:space": "cosine"},
+        )
 
 
 def retrieve(query: str, top_k: int | None = None) -> RetrievalResult:

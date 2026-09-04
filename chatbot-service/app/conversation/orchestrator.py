@@ -6,6 +6,7 @@ agent. Returns a Reply; the caller is responsible for actually sending it.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from app.backend_client import api as backend
@@ -30,13 +31,59 @@ def _wa_digits(wa_number: str) -> str:
     return "".join(c for c in wa_number if c.isdigit())
 
 
+# ── Shapes the deterministic steps have to recognise in free text ────────────
+_QUESTION_STARTERS = (
+    "kenapa", "knp", "kok", "gimana", "gmn", "bagaimana", "apakah", "apa itu",
+    "apa aja", "berapa", "brp", "bisakah", "emang", "memang", "siapa", "kapan",
+    "dimana", "di mana", "buat apa", "untuk apa", "aman ",
+)
+
+# Addresses a courier can actually find are built from these words; "rumah"
+# is not one of them.
+_ADDRESS_HINT_RE = re.compile(
+    r"\b(jl|jln|jalan|gg|gang|blok|perum|perumahan|komplek|kompleks|kav|rt|rw|"
+    r"no|nomor|desa|dusun|kel|kelurahan|kec|kecamatan|apartemen|apart|tower|"
+    r"lantai|ruko|batam|nagoya|sekupang|batam ?centre)\b",
+    re.IGNORECASE,
+)
+
+# QRIS is checked first: the prompt itself offers GoPay/OVO/Dana as QRIS.
+_QRIS_RE = re.compile(
+    r"\b(qris|qr|gopay|go-?pay|ovo|dana|shopee ?pay|linkaja|link ?aja|"
+    r"e-?wallet|dompet digital|scan)\b",
+    re.IGNORECASE,
+)
+_VA_RE = re.compile(
+    r"\b(va|virtual account|transfer|tf|bank|atm|m-?banking|mbanking|"
+    r"internet banking|rekening)\b",
+    re.IGNORECASE,
+)
+_FULL_RE = re.compile(r"\b(penuh|full|lunas|sekaligus)\b", re.IGNORECASE)
+_DP_RE = re.compile(r"\b(dp|50|separuh|setengah|sebagian|down ?payment)\b", re.IGNORECASE)
+
+
+def _looks_like_question(text: str) -> bool:
+    """True when the customer is asking something instead of answering us.
+
+    The identity steps store whatever is typed, so without this a customer who
+    types "kenapa harus kasih nama sih?" is saved to the backend WITH that
+    sentence as their name — observed live, and the row is still there.
+    """
+    t = text.strip().lower()
+    return bool(t) and (t.endswith("?") or t.startswith(_QUESTION_STARTERS))
+
+
 # ── Identity validation ───────────────────────────────────────────────────────
 def _valid_name(s: str) -> bool:
     return len(s.strip()) >= 2 and not s.strip().isdigit()
 
 
 def _valid_address(s: str) -> bool:
-    return len(s.strip()) >= 5
+    """Length alone let "rumah" through and a real order was created for it."""
+    t = s.strip()
+    if len(t) < 10:
+        return False
+    return bool(re.search(r"\d", t) or _ADDRESS_HINT_RE.search(t))
 
 
 def _valid_phone(s: str) -> bool:
@@ -92,15 +139,35 @@ async def _takeover_still_active(wa_number: str) -> bool:
         st = await backend.get_takeover_status(wa_number)
     except Exception:  # noqa: BLE001 - backend unreachable -> trust local flag
         return True
-    if st is None:  # customer unknown to backend -> no takeover there
-        return False
+    if st is None:
+        # 404 means the backend has never heard of this number, not that the
+        # takeover ended: it only learns about a customer at checkout, while the
+        # commonest escalation is a NEW customer asking for a custom cake.
+        # Reading 404 as "no takeover" un-muted the bot one message after it
+        # promised a human would take over (observed live).
+        return True
     return bool(st.get("human_takeover_active")) and not st.get("is_expired")
+
+
+async def _answer_then_reask(wa_number: str, text: str, reask: str) -> Reply:
+    """Answer an off-script question, then repeat the step we were standing on.
+
+    State is pinned back afterwards: the identity steps are deterministic, so a
+    tool that tried to move the state (add_to_cart) must not win here.
+    """
+    reply = await _run_agent_turn(wa_number, text)
+    await store.set_state(wa_number, State.COLLECTING_IDENTITY)
+    body = (reply.text or "").strip()
+    return Reply(text=f"{body}\n\n{reask}" if body else reask, media=reply.media)
 
 
 async def _run_agent_turn(wa_number: str, text: str) -> Reply:
     ctx = TurnContext(wa_number=wa_number)
     set_turn_context(ctx)
-    history = await store.recent_history(wa_number, limit=6)
+    # limit=7 lalu buang pesan ini sendiri: handle_message sudah mencatatnya ke
+    # log sebelum merutekan, jadi tanpa exclude_last_user model menerima pesan
+    # yang sama dua kali dan routing-nya ambruk (lihat recent_history).
+    history = await store.recent_history(wa_number, limit=7, exclude_last_user=text)
     answer = await run_agent(wa_number, text, history)
     # A tool (add_to_cart) may have requested a state transition.
     if ctx.next_state:
@@ -124,7 +191,8 @@ async def _handle_confirmation(wa_number: str, text: str) -> Reply:
         await store.set_customer(wa_number, {})  # reset identity collection
         await store.set_state(wa_number, State.COLLECTING_IDENTITY)
         return Reply(
-            text="Siap! Untuk memproses pesanan, boleh aku minta *nama* kamu dulu?"
+            text="Siap! Untuk memproses pesanan, boleh aku minta *nama* kamu dulu?\n"
+                 "(ketik *batal* kalau berubah pikiran)"
         )
 
     # Otherwise treat as a modification / other request -> agent (can add items).
@@ -143,6 +211,9 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
 
     # Step 1: name
     if "nama" not in cust:
+        if _looks_like_question(text):
+            return await _answer_then_reask(
+                wa_number, text, "Balik ke pesanan ya — boleh aku minta *nama* kamu?")
         if not _valid_name(text):
             return Reply(text="Namanya sepertinya kurang tepat. Boleh ketik nama lengkapmu?")
         cust["nama"] = text.strip()
@@ -151,8 +222,14 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
 
     # Step 2: address
     if "alamat" not in cust:
+        if _looks_like_question(text):
+            return await _answer_then_reask(
+                wa_number, text, "Lanjut ya — boleh minta *alamat* lengkapmu?")
         if not _valid_address(text):
-            return Reply(text="Alamatnya terlalu singkat. Boleh ketik alamat lengkapnya?")
+            return Reply(text=(
+                "Alamatnya belum cukup jelas buat kurir. Boleh ketik alamat lengkapnya "
+                "— nama jalan, nomor rumah, dan patokan kalau ada?"
+            ))
         cust["alamat"] = text.strip()
         await store.set_customer(wa_number, cust)
         return Reply(
@@ -194,10 +271,9 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
 
     # Step 5: payment type (full vs DP 50%)
     if "payment_type" not in cust:
-        low = text.lower()
-        if not settings.allow_down_payment or "penuh" in low or "full" in low or "lunas" in low:
+        if not settings.allow_down_payment or _FULL_RE.search(text):
             cust["payment_type"] = "full"
-        elif "dp" in low or "50" in low or "separuh" in low:
+        elif _DP_RE.search(text):
             cust["payment_type"] = "dp"
         else:
             return Reply(text=_payment_type_prompt())
@@ -206,10 +282,11 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
 
     # Step 6: payment channel (VA vs QRIS) -> finalize.
     if "channel" not in cust:
-        low = text.lower()
-        if "qris" in low or "qr" in low:
+        # QRIS first: our own prompt advertises GoPay/OVO/Dana as QRIS, and a
+        # customer who typed "gopay" used to get the same prompt back forever.
+        if _QRIS_RE.search(text):
             cust["channel"] = "qris"
-        elif "va" in low or "transfer" in low or "bank" in low:
+        elif _VA_RE.search(text):
             cust["channel"] = "bank_transfer"
         else:
             return Reply(text=_channel_prompt())

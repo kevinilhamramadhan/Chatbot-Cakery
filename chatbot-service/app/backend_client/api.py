@@ -10,7 +10,7 @@ from urllib.parse import quote
 import httpx
 
 from app.core.config import settings
-from app.core.security import valid_wa_number
+from app.core.security import canonical_wa_number, valid_wa_number
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +28,31 @@ def _headers() -> dict:
     return {"X-Service-Key": k} if k else {}
 
 
+def _wa_variants(wa_number: str) -> list[str]:
+    """Canonical `62…` first, then the raw JID as a compatibility fallback.
+
+    The chatbot used to send WhatsApp\'s own chat id (`628…@c.us`) straight into
+    the customers table, so Admin Site displayed a JID where a phone number
+    belongs and no plain-number lookup could match. Writes are canonical from
+    now on; reads still try the JID second so customers created before this
+    change keep their takeover flag and order history until the backend
+    migrates those rows.
+    """
+    variants: list[str] = []
+    canonical = canonical_wa_number(wa_number)
+    if canonical:
+        variants.append(canonical)
+    raw = (wa_number or "").strip()
+    if raw and raw not in variants:
+        variants.append(raw)
+    return variants
+
+
 async def upsert_customer(wa_number: str, nama: str, alamat: str, phone: str) -> dict:
+    number = _wa_variants(wa_number)[0]
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         r = await c.post(f"{_base()}/customers",
-                         json={"nomor_wa": wa_number, "nama": nama, "alamat": alamat},
+                         json={"nomor_wa": number, "nama": nama, "alamat": alamat},
                          headers=_headers())
         r.raise_for_status()
         d = r.json()
@@ -88,11 +109,14 @@ async def get_payment_status(order_id) -> dict | None:
 
 async def get_latest_order(wa_number: str) -> dict | None:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-        r = await c.get(f"{_base()}/orders/latest", params={"nomor_wa": wa_number}, headers=_headers())
-        if r.status_code == 404:
-            return None
-        r.raise_for_status()
-        return r.json()
+        for number in _wa_variants(wa_number):
+            r = await c.get(f"{_base()}/orders/latest", params={"nomor_wa": number},
+                            headers=_headers())
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            return r.json()
+    return None
 
 
 async def cancel_order(order_id) -> dict:
@@ -114,22 +138,37 @@ def _path_number(wa_number: str) -> str:
 
 
 async def get_takeover_status(wa_number: str) -> dict | None:
-    """C1 read: {nomor_wa, human_takeover_active, takeover_expires_at, is_expired}."""
+    """C1 read: {nomor_wa, human_takeover_active, takeover_expires_at, is_expired}.
+
+    None means "the backend has no row for this number" — the caller must treat
+    that as unknown, NOT as "takeover is off".
+    """
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-        r = await c.get(f"{_base()}/customers/{_path_number(wa_number)}/takeover",
-                        headers=_headers())
-        if r.status_code == 404:
-            return None
-        r.raise_for_status()
-        return r.json()
+        for number in _wa_variants(wa_number):
+            r = await c.get(f"{_base()}/customers/{_path_number(number)}/takeover",
+                            headers=_headers())
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            return r.json()
+    return None
 
 
 async def set_takeover(wa_number: str, active: bool, expires_at: str | None) -> dict:
+    payload = {"active": active, "expires_at": expires_at}
+    last: httpx.Response | None = None
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-        r = await c.post(f"{_base()}/customers/{_path_number(wa_number)}/takeover",
-                         json={"active": active, "expires_at": expires_at}, headers=_headers())
-        r.raise_for_status()
-        return r.json()
+        for number in _wa_variants(wa_number):
+            r = await c.post(f"{_base()}/customers/{_path_number(number)}/takeover",
+                             json=payload, headers=_headers())
+            if r.status_code == 404:
+                last = r
+                continue
+            r.raise_for_status()
+            return r.json()
+    if last is not None:
+        last.raise_for_status()
+    return {}
 
 
 async def get_report_summary(start_date: str, end_date: str) -> dict | None:

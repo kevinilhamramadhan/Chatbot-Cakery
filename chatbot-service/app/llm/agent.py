@@ -45,6 +45,12 @@ def _history_view(content: str) -> str:
     """
     if content.startswith("Berikut menu"):
         return "[Aku sudah menampilkan daftar menu via tool get_menu]"
+    if content.startswith("Permintaanmu sudah aku teruskan ke admin"):
+        # Left verbatim, this reply is the single strongest example in the
+        # window and the model copies it: measured, an ordinary "aku mau bento
+        # cookies 2" flipped from add_to_cart 3/3 to escalate_to_admin 3/3 once
+        # this sentence was in the history.
+        return "[Aku sudah meneruskan permintaan itu ke admin via tool escalate_to_admin]"
     if content.startswith("*") and "Harga:" in content:
         produk = content.split("*")[1] if content.count("*") >= 2 else "produk"
         return f"[Aku sudah menampilkan detail {produk} + fotonya via tool get_product_detail]"
@@ -108,12 +114,17 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         # money without a tool having produced it, throw it away and serve the
         # real catalogue instead.
         if answer and _PRICE_RE.search(answer):
-            logger.warning("Ungrounded price in a tool-less reply — substituting get_menu")
-            try:
-                return str(await TOOLS_BY_NAME["get_menu"].ainvoke({}))
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("get_menu substitution failed: %s", exc)
-                return "Maaf, daftar menu sedang tidak bisa diambil. Coba lagi sebentar ya 🙏"
+            # A price the model typed itself is invented, and the spec forbids
+            # inventing harga/stok — so the sentence is dropped. What replaces it
+            # is deliberately NOT chosen by classifying the question: guessing
+            # "this looks like a menu question" answered "udah aku bayar kok"
+            # with the entire price list. Say nothing we cannot ground, and let
+            # the customer's next message route normally through the model.
+            logger.warning("Ungrounded price in a tool-less reply — dropping it")
+            return (
+                "Biar aku nggak salah sebut angka, harga selalu kuambil dari sistem ya. "
+                "Boleh sebutkan kuenya, atau ketik *menu* untuk daftar lengkapnya 😊"
+            )
         # Hard scope guard: out-of-scope and the model didn't use any on-topic
         # tool -> refuse rather than answer from general knowledge.
         if not rag_context and not answer:
