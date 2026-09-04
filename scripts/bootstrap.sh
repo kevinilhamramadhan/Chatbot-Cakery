@@ -42,7 +42,11 @@ LLM_MODEL="$(env_get LLM_MODEL)";           LLM_MODEL="${LLM_MODEL:-toti-qwen-1.
 EMBEDDING_MODEL="$(env_get EMBEDDING_MODEL)"; EMBEDDING_MODEL="${EMBEDDING_MODEL:-qwen3-embedding:0.6b}"
 HF_REPO="${HF_REPO:-$(env_get HF_REPO)}";   HF_REPO="${HF_REPO:-LasagnaS/toti-qwen-gguf}"
 HF_TOKEN="${HF_TOKEN:-$(env_get HF_TOKEN)}"
-MODELFILE="${MODELFILE:-finetune/Modelfile.qwen3-1.7b-v4}"
+# Modelfile MENGIKUTI versi di LLM_MODEL, tidak dipatok: kalau di-hardcode,
+# menaikkan LLM_MODEL ke -v5 sementara Modelfile tetap -v4 akan membuat model
+# BERNAMA v5 dari bobot v4, tanpa satu pun pesan error. Override manual tetap
+# bisa: MODELFILE=path/lain ./scripts/bootstrap.sh
+MODELFILE="${MODELFILE:-finetune/Modelfile.qwen3-1.7b-${LLM_MODEL##*-}}"
 
 # `ollama list` menuliskan tag lengkap (toti-qwen-1.7b-v4:latest), sedangkan
 # LLM_MODEL di .env ditulis tanpa :latest — samakan dulu sebelum dibandingkan.
@@ -77,7 +81,11 @@ printf '\n'
 if model_present "$LLM_MODEL"; then
   ok "$LLM_MODEL sudah ada di model store — dilewati"
 else
-  [ -f "$MODELFILE" ] || die "Modelfile tidak ditemukan: $MODELFILE"
+  [ -f "$MODELFILE" ] || die "Modelfile tidak ditemukan: $MODELFILE
+     Diturunkan dari LLM_MODEL=$LLM_MODEL di .env. Perbaiki salah satu:
+       a) samakan nama, mis. LLM_MODEL=toti-qwen-1.7b-v5 butuh
+          finetune/Modelfile.qwen3-1.7b-v5, atau
+       b) tunjuk manual: MODELFILE=finetune/Modelfile.lain ./scripts/bootstrap.sh"
   # Nama file GGUF diambil dari baris FROM Modelfile supaya keduanya tidak
   # pernah lepas sinkron saat versi model naik.
   GGUF="$(awk 'tolower($1)=="from"{print $2; exit}' "$MODELFILE" | sed 's#.*/##')"
