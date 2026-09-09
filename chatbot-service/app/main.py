@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,6 +17,38 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+class _RedactAccessLog(logging.Filter):
+    """Keep the webhook secret and phone numbers out of uvicorn's access log.
+
+    The gateway cannot attach headers to its callbacks, so the shared secret
+    travels as a path segment — and uvicorn wrote it verbatim to the access log,
+    on disk, once per inbound message. That token is the only thing stopping
+    someone from forging a message from any customer's number. The internal
+    endpoints carry a phone number in the path for the same structural reason.
+    """
+
+    _PATTERNS = (
+        re.compile(r"(/webhook/whatsapp/)[^\s\"?]+"),
+        re.compile(r"(/webhook/internal/takeover/)[^\s\"/?]+"),
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001 - never break logging over formatting
+            return True
+        redacted = message
+        for pattern in self._PATTERNS:
+            redacted = pattern.sub(r"\1***", redacted)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactAccessLog())
 
 
 async def _warmup_models() -> None:
@@ -68,7 +101,19 @@ async def lifespan(app: FastAPI):
     await background.stop()
 
 
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+# Interactive docs are a development convenience. In production they describe
+# the internal endpoints (and the shape of the webhook path) to anyone who can
+# reach the service on the compose network.
+_is_production = settings.environment.lower() == "production"
+
+app = FastAPI(
+    title=settings.app_name,
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
+)
 app.include_router(webhook_router, prefix="/webhook", tags=["webhook"])
 
 

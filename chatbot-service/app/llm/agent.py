@@ -11,6 +11,7 @@ import re
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from app.conversation.context import get_turn_context_or_none
 from app.core.config import settings
 from app.llm.client import get_llm
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER
@@ -22,6 +23,17 @@ logger = logging.getLogger(__name__)
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 # "Rp50.000", "Rp 50000", "50.000 rupiah" — any money the model typed itself.
 _PRICE_RE = re.compile(r"(rp\s?\d|\d[\d.,]*\s*(rupiah|ribu\b))", re.IGNORECASE)
+# A report the model typed itself is as invented as a price it typed itself.
+# Observed live: an Owner asking "produk apa yang paling laku bulan ini?" got a
+# whole "📈 *Analitik Bisnis*" block with no tool call behind it.
+_REPORT_RE = re.compile(r"(📊|📈|laporan keuangan|analitik bisnis)", re.IGNORECASE)
+# And it has told customers "aku bisa panggil tool `get_menu` ya 😊".
+_TOOLNAME_RE = re.compile(
+    r"\b(get_menu|get_product_detail|add_to_cart|compare_products|get_order_status|"
+    r"check_payment_status|cancel_order|escalate_to_admin|financial_report|"
+    r"business_analytics|lihat_keranjang|kirim_ulang_pembayaran)\b",
+    re.IGNORECASE,
+)
 
 OUT_OF_SCOPE_REPLY = (
     f"Maaf, aku hanya bisa membantu seputar {settings.store_name} ya — menu, pemesanan, "
@@ -67,6 +79,10 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     logger.info(
         "RAG best_sim=%.3f in_scope=%s", retrieval.best_similarity, retrieval.in_scope
     )
+    _ctx = get_turn_context_or_none()
+    if _ctx is not None:
+        _ctx.rag_similarity = retrieval.best_similarity
+        _ctx.rag_in_scope = retrieval.in_scope
 
     # LATENCY, not cosmetics: Ollama reuses its KV cache only for the longest
     # COMMON PREFIX of the prompt, and the system block (with the 9 tool
@@ -125,6 +141,21 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
                 "Biar aku nggak salah sebut angka, harga selalu kuambil dari sistem ya. "
                 "Boleh sebutkan kuenya, atau ketik *menu* untuk daftar lengkapnya 😊"
             )
+        # Same rule, other shapes: a report with no tool behind it is invented,
+        # and the internal tool names are not something a customer should read.
+        if answer and _REPORT_RE.search(answer):
+            logger.warning("Ungrounded report in a tool-less reply — dropping it")
+            return (
+                "Angka laporan selalu kuambil dari sistem, jadi aku nggak bisa "
+                "menyebutkannya sendiri. Coba minta lagi ya — nanti kuambilkan "
+                "dari data yang sebenarnya 🙏"
+            )
+        if answer and _TOOLNAME_RE.search(answer):
+            logger.warning("Reply mentioned an internal tool name — dropping it")
+            return (
+                "Boleh diulang maksudnya kak? Aku bisa bantu soal menu, pemesanan, "
+                "pembayaran, dan status pesanan 😊"
+            )
         # Hard scope guard: out-of-scope and the model didn't use any on-topic
         # tool -> refuse rather than answer from general knowledge.
         if not rag_context and not answer:
@@ -139,6 +170,8 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
             logger.warning("LLM requested unknown tool: %s", tc["name"])
             continue
         try:
+            if _ctx is not None:
+                _ctx.tools_called.append(tc["name"])
             result = await tool.ainvoke(tc["args"])
             outputs.append(str(result))
         except Exception as exc:  # noqa: BLE001
