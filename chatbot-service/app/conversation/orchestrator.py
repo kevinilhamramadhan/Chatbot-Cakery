@@ -86,16 +86,49 @@ def _looks_like_question(text: str) -> bool:
 
 
 # ── Identity validation ───────────────────────────────────────────────────────
-def _valid_name(s: str) -> bool:
-    """A plausible person's name, not a whole sentence.
+# Words that answer a LATER step. Alone they are not names, and accepting them
+# produced "Halo dikirim! Sekarang, boleh minta *alamat*-mu?".
+_STEP_WORDS = {
+    "pickup", "delivery", "dikirim", "kirim", "diantar", "dianter", "antar",
+    "ambil", "qris", "va", "transfer", "gopay", "ovo", "dana", "dp", "penuh",
+    "lunas", "ya", "iya", "oke", "ok", "sudah", "udah", "belum", "halo", "hai",
+}
 
-    The word/length caps matter because whatever passes here is written to the
-    backend as the customer's name: a live run stored "eh tambahin 1 brownies
-    fudgy almond dong" as somebody's name before the caller learned to spot a
-    cart change first.
+
+def _valid_name(s: str) -> bool:
+    """A plausible person's name, not a whole sentence and not a flow keyword.
+
+    The caps matter because whatever passes here is written to the backend as
+    the customer's name: a live run stored "eh tambahin 1 brownies fudgy almond
+    dong" as somebody's name before the caller learned to spot a cart change.
     """
     t = s.strip()
-    return 2 <= len(t) <= 60 and not t.isdigit() and len(t.split()) <= 5
+    if not (2 <= len(t) <= 60) or t.isdigit() or len(t.split()) > 5:
+        return False
+    return t.casefold() not in _STEP_WORDS
+
+
+def _extract_name(text: str) -> str | None:
+    """Find the name inside a sentence, instead of rejecting the whole message.
+
+    Customers answer this step in sentences — "namaku Rina Kartika", "kan udah
+    aku sebut di atas, Kevin". Rejecting those verbatim left the conversation
+    repeating "Namanya sepertinya kurang tepat" with no way forward.
+    """
+    t = text.strip()
+    # "namaku Rina Kartika" is a valid-looking name on its own, so the prefix has
+    # to be stripped BEFORE the plain check — otherwise the customer is greeted
+    # "Halo namaku Rina Kartika!" and the backend stores it that way.
+    m = re.search(r"\bnama(?:ku|nya|nya adalah)?\s*:?\s+(.{2,60})$", t, re.IGNORECASE)
+    if m and _valid_name(m.group(1)):
+        return m.group(1).strip()
+    if _valid_name(t):
+        return t
+    if "," in t:
+        tail = t.rsplit(",", 1)[1].strip()
+        if _valid_name(tail):
+            return tail
+    return None
 
 
 def _valid_address(s: str) -> bool:
@@ -212,14 +245,15 @@ async def _takeover_still_active(wa_number: str) -> bool:
     return bool(st.get("human_takeover_active")) and not st.get("is_expired")
 
 
-async def _answer_then_reask(wa_number: str, text: str, reask: str) -> Reply:
+async def _answer_then_reask(wa_number: str, text: str, reask: str,
+                             back_to: State = State.COLLECTING_IDENTITY) -> Reply:
     """Answer an off-script question, then repeat the step we were standing on.
 
-    State is pinned back afterwards: the identity steps are deterministic, so a
+    State is pinned back afterwards: the deterministic steps own the flow, so a
     tool that tried to move the state (add_to_cart) must not win here.
     """
     reply = await _run_agent_turn(wa_number, text)
-    await store.set_state(wa_number, State.COLLECTING_IDENTITY)
+    await store.set_state(wa_number, back_to)
     body = (reply.text or "").strip()
     return Reply(text=f"{body}\n\n{reask}" if body else reask, media=reply.media)
 
@@ -265,8 +299,19 @@ async def _handle_confirmation(wa_number: str, text: str) -> Reply:
                  "(ketik *batal* kalau berubah pikiran)"
         )
 
-    # Anything else is answered deterministically instead of being handed to the
-    # model. Handing it over is what doubled orders: with the cart summary still
+    # A question here is still a question — "berapa totalnya sekarang?" or
+    # "kalian buka jam berapa?" must be answered, then the step repeated. Only
+    # the model can answer those, but the state is pinned back afterwards.
+    if _looks_like_question(text) or len(text.split()) > 3:
+        return await _answer_then_reask(
+            wa_number, text,
+            "Balik ke pesanan ya — ketik *sudah sesuai* kalau totalnya sudah pas, "
+            "atau *batal* untuk membatalkan.",
+            State.AWAITING_CART_CONFIRMATION,
+        )
+
+    # Short and unrecognised: answer deterministically rather than hand it to the
+    # model. Handing it over is what doubled orders — with the cart summary still
     # in the window, the model answered "iya udah bener" by calling add_to_cart
     # again (2 brownies -> 4, measured live).
     return Reply(text=(
@@ -302,9 +347,16 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
         if _looks_like_question(text):
             return await _answer_then_reask(
                 wa_number, text, "Balik ke pesanan ya — boleh aku minta *nama* kamu?")
-        if not _valid_name(text):
+        nama = _extract_name(text)
+        if nama is None:
+            # A sentence that holds no name is usually a request, not a bad
+            # answer. Repeating "Namanya sepertinya kurang tepat" at it left the
+            # conversation in a loop with no way forward.
+            if len(text.split()) > 3:
+                return await _answer_then_reask(
+                    wa_number, text, "Balik ke pesanan ya — boleh aku minta *nama* kamu?")
             return Reply(text="Namanya sepertinya kurang tepat. Boleh ketik nama lengkapmu?")
-        cust["nama"] = text.strip()
+        cust["nama"] = nama
         await store.set_customer(wa_number, cust)
         return Reply(text=f"Halo {cust['nama']}! Sekarang, boleh minta *alamat*-mu?")
 
@@ -314,6 +366,9 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
             return await _answer_then_reask(
                 wa_number, text, "Lanjut ya — boleh minta *alamat* lengkapmu?")
         if not _valid_address(text):
+            if len(text.split()) > 3:
+                return await _answer_then_reask(
+                    wa_number, text, "Lanjut ya — boleh minta *alamat* lengkapmu?")
             return Reply(text=(
                 "Alamatnya belum cukup jelas buat kurir. Boleh ketik alamat lengkapnya "
                 "— nama jalan, nomor rumah, dan patokan kalau ada?"

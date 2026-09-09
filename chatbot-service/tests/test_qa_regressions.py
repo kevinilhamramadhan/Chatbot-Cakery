@@ -691,3 +691,33 @@ async def test_two_messages_at_once_do_not_double_the_cart(patch_externals):
 
     # Tanpa kunci, urutannya jadi mulai/mulai/selesai/selesai.
     assert [o[0] for o in order] == ["mulai", "selesai", "mulai", "selesai"], order
+
+
+# ── Langkah deterministik tidak boleh jadi jalan buntu ───────────────────────
+async def test_name_is_extracted_from_a_sentence(patch_externals):
+    """Uji ulang di VM: "kan udah aku sebut di atas, Kevin" ditolak berulang kali
+    dengan "Namanya sepertinya kurang tepat", dan percakapan mentok di situ."""
+    from app.conversation.orchestrator import _extract_name
+
+    assert _extract_name("kan udah aku sebut di atas, Kevin") == "Kevin"
+    assert _extract_name("namaku Rina Kartika") == "Rina Kartika"
+    assert _extract_name("Budi Santoso") == "Budi Santoso"
+    assert _extract_name("aku cuma mau tanya tanya dulu sih kak sebenarnya") is None
+    # Jawaban langkah berikutnya bukan nama: dulu tersimpan sebagai "dikirim".
+    assert _extract_name("dikirim") is None
+    assert _extract_name("qris") is None
+
+
+async def test_question_at_confirmation_is_answered_then_reasked(patch_externals):
+    """"berapa totalnya sekarang?" di langkah konfirmasi sempat dijawab daftar
+    tombol yang sama berulang-ulang, bukan jawaban."""
+    _mock_agent(patch_externals["monkeypatch"], "Totalnya Rp100.000.")
+    await _cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
+
+    reply = await handle_message(WA, "berapa totalnya sekarang?")
+
+    assert "Totalnya Rp100.000." in reply.text
+    assert "sudah sesuai" in reply.text.lower()
+    session = await store.get_or_create_session(WA)
+    assert session.state == State.AWAITING_CART_CONFIRMATION
+    assert (await store.get_cart(WA))[0]["qty"] == 2      # tetap tidak berubah
