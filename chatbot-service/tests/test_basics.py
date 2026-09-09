@@ -62,6 +62,8 @@ def test_context_drops_chunks_below_threshold():
     assert r.in_scope is True
     assert r.relevant_documents == ["pengiriman"]
     assert r.context_text() == "pengiriman"
-    # Several genuinely-relevant chunks still all go through.
+    # Bahkan saat dua potongan sama-sama relevan, hanya yang terbaik yang dipakai:
+    # konteks FAQ menempel pada pertanyaan, bukan pada prefiks sistem yang
+    # di-cache, jadi setiap potongan tambahan diprefill ulang setiap giliran.
     r2 = RetrievalResult(["a", "b"], [{}, {}], [0.7, 0.55])
-    assert r2.relevant_documents == ["a", "b"]
+    assert r2.relevant_documents == ["a"]
