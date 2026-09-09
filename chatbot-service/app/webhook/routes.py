@@ -84,9 +84,12 @@ def _extract_message(payload: dict) -> tuple[str, str] | None:
 
 
 def _should_send_text_only_notice(sender: str) -> bool:
+    # `None` rather than a 0.0 default: time.monotonic() is the machine's uptime,
+    # so on a freshly booted host every first message looked like it had already
+    # been answered within the cooldown and nobody got the notice at all.
     now = time.monotonic()
-    last = _text_only_notified.get(sender, 0.0)
-    if now - last < _TEXT_ONLY_COOLDOWN_SECONDS:
+    last = _text_only_notified.get(sender)
+    if last is not None and now - last < _TEXT_ONLY_COOLDOWN_SECONDS:
         return False
     _text_only_notified[sender] = now
     return True
