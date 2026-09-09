@@ -43,11 +43,18 @@ class RetrievalResult:
         pembayaran 0.348 and halal 0.299). Feeding all three dilutes the context
         and the small model then answers from the wrong one — or falls back to
         repeating its previous reply. One good chunk beats three mixed ones.
+
+        Now capped at that one chunk outright, for latency as well as accuracy:
+        the FAQ context rides with the question rather than with the cached
+        system prefix, so every extra chunk is re-prefilled on CPU on every
+        turn. Growing the FAQ base from 5 to 15 documents tripled how often a
+        turn carries context at all (7/36 -> 25/48 across the same suite), and
+        the median turn went from 6,7s to 15,4s with it.
         """
         threshold = settings.rag_similarity_threshold
         return [
             doc for doc, sim in zip(self.documents, self.similarities) if sim >= threshold
-        ]
+        ][:1]
 
     def context_text(self) -> str:
         return "\n\n---\n\n".join(self.relevant_documents)
