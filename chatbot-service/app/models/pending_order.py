@@ -25,6 +25,12 @@ class PendingOrder(Base):
     # pending | paid | expired | cancelled | ready
     status: Mapped[str] = mapped_column(String(12), default="pending", index=True)
 
+    # What the customer was actually told at checkout. Kept so every later
+    # message can name the same invoice, and so the payment link can be sent
+    # again — on WhatsApp the checkout message is buried within minutes.
+    nomor_invoice: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pay_instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Snapshots so notifications work without re-querying.
     items_json: Mapped[str] = mapped_column(Text, default="[]")
     customer_json: Mapped[str] = mapped_column(Text, default="{}")

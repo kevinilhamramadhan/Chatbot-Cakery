@@ -9,6 +9,8 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
+import httpx
+
 from app.backend_client import api as backend
 from app.backend_client import products as products_api
 from app.conversation import store
@@ -105,6 +107,20 @@ async def finalize_order(wa_number: str) -> str:
             metode_pengiriman=delivery,
             created_via="chatbot",
         )
+    except httpx.HTTPStatusError as exc:
+        # 409 is a business answer, not a hiccup: the backend refuses a second
+        # order while an invoice is still unpaid. Telling the customer to "coba
+        # ulangi sebentar lagi" sent them into a retry that can never succeed.
+        if exc.response is not None and exc.response.status_code == 409:
+            logger.info("backend refused a second order for this customer")
+            await store.set_state(wa_number, State.IDLE)
+            return (
+                "Kamu masih punya tagihan yang belum dibayar. Selesaikan dulu "
+                "pembayaran itu, atau ketik *batal* untuk membatalkannya, baru "
+                "kita buat pesanan baru ya 🙏"
+            )
+        logger.exception("create order failed: %s", exc)
+        return "Maaf, pembuatan pesanan gagal. Coba ulangi sebentar lagi ya 🙏"
     except Exception as exc:  # noqa: BLE001
         logger.exception("create order failed: %s", exc)
         return "Maaf, pembuatan pesanan gagal. Coba ulangi sebentar lagi ya 🙏"
@@ -127,9 +143,32 @@ async def finalize_order(wa_number: str) -> str:
             logger.warning("could not cancel orphaned order %s", order_id)
         return "Maaf, pembuatan tagihan gagal. Coba ulangi sebentar lagi ya 🙏"
 
+    # An invoice nobody can pay is worse than an honest failure. The backend
+    # answers 201 even when Midtrans rejects the charge (a second charge on the
+    # same order comes back 406, with pg_transaction_id and qris_url both null),
+    # and the checkout message was still sent — with an empty payment line and a
+    # 30-minute deadline under it.
+    va = pay.get("va_number")
+    qris = pay.get("qris_url")
+    if not va and not qris:
+        logger.error("charge for order %s returned no payment instrument: %s",
+                     order_id, {k: pay.get(k) for k in ("status", "pg_transaction_id")})
+        try:
+            await backend.cancel_order(order_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("could not cancel unpayable order %s", order_id)
+        return (
+            "Maaf, tagihannya gagal diterbitkan jadi pesanannya belum kubuat. "
+            "Coba ulangi sebentar lagi ya 🙏"
+        )
+
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.payment_timeout_minutes)
+    paid_label = "Pembayaran penuh" if payment_type == "full" else "DP 50%"
+    pay_line = f"💳 Virtual Account: *{va}*" if va else f"Scan QRIS: {qris}"
 
     # 3) Track locally (order_ref = backend order_id) for timeout/poll/guard.
+    # The invoice number and the payment line are snapshotted here so every
+    # later message can name the same invoice and re-send the same instructions.
     await store.create_pending_order(
         wa_number=wa_number,
         order_ref=str(order_id),
@@ -137,6 +176,8 @@ async def finalize_order(wa_number: str) -> str:
         payment_type=payment_type,
         total_amount=total,
         amount_due=amount_due,
+        nomor_invoice=nomor_invoice,
+        pay_instruction=pay_line,
         items_json=json.dumps(cart, ensure_ascii=False),
         customer_json=json.dumps(cust, ensure_ascii=False),
         delivery_method=delivery,
@@ -145,10 +186,6 @@ async def finalize_order(wa_number: str) -> str:
     await store.set_cart(wa_number, [])
     await store.set_state(wa_number, State.AWAITING_PAYMENT)
 
-    paid_label = "Pembayaran penuh" if payment_type == "full" else "DP 50%"
-    va = pay.get("va_number")
-    qris = pay.get("qris_url")
-    pay_line = f"💳 Virtual Account: *{va}*" if va else (f"Scan QRIS: {qris}" if qris else "")
     return (
         f"Pesanan kamu sudah dibuat ✅\nNo. Invoice: *{nomor_invoice}*\n\n"
         f"{paid_label} yang harus dibayar: *{rupiah(amount_due)}*"

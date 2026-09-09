@@ -34,6 +34,17 @@ async def _notify(wa_number: str, text: str) -> None:
         logger.error("Failed to notify %s: %s", mask_phone(wa_number), exc)
 
 
+def _label(order) -> str:
+    """Name an order the way the customer was told about it.
+
+    order_ref is the backend's internal id; checkout hands out the invoice
+    number, so "Pesananmu *3* sudah siap" reads like a different order from the
+    INV-… they were given. Falls back to the id for rows created before the
+    invoice number was snapshotted.
+    """
+    return order.nomor_invoice or order.order_ref
+
+
 def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
@@ -58,11 +69,11 @@ async def _check_once() -> None:
             await store.update_pending_order(order.id, status="expired")
             await store.set_state(order.wa_number, State.IDLE)
             if cancelled:
-                text = (f"Pesanan *{order.order_ref}* dibatalkan otomatis karena "
+                text = (f"Pesanan *{_label(order)}* dibatalkan otomatis karena "
                         "melewati batas waktu pembayaran. Silakan pesan lagi "
                         "kapan saja ya 🙏")
             else:
-                text = (f"Batas waktu pembayaran pesanan *{order.order_ref}* sudah "
+                text = (f"Batas waktu pembayaran pesanan *{_label(order)}* sudah "
                         "lewat, jadi pesanannya tidak kami proses. Kalau kamu "
                         "terlanjur membayar, hubungi admin ya 🙏")
             await _notify(order.wa_number, text)
@@ -100,7 +111,7 @@ async def notify_ready(order_id: int) -> bool:
         return True
     await store.update_pending_order(order.id, status="ready", notified_ready=True)
 
-    msg = f"Kabar baik! Pesananmu *{order.order_ref}* sudah *siap* 🎉\n"
+    msg = f"Kabar baik! Pesananmu *{_label(order)}* sudah *siap* 🎉\n"
     if order.delivery_method == "delivery":
         msg += (
             "\nUntuk pengiriman, silakan pesan kurir (GoSend/GrabExpress) sendiri ke "
