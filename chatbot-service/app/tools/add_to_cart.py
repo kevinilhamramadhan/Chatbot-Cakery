@@ -8,7 +8,7 @@ from langchain_core.tools import tool
 
 from app.conversation import store
 from app.conversation.context import get_turn_context
-from app.conversation.states import State
+from app.conversation.states import State, mentions_quantity
 from app.core.config import settings
 from app.tools.formatting import options_line, product_label, resolve_product, rupiah
 
@@ -73,6 +73,13 @@ async def add_to_cart(items: list[dict]) -> str:
             continue
         qty = _parse_qty(raw.get("qty", 1))
         if qty is None:
+            unclear_qty.append(name_q)
+            continue
+        # Defaulting to 1 is fine; anything larger has to be a number the
+        # customer actually wrote. "pesan bolu beberapa aja" came back from the
+        # model as qty=2 — a quantity nobody asked for — and it was only kept
+        # out of the cart because that product happened not to exist.
+        if qty > 1 and ctx.user_text and not mentions_quantity(ctx.user_text):
             unclear_qty.append(name_q)
             continue
         p, options = await resolve_product(name_q)

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
 
     # ── Service ───────────────────────────────────────────────────────────────
     app_name: str = "Toti Cakery Chatbot Service"
+    # "production" hides the interactive API docs; anything else keeps them, so
+    # local development is unaffected.
+    environment: str = "development"
     log_level: str = "INFO"
     # Log message BODIES (customer text) as well as metadata. Off by default:
     # the conversation log in SQLite is the record of truth, and container logs
@@ -121,7 +124,6 @@ class Settings(BaseSettings):
 
     # ── Checkout / identity ───────────────────────────────────────────────────
     # Decision: phone auto-fills from the sender's WhatsApp number, overridable.
-    autofill_phone_from_wa: bool = True
     # Above this many pieces of one product the chatbot stops taking the order
     # itself and hands over to an admin: the FAQ asks for H-2 on bulk orders,
     # and a mistyped quantity used to be silently clamped into a real invoice.
@@ -142,7 +144,7 @@ class Settings(BaseSettings):
     # ── Admin / human takeover ────────────────────────────────────────────────
     # Decision: single fixed admin number for now.
     admin_wa_number: str = ""
-    takeover_expiry_days: int = 7
+    takeover_expiry_days: int = 1
 
     # ── Store info (used in "ready for pickup/delivery" messages) ─────────────
     store_name: str = "Toti Cakery"

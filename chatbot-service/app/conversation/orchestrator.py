@@ -7,12 +7,24 @@ agent. Returns a Reply; the caller is responsible for actually sending it.
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 from app.backend_client import api as backend
-from app.conversation import checkout, store, verification
-from app.conversation.context import OutboundMedia, TurnContext, set_turn_context
-from app.conversation.states import State, text_is_cancel, text_is_confirm
+from app.conversation import checkout, escalation, store, verification
+from app.conversation.context import (
+    OutboundMedia,
+    TurnContext,
+    get_turn_context_or_none,
+    set_turn_context,
+)
+from app.conversation.states import (
+    State,
+    is_bare_greeting,
+    looks_like_cart_change,
+    text_is_cancel,
+    text_is_confirm,
+)
 from app.core.config import settings
 from app.core.security import mask_phone
 from app.llm.agent import run_agent
@@ -75,7 +87,15 @@ def _looks_like_question(text: str) -> bool:
 
 # ── Identity validation ───────────────────────────────────────────────────────
 def _valid_name(s: str) -> bool:
-    return len(s.strip()) >= 2 and not s.strip().isdigit()
+    """A plausible person's name, not a whole sentence.
+
+    The word/length caps matter because whatever passes here is written to the
+    backend as the customer's name: a live run stored "eh tambahin 1 brownies
+    fudgy almond dong" as somebody's name before the caller learned to spot a
+    cart change first.
+    """
+    t = s.strip()
+    return 2 <= len(t) <= 60 and not t.isdigit() and len(t.split()) <= 5
 
 
 def _valid_address(s: str) -> bool:
@@ -84,11 +104,6 @@ def _valid_address(s: str) -> bool:
     if len(t) < 10:
         return False
     return bool(re.search(r"\d", t) or _ADDRESS_HINT_RE.search(t))
-
-
-def _valid_phone(s: str) -> bool:
-    d = _wa_digits(s)
-    return 8 <= len(d) <= 15
 
 
 async def handle_message(wa_number: str, text: str) -> Reply:
@@ -121,6 +136,35 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     await store.log_message(wa_number, "in", text)
     state = session.state
 
+    # 2) An escalation we OFFERED on the previous turn. Takeover is a big hammer
+    # — it silences the bot for days — so it only swings when the customer says
+    # yes. Anything else clears the offer and the message routes normally.
+    if session.pending_escalation:
+        await store.set_pending_escalation(wa_number, None)
+        if text_is_confirm(text) and not text_is_cancel(text):
+            reply = Reply(text=await escalation.start_takeover(
+                wa_number, session.pending_escalation))
+            await store.log_message(wa_number, "out", reply.text)
+            return reply
+
+    # 3) A bare greeting is answered from a template: it is the commonest
+    # opening message on WhatsApp, the model used to refuse it outright, and
+    # skipping inference saves the customer ~8 seconds on their first message.
+    if is_bare_greeting(text) and state == State.IDLE:
+        reply = Reply(text=(
+            f"Halo! 👋 Aku asisten {settings.store_name}. "
+            "Ketik *menu* untuk lihat daftar kue, atau langsung sebutkan kue "
+            "dan jumlahnya kalau mau pesan ya 😊"
+        ))
+        await store.log_message(wa_number, "out", reply.text)
+        return reply
+
+    # One context per inbound message, set here rather than inside the agent
+    # branch: the deterministic steps need it too (tools read `user_text`), and
+    # a leftover context from the previous message would make the turn log lie.
+    set_turn_context(TurnContext(wa_number=wa_number, user_text=text))
+
+    started = time.monotonic()
     if state == State.AWAITING_CART_CONFIRMATION:
         reply = await _handle_confirmation(wa_number, text)
     elif state == State.COLLECTING_IDENTITY:
@@ -128,10 +172,29 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     else:
         # IDLE / AWAITING_PAYMENT / ORDER_ACTIVE -> LLM agent (with tools).
         reply = await _run_agent_turn(wa_number, text)
+    _log_turn(wa_number, state, started)
 
     if reply.text:
         await store.log_message(wa_number, "out", reply.text)
     return reply
+
+
+def _log_turn(wa_number: str, state: str, started: float) -> None:
+    """One line per inbound message, so a conversation can be traced from logs.
+
+    Before this, tool calls were not logged at all: the only way to find out
+    which tool a turn used was to re-run the QA harness against the model, which
+    is far too expensive for everyday troubleshooting.
+    """
+    ctx = get_turn_context_or_none()
+    tools = ",".join(ctx.tools_called) if ctx and ctx.tools_called else "-"
+    sim = f"{ctx.rag_similarity:.3f}" if ctx and ctx.rag_similarity is not None else "-"
+    scope = ("in" if ctx.rag_in_scope else "out") if ctx and ctx.rag_in_scope is not None else "-"
+    logger.info(
+        "turn %s | state=%s | rag=%s/%s | tools=%s | %dms",
+        mask_phone(wa_number), state, sim, scope, tools,
+        int((time.monotonic() - started) * 1000),
+    )
 
 
 async def _takeover_still_active(wa_number: str) -> bool:
@@ -162,8 +225,10 @@ async def _answer_then_reask(wa_number: str, text: str, reask: str) -> Reply:
 
 
 async def _run_agent_turn(wa_number: str, text: str) -> Reply:
-    ctx = TurnContext(wa_number=wa_number)
-    set_turn_context(ctx)
+    ctx = get_turn_context_or_none()
+    if ctx is None or ctx.wa_number != wa_number:
+        ctx = TurnContext(wa_number=wa_number, user_text=text)
+        set_turn_context(ctx)
     # limit=7 lalu buang pesan ini sendiri: handle_message sudah mencatatnya ke
     # log sebelum merutekan, jadi tanpa exclude_last_user model menerima pesan
     # yang sama dua kali dan routing-nya ambruk (lihat recent_history).
@@ -182,6 +247,11 @@ async def _handle_confirmation(wa_number: str, text: str) -> Reply:
         await store.set_state(wa_number, State.IDLE)
         return Reply(text="Oke, pesanan dibatalkan ya. Ada lagi yang bisa kubantu? 😊")
 
+    # A modification is checked BEFORE agreement, because "iya, tambah 1 lagi"
+    # is both at once and the change has to win.
+    if looks_like_cart_change(text):
+        return await _run_agent_turn(wa_number, text)
+
     if text_is_confirm(text):
         cust = await store.get_customer(wa_number)
         if cust.get("channel"):
@@ -195,8 +265,16 @@ async def _handle_confirmation(wa_number: str, text: str) -> Reply:
                  "(ketik *batal* kalau berubah pikiran)"
         )
 
-    # Otherwise treat as a modification / other request -> agent (can add items).
-    return await _run_agent_turn(wa_number, text)
+    # Anything else is answered deterministically instead of being handed to the
+    # model. Handing it over is what doubled orders: with the cart summary still
+    # in the window, the model answered "iya udah bener" by calling add_to_cart
+    # again (2 brownies -> 4, measured live).
+    return Reply(text=(
+        "Maaf, aku belum menangkap maksudnya 🙏\n"
+        "• Ketik *sudah sesuai* kalau pesanannya sudah pas\n"
+        "• Ketik *batal* kalau berubah pikiran\n"
+        "• Atau sebutkan perubahannya, mis. \"tambah 1 brownies\""
+    ))
 
 
 # ── Identity + payment-type collection (PROMPT §10.6-8) ───────────────────────
@@ -206,6 +284,16 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
         await store.set_customer(wa_number, {})
         await store.set_state(wa_number, State.IDLE)
         return Reply(text="Oke, pesanan dibatalkan ya. 😊")
+
+    # A request to change the order is not an answer to the step we are on.
+    # Without this, "eh tambahin 1 brownies fudgy almond dong" typed at the name
+    # step was stored as the customer's NAME and sent to the backend that way.
+    if looks_like_cart_change(text):
+        reply = await _run_agent_turn(wa_number, text)
+        # The cart moved, so the total the customer agreed to is stale: send
+        # them back to confirmation instead of continuing to collect identity.
+        await store.set_state(wa_number, State.AWAITING_CART_CONFIRMATION)
+        return reply
 
     cust = await store.get_customer(wa_number)
 
@@ -245,31 +333,15 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
             cust["metode_pengiriman"] = "delivery"
         else:
             return Reply(text="Ketik *pickup* (ambil sendiri) atau *delivery* (dikirim) ya.")
-        await store.set_customer(wa_number, cust)
-        # Phone step: auto-fill suggestion from WA number (PROMPT decision).
-        if settings.autofill_phone_from_wa:
-            return Reply(
-                text=(
-                    f"Aku pakai nomor WA ini sebagai kontak: *{_wa_digits(wa_number)}*.\n"
-                    "Ketik *ya* untuk pakai nomor ini, atau ketik nomor HP lain."
-                )
-            )
-        return Reply(text="Terakhir, boleh minta *nomor HP* aktifmu?")
-
-    # Step 4: phone (auto-fill on confirm, else validate typed number)
-    if "nomor_hp" not in cust:
-        if settings.autofill_phone_from_wa and text_is_confirm(text):
-            cust["nomor_hp"] = _wa_digits(wa_number)
-        elif _valid_phone(text):
-            cust["nomor_hp"] = _wa_digits(text)
-        else:
-            return Reply(
-                text="Nomor HP-nya kurang valid (harus 8-15 digit angka). Coba ketik ulang ya."
-            )
+        # The contact number is the WhatsApp number the message arrived from —
+        # it is already proven to work, and the backend has nowhere to store a
+        # second one (customers has only nomor_wa), so asking for another one
+        # meant collecting a number and then throwing it away.
+        cust["nomor_hp"] = _wa_digits(wa_number)
         await store.set_customer(wa_number, cust)
         return Reply(text=_payment_type_prompt())
 
-    # Step 5: payment type (full vs DP 50%)
+    # Step 4: payment type (full vs DP 50%)
     if "payment_type" not in cust:
         if not settings.allow_down_payment or _FULL_RE.search(text):
             cust["payment_type"] = "full"
@@ -280,7 +352,7 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
         await store.set_customer(wa_number, cust)
         return Reply(text=_channel_prompt())
 
-    # Step 6: payment channel (VA vs QRIS) -> finalize.
+    # Step 5: payment channel (VA vs QRIS) -> finalize.
     if "channel" not in cust:
         # QRIS first: our own prompt advertises GoPay/OVO/Dana as QRIS, and a
         # customer who typed "gopay" used to get the same prompt back forever.

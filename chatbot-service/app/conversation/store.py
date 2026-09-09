@@ -80,6 +80,11 @@ async def set_state(wa_number: str, state: State | str) -> None:
     await update_session(wa_number, state=str(state))
 
 
+async def set_pending_escalation(wa_number: str, reason: str | None) -> None:
+    """Remember an escalation we offered, so the next "ya" can accept it."""
+    await update_session(wa_number, pending_escalation=reason)
+
+
 # ── Human takeover ────────────────────────────────────────────────────────────
 async def activate_takeover(wa_number: str) -> datetime:
     expires = datetime.now(timezone.utc) + timedelta(days=settings.takeover_expiry_days)

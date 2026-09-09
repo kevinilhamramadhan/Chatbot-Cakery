@@ -11,12 +11,14 @@ data (it decides whose orders get read/cancelled), so it is also format-checked
 before it reaches the conversation layer or a backend URL.
 """
 
+import asyncio
 import logging
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 
 from app.backend_client import api as backend
-from app.conversation import background
+from app.conversation import background, store
 from app.conversation.orchestrator import handle_message
 from app.conversation.store import deactivate_takeover
 from app.core.config import settings
@@ -34,8 +36,20 @@ def _require_internal_key(key: str | None) -> None:
         raise HTTPException(status_code=404, detail="Not Found")
 
 
-def _extract_message(payload: dict) -> tuple[str, str] | None:
-    """Pull (sender_chat_id, text) from a wwebjs-api message event, or None."""
+TEXT_ONLY_REPLY = (
+    "Maaf ya, aku cuma bisa membaca pesan teks 🙏 Voice note, stiker, foto, dan "
+    "lokasi belum bisa kuproses. Boleh diketik saja maksudnya? Ketik *menu* "
+    "kalau mau lihat daftar kue 😊"
+)
+
+# One notice per customer per hour. Somebody sending five stickers in a row
+# should not get five identical replies.
+_TEXT_ONLY_COOLDOWN_SECONDS = 3600
+_text_only_notified: dict[str, float] = {}
+
+
+def _direct_sender(payload: dict) -> str | None:
+    """The customer's chat id for a direct, inbound message event — or None."""
     if payload.get("dataType") != "message":
         return None
     data = payload.get("data") or {}
@@ -48,7 +62,19 @@ def _extract_message(payload: dict) -> tuple[str, str] | None:
     if not valid_wa_number(sender):
         logger.warning("Dropped message with malformed sender id: %r", sender[:64])
         return None
-    # Only plain text chats; media/stickers/etc. are skipped for now.
+    return sender
+
+
+def _extract_message(payload: dict) -> tuple[str, str] | None:
+    """Pull (sender_chat_id, text) from a wwebjs-api message event, or None."""
+    sender = _direct_sender(payload)
+    if sender is None:
+        return None
+    data = payload.get("data") or {}
+    msg = data.get("message") or data
+    # Text only. Anything else is answered with a template further down instead
+    # of being dropped in silence — a customer who sent a voice note used to get
+    # no reply at all, which from their side looks like being ignored.
     if msg.get("type") not in (None, "chat", "text"):
         return None
     body = (msg.get("body") or "").strip()
@@ -57,17 +83,49 @@ def _extract_message(payload: dict) -> tuple[str, str] | None:
     return sender, body
 
 
+def _should_send_text_only_notice(sender: str) -> bool:
+    now = time.monotonic()
+    last = _text_only_notified.get(sender, 0.0)
+    if now - last < _TEXT_ONLY_COOLDOWN_SECONDS:
+        return False
+    _text_only_notified[sender] = now
+    return True
+
+
+# One lock per customer. Every inbound message runs as its own background task,
+# so two messages sent a second apart were handled concurrently: both read the
+# same cart, both wrote it back, and "aku mau 2 brownies" sent twice ended up as
+# 4 in the cart with two contradictory summaries sent back.
+_locks: dict[str, asyncio.Lock] = {}
+
+
+def _lock_for(sender: str) -> asyncio.Lock:
+    lock = _locks.get(sender)
+    if lock is None:
+        lock = _locks[sender] = asyncio.Lock()
+    return lock
+
+
 async def _process(sender: str, text: str) -> None:
+    async with _lock_for(sender):
+        try:
+            reply = await handle_message(sender, text)
+            if reply.suppressed:
+                return
+            if reply.text:
+                await whatsapp_client.send_text(sender, reply.text)
+            for media in reply.media:
+                await whatsapp_client.send_image(sender, media.image_url, media.caption)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error processing message from %s: %s", mask_phone(sender), exc)
+
+
+async def _send_text_only_notice(sender: str) -> None:
     try:
-        reply = await handle_message(sender, text)
-        if reply.suppressed:
-            return
-        if reply.text:
-            await whatsapp_client.send_text(sender, reply.text)
-        for media in reply.media:
-            await whatsapp_client.send_image(sender, media.image_url, media.caption)
+        await whatsapp_client.send_text(sender, TEXT_ONLY_REPLY)
+        await store.log_message(sender, "out", TEXT_ONLY_REPLY, intent="text_only")
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Error processing message from %s: %s", mask_phone(sender), exc)
+        logger.error("Failed to send text-only notice to %s: %s", mask_phone(sender), exc)
 
 
 async def _handle_callback(request: Request, bg: BackgroundTasks) -> dict:
@@ -77,6 +135,14 @@ async def _handle_callback(request: Request, bg: BackgroundTasks) -> dict:
         return {"status": "ignored"}
     extracted = _extract_message(payload)
     if extracted is None:
+        # A real person sent something we cannot read (voice note, sticker,
+        # photo, location). Say so once instead of leaving them hanging.
+        sender = _direct_sender(payload)
+        if sender and _should_send_text_only_notice(sender):
+            logger.info("Non-text message from %s — replying with the text-only notice",
+                        mask_phone(sender))
+            bg.add_task(_send_text_only_notice, sender)
+            return {"status": "unsupported_media"}
         return {"status": "ignored"}
     sender, text = extracted
     if settings.log_message_bodies:

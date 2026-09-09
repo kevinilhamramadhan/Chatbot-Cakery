@@ -19,9 +19,17 @@ class OutboundMedia:
 @dataclass
 class TurnContext:
     wa_number: str
+    # The customer's raw message. Tools need it to check the model's arguments
+    # against what was actually typed — add_to_cart turned "pesan bolu beberapa"
+    # into qty=2, a number nobody wrote.
+    user_text: str = ""
     media: list[OutboundMedia] = field(default_factory=list)
     # A tool may request a hard state transition handled by the orchestrator.
     next_state: str | None = None
+    # Filled during the turn so a single log line can describe what happened.
+    tools_called: list[str] = field(default_factory=list)
+    rag_similarity: float | None = None
+    rag_in_scope: bool | None = None
 
 
 _current: ContextVar[TurnContext | None] = ContextVar("turn_context", default=None)
@@ -29,6 +37,12 @@ _current: ContextVar[TurnContext | None] = ContextVar("turn_context", default=No
 
 def set_turn_context(ctx: TurnContext) -> None:
     _current.set(ctx)
+
+
+def get_turn_context_or_none() -> TurnContext | None:
+    """Like get_turn_context(), but for callers that also run outside a turn
+    (background jobs, tests) and only want to record something if one exists."""
+    return _current.get()
 
 
 def get_turn_context() -> TurnContext:
