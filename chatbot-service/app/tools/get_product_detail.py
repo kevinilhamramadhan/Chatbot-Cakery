@@ -7,7 +7,13 @@ from langchain_core.tools import tool
 
 from app.conversation.context import OutboundMedia, get_turn_context
 from app.core.config import settings
-from app.tools.formatting import options_line, product_label, resolve_product, rupiah
+from app.tools.formatting import (
+    menu_fallback,
+    options_line,
+    product_label,
+    resolve_product,
+    rupiah,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +56,8 @@ async def get_product_detail(product: str) -> str:
                 f"Untuk '{product}' ada beberapa pilihan: {options_line(options)}. "
                 "Yang mana yang mau kamu lihat? 😊"
             )
-        return f"Maaf, aku tidak menemukan produk '{product}'. Coba cek menu dulu ya."
+        return await menu_fallback(
+            f"Maaf, aku belum menangkap kue mana yang kamu maksud dengan '{product}'.")
 
     name = product_label(p)
     desc = p.get("deskripsi") or "Belum ada deskripsi untuk produk ini."

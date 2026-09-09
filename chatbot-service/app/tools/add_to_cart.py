@@ -10,7 +10,13 @@ from app.conversation import store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State, mentions_quantity
 from app.core.config import settings
-from app.tools.formatting import options_line, product_label, resolve_product, rupiah
+from app.tools.formatting import (
+    menu_fallback,
+    options_line,
+    product_label,
+    resolve_product,
+    rupiah,
+)
 
 
 def _parse_qty(raw) -> int | None:
@@ -160,7 +166,7 @@ async def add_to_cart(items: list[dict]) -> str:
                 "Mau pesan menu yang lain?"
             )
         nf = ", ".join(not_found) if not_found else "item yang diminta"
-        return f"Maaf, aku tidak menemukan {nf} di menu. Coba cek menu dulu ya."
+        return await menu_fallback(f"Maaf, aku tidak menemukan {nf} di menu.")
 
     # Hand control to the confirmation step.
     ctx.next_state = State.AWAITING_CART_CONFIRMATION

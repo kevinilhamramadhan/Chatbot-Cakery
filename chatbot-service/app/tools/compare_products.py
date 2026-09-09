@@ -2,7 +2,7 @@
 
 from langchain_core.tools import tool
 
-from app.tools.formatting import options_line, product_label, resolve_product, rupiah
+from app.tools.formatting import menu_fallback, options_line, product_label, resolve_product, rupiah
 
 
 @tool
@@ -27,7 +27,7 @@ async def compare_products(products: list[str]) -> str:
 
     if len(resolved) < 2:
         nf = ", ".join(not_found)
-        return f"Maaf, aku tidak menemukan: {nf}. Coba cek menu dulu ya."
+        return await menu_fallback(f"Maaf, aku tidak menemukan: {nf}.")
 
     lines = ["Perbandingan produk:"]
     for p in resolved:

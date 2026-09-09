@@ -48,19 +48,23 @@ def _to_wa_id(number: str) -> str:
 
 
 async def admin_numbers() -> list[str]:
-    """Backend list UNION the env fallback, normalised and de-duplicated.
+    """Who gets told about an escalation. ADMIN_WA_NUMBER in .env is the source.
 
-    Union, not fallback: the old code used ADMIN_WA_NUMBER only when the backend
-    list came back empty, so two placeholder rows in the backend were enough to
-    make sure the real admin never heard about a single escalation.
+    The backend's /admin/takeover-handlers list is only consulted when the env
+    value is empty. It used to be the primary source, and the rows sitting in it
+    were two seeded placeholders in local format ("08111111111", "08222222222")
+    — so every escalation notice went to numbers WhatsApp cannot even address,
+    while the real admin number in .env was never used because the list was not
+    empty. Deployment owns this, and .env is the file the deployer edits.
     """
     numbers: list[str] = []
-    try:
-        numbers = list(await backend.get_takeover_admin_numbers())
-    except Exception as exc:  # noqa: BLE001 - env fallback still applies
-        logger.warning("could not read takeover handlers from backend: %s", exc)
     if settings.admin_wa_number:
         numbers.append(settings.admin_wa_number)
+    else:
+        try:
+            numbers = list(await backend.get_takeover_admin_numbers())
+        except Exception as exc:  # noqa: BLE001 - nothing left to fall back to
+            logger.warning("could not read takeover handlers from backend: %s", exc)
     out: list[str] = []
     for n in numbers:
         norm = _to_wa_id(n)

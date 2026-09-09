@@ -740,3 +740,32 @@ async def test_asking_for_a_human_connects_without_a_second_question(patch_exter
     assert "admin" in reply.text.lower()
     assert await store.is_takeover_active(WA) is True
     assert any("628999000111" == wa for wa, _ in patch_externals["sent"])
+
+
+async def test_admin_numbers_come_from_env(patch_externals):
+    """Nomor penerima takeover dibaca dari ADMIN_WA_NUMBER di .env. Daftar
+    /admin/takeover-handlers di backend berisi nomor seed berformat lokal
+    ("08111111111"), dan selama daftar itu jadi sumber utama, notifikasi
+    eskalasi tidak pernah sampai ke admin yang sebenarnya."""
+    from app.conversation import escalation
+
+    async def seeded():
+        return ["08111111111", "08222222222"]
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_takeover_admin_numbers", seeded)
+
+    assert await escalation.admin_numbers() == ["628999000111"]
+
+
+async def test_unknown_product_answers_with_the_menu(patch_externals):
+    """Rujukan yang tidak bisa disambungkan model ("yang coklat itu lho") adalah
+    justru saat yang tepat menampilkan katalog, bukan menyuruh pelanggan
+    "cek menu dulu"."""
+    from app.tools.get_product_detail import get_product_detail
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="yang kemarin itu lho"))
+    out = await get_product_detail.ainvoke({"product": "yang kemarin itu"})
+
+    assert "Brownies Coklat" in out and "Bolu Pandan" in out
+    assert "cek menu dulu" not in out.lower()
