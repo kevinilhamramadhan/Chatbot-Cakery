@@ -417,12 +417,19 @@ async def test_qris_channel_returns_qr_link():
 async def test_identity_validation_rejects_bad_input():
     await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
     await handle_message(WA, "sudah sesuai")
-    await handle_message(WA, "Budi")
+    r = await handle_message(WA, "12")           # digits alone are not a name
+    assert "nama" in r.text.lower()
+    r = await handle_message(WA, "Budi")
+    assert "alamat" in r.text.lower()
+    r = await handle_message(WA, "rumah")        # not an address a courier can find
+    assert "alamat" in r.text.lower()
     await handle_message(WA, "Jl. Test 1")
-    await handle_message(WA, "delivery")
-    r = await handle_message(WA, "12")
-    assert "valid" in r.text.lower()
-    assert "nomor_hp" not in json.loads((await store.get_or_create_session(WA)).customer_json)
+    r = await handle_message(WA, "delivery")
+    # The contact number is no longer asked for: it is the WhatsApp number the
+    # message arrived on, and the backend has nowhere to keep a second one.
+    assert "penuh" in r.text.lower() and "dp" in r.text.lower()
+    cust = json.loads((await store.get_or_create_session(WA)).customer_json)
+    assert cust["nomor_hp"] == WA.split("@")[0]
 
 
 async def test_cancel_during_confirmation():
@@ -473,14 +480,35 @@ async def test_cancel_calls_backend():
 
 
 # ── Human takeover suppresses auto-reply ──────────────────────────────────────
-async def test_escalate_sets_takeover_and_suppresses(patch_externals):
+async def test_escalate_offers_first_then_takes_over_on_yes(patch_externals):
+    """The tool only OFFERS; takeover needs an explicit yes from the customer.
+
+    Live QA: the model fired escalate_to_admin on ordinary messages ("pakai
+    nomor ini aja", "ada yang tanpa telur gak?"), and because takeover mutes the
+    bot for days, 19 of 65 turns in that sweep went unanswered.
+    """
     from app.tools.escalate import escalate_to_admin
     set_turn_context(TurnContext(wa_number=WA))
-    await escalate_to_admin.ainvoke({"reason": "kue custom ulang tahun"})
+    out = await escalate_to_admin.ainvoke({"reason": "kue custom ulang tahun"})
+    assert "admin" in out.lower()
+    assert await store.is_takeover_active(WA) is False   # nothing muted yet
+    assert patch_externals["sent"] == []                 # nobody notified yet
+
+    reply = await handle_message(WA, "ya")               # customer accepts
+    assert "admin" in (reply.text or "").lower()
     assert await store.is_takeover_active(WA) is True
     assert any("628999000111" == wa for wa, _ in patch_externals["sent"])
     reply = await handle_message(WA, "halo?")
     assert reply.suppressed is True
+
+
+async def test_escalation_offer_declined_leaves_bot_running(patch_externals):
+    from app.tools.escalate import escalate_to_admin
+    set_turn_context(TurnContext(wa_number=WA))
+    await escalate_to_admin.ainvoke({"reason": "kue custom ulang tahun"})
+    await handle_message(WA, "halo")                     # anything that isn't yes
+    assert await store.is_takeover_active(WA) is False
+    assert (await store.get_or_create_session(WA)).pending_escalation is None
 
 
 # ── Owner reports (real backend data; honest fallback while endpoint absent) ──

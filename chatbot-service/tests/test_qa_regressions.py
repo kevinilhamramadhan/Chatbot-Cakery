@@ -1,0 +1,693 @@
+"""Regressions from the live QA sweep (3 Sep 2026).
+
+Every test here started as a transcript from a real conversation run through
+`handle_message` with the real model, so each one names the customer-visible
+failure it locks down rather than the code path it happens to touch.
+"""
+
+import datetime as dt
+import json
+
+import httpx
+import pytest
+
+from app.conversation import background, store
+from app.conversation.context import TurnContext, set_turn_context
+from app.conversation.orchestrator import handle_message
+from app.conversation.states import State
+
+WA = "628123456789@c.us"
+
+FAKE_PRODUCTS = [
+    {"id": 5, "nama_produk": "Brownies Coklat", "deskripsi": "Brownies fudgy",
+     "kategori": "Brownies", "harga_jual": 50000, "is_active": True, "minimum_order": 1},
+    {"id": 8, "nama_produk": "Bolu Pandan", "deskripsi": "Bolu lembut",
+     "kategori": "Bolu", "harga_jual": 75000, "is_active": True, "minimum_order": 1},
+]
+
+
+@pytest.fixture(autouse=True)
+def patch_externals(monkeypatch):
+    from app.backend_client import api as backend
+    from app.backend_client import products as products_api
+    from app.whatsapp_client.client import whatsapp_client
+
+    async def fake_list(only_active=True, kategori=None):
+        return list(FAKE_PRODUCTS)
+
+    async def fake_get(pid):
+        return next((p for p in FAKE_PRODUCTS if p["id"] == pid), None)
+
+    monkeypatch.setattr(products_api, "list_products", fake_list)
+    monkeypatch.setattr(products_api, "get_product", fake_get)
+
+    sent = []
+
+    async def fake_send_text(wa, text):
+        sent.append((wa, text))
+        return {"ok": True}
+
+    monkeypatch.setattr(whatsapp_client, "send_text", fake_send_text)
+
+    # Kept before the stubs replace them: the two HTTP-level tests below need
+    # the real implementations back.
+    originals = {name: getattr(backend, name)
+                 for name in ("get_takeover_status", "get_latest_order", "cancel_order")}
+
+    cancelled = []
+
+    async def f_cancel(order_id):
+        cancelled.append(str(order_id))
+        return {"status": "success"}
+
+    async def f_takeover_status(wa):
+        return {"nomor_wa": wa, "human_takeover_active": True, "is_expired": False}
+
+    async def f_payment_status(order_id):
+        return {"invoice_status": "unpaid", "amount_paid": 0, "amount_due": 0}
+
+    monkeypatch.setattr(backend, "cancel_order", f_cancel)
+    monkeypatch.setattr(backend, "get_takeover_status", f_takeover_status)
+    monkeypatch.setattr(backend, "get_payment_status", f_payment_status)
+    return {"sent": sent, "cancelled": cancelled, "backend": backend,
+            "monkeypatch": monkeypatch, "originals": originals}
+
+
+def _mock_agent(monkeypatch, answer="(jawaban agent)"):
+    """Replace the LLM turn; these tests are about the deterministic paths."""
+    from app.conversation import orchestrator
+
+    async def fake_run_agent(wa, text, history):
+        return answer
+
+    monkeypatch.setattr(orchestrator, "run_agent", fake_run_agent)
+
+
+# ── P0-2 · takeover must survive a backend that doesn't know the number ───────
+async def test_takeover_holds_when_backend_has_no_customer_row(patch_externals):
+    """Live: bot promised "admin akan menghubungimu", then kept chatting.
+
+    The backend only learns about a customer at checkout, so the most common
+    escalation (a new customer asking for a custom cake) 404s — which used to
+    read as "admin ended the takeover" and un-muted the bot immediately.
+    """
+    async def not_found(wa):
+        return None
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_takeover_status", not_found)
+
+    await store.activate_takeover(WA)
+    reply = await handle_message(WA, "halo?")
+    assert reply.suppressed is True
+    assert await store.is_takeover_active(WA) is True
+
+
+async def test_takeover_released_when_backend_says_it_ended(patch_externals):
+    async def ended(wa):
+        return {"nomor_wa": wa, "human_takeover_active": False, "is_expired": False}
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_takeover_status", ended)
+    _mock_agent(patch_externals["monkeypatch"], "Halo! Ada yang bisa kubantu?")
+
+    await store.activate_takeover(WA)
+    reply = await handle_message(WA, "halo?")
+    assert reply.suppressed is False
+    assert await store.is_takeover_active(WA) is False
+
+
+# ── P0-3 · identity step must not swallow questions as data ──────────────────
+async def test_question_at_name_step_is_answered_not_stored(patch_externals):
+    """Live: customer #3 in the backend was named
+    "siapa aja yang bisa lihat data aku?" with address "rumah"."""
+    _mock_agent(patch_externals["monkeypatch"], "Datamu hanya dipakai untuk pesanan ini.")
+    await store.set_state(WA, State.COLLECTING_IDENTITY)
+
+    reply = await handle_message(WA, "siapa aja yang bisa lihat data aku?")
+
+    assert "nama" not in await store.get_customer(WA)
+    assert "Datamu hanya dipakai" in reply.text
+    assert "nama" in reply.text.lower()          # the question is asked again
+    assert (await store.get_or_create_session(WA)).state == State.COLLECTING_IDENTITY
+
+
+async def test_vague_address_is_rejected(patch_externals):
+    _mock_agent(patch_externals["monkeypatch"])
+    await store.set_customer(WA, {"nama": "Budi"})
+    await store.set_state(WA, State.COLLECTING_IDENTITY)
+
+    reply = await handle_message(WA, "rumah")
+    assert "alamat" not in await store.get_customer(WA)
+    assert "alamat" in reply.text.lower()
+
+    await handle_message(WA, "Jl. Anggrek No. 9 RT 03 Batam")
+    assert (await store.get_customer(WA))["alamat"].startswith("Jl. Anggrek")
+
+
+# ── P0-4 · backend must receive a canonical 62… number ───────────────────────
+def _mock_backend_http(monkeypatch, handler):
+    """Point app.backend_client.api's httpx clients at a fake transport."""
+    from app.backend_client import api as api_mod
+    real_client = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs.pop("timeout", None)
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(api_mod.httpx, "AsyncClient", factory)
+
+
+async def test_customer_is_created_with_canonical_number(patch_externals):
+    """Live: the customers table held `628990000001@c.us` next to `628999000111`,
+    so Admin Site showed a JID as the phone number and no plain-number lookup
+    could ever match."""
+    from app.backend_client import api as api_mod
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": 1, "nomor_wa": seen["body"]["nomor_wa"]})
+
+    _mock_backend_http(patch_externals["monkeypatch"], handler)
+    await api_mod.upsert_customer(WA, "Budi", "Jl. Anggrek 9", "628123456789")
+    assert seen["body"]["nomor_wa"] == "628123456789"
+
+
+async def test_takeover_lookup_falls_back_to_the_raw_jid(patch_externals):
+    """Rows written before the fix are keyed by JID; they must still resolve."""
+    from app.backend_client import api as api_mod
+    tried = []
+
+    def handler(request):
+        tried.append(request.url.path)
+        if "%40c.us" in str(request.url) or "@c.us" in str(request.url):
+            return httpx.Response(200, json={"human_takeover_active": True,
+                                             "is_expired": False})
+        return httpx.Response(404, json={"detail": "not found"})
+
+    patch_externals["monkeypatch"].setattr(
+        api_mod, "get_takeover_status", patch_externals["originals"]["get_takeover_status"])
+    _mock_backend_http(patch_externals["monkeypatch"], handler)
+    st = await api_mod.get_takeover_status(WA)
+    assert st is not None and st["human_takeover_active"] is True
+    assert len(tried) == 2                      # canonical first, then the JID
+
+
+# ── P1-1 · an unmatched category is not a system outage ──────────────────────
+async def test_unknown_category_shows_the_full_menu(patch_externals):
+    """Live: "ada kue ultah gak?" -> get_menu(kategori="cake") -> 0 rows ->
+    "Maaf, daftar menu sedang tidak bisa diambil" — a fake outage message."""
+    from app.tools.get_menu import get_menu
+    out = await get_menu.ainvoke({"kategori": "cake"})
+    assert "tidak bisa diambil" not in out
+    assert "Brownies Coklat" in out and "Bolu Pandan" in out
+
+
+async def test_every_menu_output_is_compressible_in_history(patch_externals):
+    """_history_view() keys off the "Berikut menu" prefix; a menu that slips
+    back into the LLM context verbatim is what taught the model to answer menu
+    questions from memory (insiden #1 of the v4 dataset notes)."""
+    from app.llm.agent import _history_view
+    from app.tools.get_menu import get_menu
+    for kwargs in ({}, {"kategori": "brownies"}, {"kategori": "cake"}):
+        out = await get_menu.ainvoke(kwargs)
+        assert "get_menu" in _history_view(out), f"not compressed for {kwargs}"
+
+
+async def test_known_category_filters(patch_externals):
+    from app.tools.get_menu import get_menu
+    out = await get_menu.ainvoke({"kategori": "brownies"})   # lowercase on purpose
+    assert "Brownies Coklat" in out
+    assert "Bolu Pandan" not in out
+
+
+async def test_empty_catalogue_still_reports_an_outage(patch_externals):
+    from app.backend_client import products as products_api
+    from app.tools.get_menu import get_menu
+
+    async def nothing(only_active=True, kategori=None):
+        return []
+    patch_externals["monkeypatch"].setattr(products_api, "list_products", nothing)
+    assert "tidak bisa diambil" in await get_menu.ainvoke({})
+
+
+# ── P1-3 · the ungrounded-price guard must not answer with a menu dump ───────
+async def test_ungrounded_price_outside_a_menu_question(patch_externals):
+    """Live: "udah aku bayar kok" was answered with the full price list."""
+    from langchain_core.messages import AIMessage
+    from app.llm import agent as agent_mod
+    from app.rag.store import RetrievalResult
+
+    class _Bound:
+        async def ainvoke(self, messages):
+            return AIMessage(content="Oke, pembayaran Rp235.000 sudah tercatat ya.")
+
+    class _LLM:
+        def bind_tools(self, tools):
+            return _Bound()
+
+    mp = patch_externals["monkeypatch"]
+    mp.setattr(agent_mod, "get_llm", lambda: _LLM())
+    mp.setattr(agent_mod, "retrieve", lambda q, top_k=None: RetrievalResult([], [], []))
+
+    set_turn_context(TurnContext(wa_number=WA))
+    out = await agent_mod.run_agent(WA, "udah aku bayar kok", history=[])
+    assert "Rp235.000" not in out            # the invented figure is gone
+    assert "Berikut menu" not in out         # and it is not a menu dump either
+
+
+# ── P1-4 · "sudah saya bayar" is answerable — as a TOOL, not a regex ─────────
+async def test_check_payment_status_reports_unpaid(patch_externals):
+    """The claim used to be intercepted by a regex in the orchestrator. Routing
+    is the model's job, so it is a tool now; this locks the tool's answers."""
+    from app.tools.payment_status import check_payment_status
+    await _seed_awaiting_payment()
+    set_turn_context(TurnContext(wa_number=WA))
+    out = await check_payment_status.ainvoke({})
+    assert "belum" in out.lower()
+
+
+async def test_check_payment_status_confirms_when_paid(patch_externals):
+    from app.tools.payment_status import check_payment_status
+
+    async def paid(order_id):
+        return {"invoice_status": "paid", "amount_paid": 100000, "amount_due": 0}
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_payment_status", paid)
+
+    await _seed_awaiting_payment()
+    ctx = TurnContext(wa_number=WA)
+    set_turn_context(ctx)
+    out = await check_payment_status.ainvoke({})
+    assert "terima" in out.lower()
+    assert ctx.next_state == State.ORDER_ACTIVE      # orchestrator applies it
+
+
+async def test_check_payment_status_without_an_order(patch_externals):
+    from app.tools.payment_status import check_payment_status
+    set_turn_context(TurnContext(wa_number=WA))
+    out = await check_payment_status.ainvoke({})
+    assert "tidak menemukan" in out.lower()
+
+
+async def test_no_static_intent_routing_in_the_orchestrator():
+    """Guard rail for a deliberate design rule: the orchestrator may parse the
+    answer to a closed question it just asked, and it must honour *batal*, but
+    it must never classify what a customer WANTS. That decision belongs to the
+    model so it can be improved by fine-tuning."""
+    import app.conversation.orchestrator as orch
+    src = __import__("pathlib").Path(orch.__file__).read_text()
+    for banned in ("_PAID_CLAIM_RE", "_MENU_ASK_RE"):
+        assert banned not in src, f"{banned} is static intent routing — use a tool"
+
+
+async def _seed_awaiting_payment(order_ref="9001"):
+    await store.create_pending_order(
+        wa_number=WA, order_ref=order_ref, payment_ref="MID", payment_type="full",
+        total_amount=100000, amount_due=100000, items_json="[]", customer_json="{}",
+        delivery_method="pickup",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    await store.set_state(WA, State.AWAITING_PAYMENT)
+
+
+# ── P2-1 · quantities are never silently rewritten ───────────────────────────
+async def test_bulk_quantity_is_confirmed_not_clamped(patch_externals):
+    """Live: "brownies panggang 1000 box" silently became 100 -> Rp8.500.000."""
+    from app.tools.add_to_cart import add_to_cart
+    set_turn_context(TurnContext(wa_number=WA))
+    out = await add_to_cart.ainvoke({"items": [{"product": "Brownies Coklat", "qty": 1000}]})
+    assert await store.get_cart(WA) == []
+    assert "1000" in out
+
+
+async def test_nonpositive_and_fractional_quantities_ask_again(patch_externals):
+    from app.tools.add_to_cart import add_to_cart
+    set_turn_context(TurnContext(wa_number=WA))
+    for bad in (-5, 0, 0.5):
+        out = await add_to_cart.ainvoke({"items": [{"product": "Brownies Coklat", "qty": bad}]})
+        assert await store.get_cart(WA) == [], f"qty={bad} should not enter the cart"
+        assert "jumlah" in out.lower()
+
+
+# ── P2-2 · e-wallet names are QRIS ───────────────────────────────────────────
+@pytest.mark.parametrize("typed,expected", [
+    ("gopay", "qris"), ("OVO", "qris"), ("dana aja", "qris"),
+    ("m-banking", "bank_transfer"), ("transfer bank", "bank_transfer"),
+])
+async def test_channel_understands_wallet_names(patch_externals, typed, expected):
+    from app.conversation import checkout
+    captured = {}
+
+    async def fake_finalize(wa):
+        captured["channel"] = (await store.get_customer(wa)).get("channel")
+        return "ok"
+    patch_externals["monkeypatch"].setattr(checkout, "finalize_order", fake_finalize)
+
+    await store.set_customer(WA, {"nama": "Budi", "alamat": "Jl. Anggrek No. 9 Batam",
+                                  "metode_pengiriman": "pickup", "nomor_hp": "628123456789",
+                                  "payment_type": "full"})
+    await store.set_state(WA, State.COLLECTING_IDENTITY)
+    await handle_message(WA, typed)
+    assert captured["channel"] == expected
+
+
+# ── P2-3 · an expired order is cancelled on the backend too ──────────────────
+async def test_expired_order_is_cancelled_upstream(patch_externals):
+    """Live gap: the local row went "expired" and the customer was told the
+    order was cancelled, while the backend kept it pending forever."""
+    await store.create_pending_order(
+        wa_number=WA, order_ref="9002", payment_ref="MID", payment_type="full",
+        total_amount=100000, amount_due=100000, items_json="[]", customer_json="{}",
+        delivery_method="pickup",
+        expires_at=dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1),
+    )
+    await background._check_once()
+    assert patch_externals["cancelled"] == ["9002"]
+    assert any("9002" in text for _, text in patch_externals["sent"])
+
+
+# ── P2-4 · three messages at once must not lose two of them ──────────────────
+async def test_concurrent_first_messages_share_one_session(patch_externals):
+    """Live: sqlite3.IntegrityError UNIQUE constraint failed: sessions.wa_number
+    — two of three messages were dropped without any reply."""
+    import asyncio
+    rows = await asyncio.gather(*(store.get_or_create_session(WA) for _ in range(5)))
+    assert all(r is not None for r in rows)
+    assert len({r.wa_number for r in rows}) == 1
+
+
+# ── Paritas prompt · pesan saat ini tidak boleh muncul di riwayatnya sendiri ─
+async def test_current_message_is_not_repeated_in_history(patch_externals):
+    """handle_message mencatat pesan masuk SEBELUM merutekan, jadi tanpa
+    penyaringan `recent_history` mengembalikannya sebagai entri terakhir dan
+    model menerima pesan yang sama dua kali — bentuk yang tidak pernah ada di
+    data latih. Terukur pada toti-qwen-1.7b-v5: duplikasi itu sendiri membalik
+    "mau order cupcake dong" dari add_to_cart 10/10 ke escalate_to_admin 10/10,
+    dan escalate salah = pelanggan dibungkam takeover selama 7 hari."""
+    from app.conversation import orchestrator
+
+    seen = {}
+
+    async def spy_run_agent(wa, text, history):
+        seen["history"] = list(history)
+        return "ok"
+
+    patch_externals["monkeypatch"].setattr(orchestrator, "run_agent", spy_run_agent)
+
+    # Bukan sapaan telanjang: "halo kak" kini dijawab template tanpa model.
+    await handle_message(WA, "kuenya apa aja kak")
+    assert seen["history"] == [], f"turn pertama harus tanpa riwayat: {seen['history']}"
+
+    await handle_message(WA, "menu dong")
+    hist = seen["history"]
+    assert all(not (m["role"] == "user" and m["content"] == "menu dong") for m in hist), \
+        f"pesan saat ini bocor ke riwayatnya sendiri: {hist}"
+    assert hist and hist[0]["content"] == "kuenya apa aja kak"  # giliran sebelumnya tetap ada
+
+
+# ── P0-1 (partial) · an escalate reply must not teach the model to escalate ──
+async def test_history_view_compresses_the_escalate_reply(patch_externals):
+    """Live: after one escalate reply landed in the history, "aku mau bento
+    cookies 2" routed to escalate_to_admin 3 times out of 3."""
+    from app.llm.agent import _history_view
+    reply = ("Permintaanmu sudah aku teruskan ke admin kami ya. Mohon tunggu, admin "
+             "akan menghubungimu langsung lewat chat ini. 🙏")
+    view = _history_view(reply)
+    assert "teruskan ke admin kami" not in view
+    assert "escalate" in view.lower()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Regresi dari sapuan QA "di luar alur" (9 Sep 2026)
+#  65 giliran, 41 lolos, 19 di antaranya tidak dijawab sama sekali.
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _cart_awaiting_confirmation(items):
+    from app.tools.add_to_cart import add_to_cart
+    set_turn_context(TurnContext(wa_number=WA))
+    await add_to_cart.ainvoke({"items": items})
+    await store.set_state(WA, State.AWAITING_CART_CONFIRMATION)
+
+
+# ── Konfirmasi keranjang ──────────────────────────────────────────────────────
+async def test_natural_confirmation_does_not_double_the_cart(patch_externals):
+    """Live: "iya udah bener" tidak dikenali sebagai konfirmasi, jatuh ke model,
+    dan model memanggil add_to_cart lagi — 2 brownies jadi 4, Rp190.000 jadi
+    Rp380.000. Satu-satunya temuan yang langsung berupa uang."""
+    _mock_agent(patch_externals["monkeypatch"], "(model tidak boleh dipanggil)")
+    await _cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
+
+    reply = await handle_message(WA, "iya udah bener")
+
+    cart = await store.get_cart(WA)
+    assert cart[0]["qty"] == 2, f"jumlah berubah tanpa diminta: {cart}"
+    assert (await store.get_or_create_session(WA)).state == State.COLLECTING_IDENTITY
+    assert "nama" in reply.text.lower()
+
+
+async def test_unrecognised_message_at_confirmation_asks_again(patch_externals):
+    """"AKU MAU PESAN SEKARANG JUGA CEPAT!!!!!" juga menggandakan keranjang.
+    Pesan yang tidak dikenali dijawab deterministik, tidak diserahkan ke model."""
+    _mock_agent(patch_externals["monkeypatch"], "(model tidak boleh dipanggil)")
+    await _cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
+
+    reply = await handle_message(WA, "AKU MAU PESAN SEKARANG JUGA CEPAT!!!!!")
+
+    assert (await store.get_cart(WA))[0]["qty"] == 2
+    assert "sudah sesuai" in reply.text.lower() and "batal" in reply.text.lower()
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_CART_CONFIRMATION
+
+
+async def test_cart_change_at_confirmation_still_reaches_the_model(patch_externals):
+    """Penjaga di atas tidak boleh mematikan kemampuan mengubah pesanan."""
+    seen = {}
+
+    from app.conversation import orchestrator
+
+    async def spy(wa, text, history):
+        seen["text"] = text
+        return "(keranjang diubah)"
+
+    patch_externals["monkeypatch"].setattr(orchestrator, "run_agent", spy)
+    await _cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+
+    await handle_message(WA, "eh tambah 1 bolu pandan juga dong")
+    assert seen["text"] == "eh tambah 1 bolu pandan juga dong"
+
+
+# ── Langkah identitas ─────────────────────────────────────────────────────────
+async def test_cart_change_at_name_step_is_not_stored_as_the_name(patch_externals):
+    """Live: "eh tambahin 1 brownies fudgy almond dong" tersimpan sebagai NAMA
+    pelanggan dan dikirim ke backend seperti itu."""
+    _mock_agent(patch_externals["monkeypatch"], "(keranjang diubah)")
+    await _cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    await handle_message(WA, "sudah sesuai")
+
+    await handle_message(WA, "eh tambahin 1 bolu pandan dong")
+
+    cust = json.loads((await store.get_or_create_session(WA)).customer_json)
+    assert "nama" not in cust, f"kalimat pesanan tersimpan sebagai nama: {cust}"
+    # Totalnya berubah, jadi pelanggan harus mengonfirmasi ulang.
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_CART_CONFIRMATION
+
+
+async def test_sentence_is_never_accepted_as_a_name(patch_externals):
+    _mock_agent(patch_externals["monkeypatch"])
+    await _cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    await handle_message(WA, "sudah sesuai")
+
+    reply = await handle_message(WA, "aku sebenarnya cuma mau tanya tanya dulu sih kak")
+
+    cust = json.loads((await store.get_or_create_session(WA)).customer_json)
+    assert "nama" not in cust
+    assert "nama" in reply.text.lower()
+
+
+# ── Menu ──────────────────────────────────────────────────────────────────────
+async def test_menu_filter_never_matches_a_product_name(patch_externals):
+    """Live: model mengarang kategori 'cake'/'kue', dan karena pencocokan ikut
+    menyasar nama produk, pelanggan hanya melihat 1 dari 3 kue tanpa tahu."""
+    from app.tools.get_menu import get_menu
+
+    # "coklat" hanya ada di NAMA produk, tidak di kategori mana pun.
+    out = await get_menu.ainvoke({"kategori": "coklat"})
+    assert "Brownies Coklat" in out and "Bolu Pandan" in out
+
+
+async def test_filtered_menu_says_it_was_filtered(patch_externals):
+    from app.tools.get_menu import get_menu
+
+    out = await get_menu.ainvoke({"kategori": "Brownies"})   # kategori asli produk #5
+    if "Bolu Pandan" not in out:                             # benar-benar tersaring
+        assert "menu" in out.lower() and "lengkap" in out.lower()
+
+
+# ── Penjaga keluaran model ────────────────────────────────────────────────────
+def test_ungrounded_report_and_tool_names_are_recognised():
+    """Live: Owner bertanya "produk apa yang paling laku" dan menerima blok
+    "📈 *Analitik Bisnis*" tanpa satu pun tool dipanggil. Bot juga pernah bilang
+    "aku bisa panggil tool `get_menu` ya 😊" ke pelanggan."""
+    from app.llm.agent import _REPORT_RE, _TOOLNAME_RE
+
+    assert _REPORT_RE.search("📈 *Analitik Bisnis* (2026-09-01 s/d 2026-09-09)")
+    assert _REPORT_RE.search("Laporan Keuangan bulan ini")
+    assert not _REPORT_RE.search("Pesanan kamu sudah dibuat ✅")
+    assert _TOOLNAME_RE.search("aku bisa panggil tool `get_menu` ya 😊")
+    assert not _TOOLNAME_RE.search("Ketik *menu* untuk daftar lengkapnya")
+
+
+# ── Pesan non-teks ────────────────────────────────────────────────────────────
+def test_voice_note_gets_a_template_reply_not_silence():
+    """Live: voice note, stiker, lokasi, dan foto berketerangan dibuang tanpa
+    balasan apa pun — dari sisi pelanggan, toko terlihat mengabaikannya."""
+    from app.webhook import routes
+
+    payload = {"dataType": "message",
+               "data": {"message": {"from": "628123999888@c.us", "type": "ptt", "body": ""}}}
+    assert routes._extract_message(payload) is None          # tetap bukan teks
+    assert routes._direct_sender(payload) == "628123999888@c.us"
+
+    routes._text_only_notified.clear()
+    assert routes._should_send_text_only_notice("628123999888@c.us") is True
+    # Lima stiker beruntun tidak berarti lima balasan yang sama.
+    assert routes._should_send_text_only_notice("628123999888@c.us") is False
+
+
+# ── Checkout ──────────────────────────────────────────────────────────────────
+async def test_checkout_refuses_an_invoice_with_no_way_to_pay(patch_externals):
+    """Backend menjawab 201 walau Midtrans menolak (406): pg_transaction_id dan
+    qris_url sama-sama null. Tagihan tanpa cara bayar tetap dikirim ke pelanggan,
+    lengkap dengan tenggat 30 menit di bawahnya."""
+    from app.conversation import checkout
+
+    cancelled = []
+
+    async def no_instrument(order_id, amount, channel="bank_transfer", payment_type="full"):
+        return {"payment_id": 9, "pg_transaction_id": None,
+                "va_number": None, "qris_url": None, "status": "Pending"}
+
+    async def f_cancel(order_id):
+        cancelled.append(order_id)
+        return {"status": "success"}
+
+    async def f_upsert(wa, nama, alamat, phone):
+        return {"id": 1, "customer_id": 1}
+
+    async def f_create_order(customer_id, items, metode_pengiriman, created_via="chatbot"):
+        return {"order_id": 30001, "nomor_invoice": "INV-TEST",
+                "total_harga_pesanan": 50000, "status": "pending"}
+
+    for name, fn in {"upsert_customer": f_upsert, "create_order": f_create_order,
+                     "create_payment": no_instrument, "cancel_order": f_cancel}.items():
+        patch_externals["monkeypatch"].setattr(patch_externals["backend"], name, fn)
+
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat",
+                               "harga": 50000.0, "qty": 1}])
+    await store.set_customer(WA, {"nama": "Budi", "alamat": "Jl. Test 1",
+                                  "metode_pengiriman": "pickup", "nomor_hp": "628123456789",
+                                  "payment_type": "full", "channel": "qris"})
+
+    out = await checkout.finalize_order(WA)
+
+    assert "gagal" in out.lower()
+    assert "batas waktu" not in out.lower()
+    assert cancelled, "pesanan yang tidak bisa dibayar harus ikut dibatalkan"
+    assert await store.get_active_pending(WA) is None
+
+
+async def test_backend_409_tells_the_customer_what_to_do(patch_externals):
+    """Backend menolak pesanan kedua selama tagihan lama belum lunas. Pesan
+    "coba ulangi sebentar lagi" mengirim pelanggan ke percobaan yang tidak akan
+    pernah berhasil."""
+    from app.conversation import checkout
+
+    async def conflict(customer_id, items, metode_pengiriman, created_via="chatbot"):
+        request = httpx.Request("POST", "http://backend/api/orders")
+        response = httpx.Response(409, request=request,
+                                 json={"detail": "Customer masih memiliki tagihan aktif."})
+        raise httpx.HTTPStatusError("409", request=request, response=response)
+
+    async def f_upsert(wa, nama, alamat, phone):
+        return {"id": 1, "customer_id": 1}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "upsert_customer", f_upsert)
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "create_order", conflict)
+
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat",
+                               "harga": 50000.0, "qty": 1}])
+    await store.set_customer(WA, {"nama": "Budi", "alamat": "Jl. Test 1",
+                                  "metode_pengiriman": "pickup", "nomor_hp": "628123456789",
+                                  "payment_type": "full", "channel": "qris"})
+
+    out = await checkout.finalize_order(WA)
+
+    assert "belum dibayar" in out.lower()
+    assert "coba ulangi sebentar lagi" not in out.lower()
+
+
+async def test_payment_instructions_can_be_sent_again(patch_externals):
+    """Live: "kode qr nya kirim ulang dong" dijawab status pesanan tanpa tautan
+    pembayaran, dan tidak ada tool lain yang bisa mengirimkannya."""
+    from app.tools.payment_info import kirim_ulang_pembayaran
+
+    await store.create_pending_order(
+        wa_number=WA, order_ref="30001", payment_ref="MID", payment_type="dp",
+        total_amount=100000, amount_due=50000, nomor_invoice="INV-TEST",
+        pay_instruction="Scan QRIS: https://api.qr/mid-test",
+        items_json="[]", customer_json="{}", delivery_method="pickup",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    set_turn_context(TurnContext(wa_number=WA))
+
+    out = await kirim_ulang_pembayaran.ainvoke({})
+
+    assert "https://api.qr/mid-test" in out
+    assert "INV-TEST" in out
+    assert "Rp50.000" in out
+
+
+# ── Jumlah yang tidak pernah ditulis pelanggan ───────────────────────────────
+async def test_quantity_the_customer_never_wrote_is_refused(patch_externals):
+    """Live: "pesan bolu beberapa aja" -> add_to_cart(qty=2). Angka itu tidak
+    pernah diketik siapa pun."""
+    from app.tools.add_to_cart import add_to_cart
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="pesan bolu pandan beberapa aja"))
+    out = await add_to_cart.ainvoke({"items": [{"product": "Bolu Pandan", "qty": 2}]})
+
+    assert "jumlah" in out.lower()
+    assert await store.get_cart(WA) == []
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="pesan bolu pandan 2 dong"))
+    await add_to_cart.ainvoke({"items": [{"product": "Bolu Pandan", "qty": 2}]})
+    assert (await store.get_cart(WA))[0]["qty"] == 2
+
+
+# ── Dua pesan beruntun dari nomor yang sama ──────────────────────────────────
+async def test_two_messages_at_once_do_not_double_the_cart(patch_externals):
+    """Live: jempol kepencet dua kali -> keranjang jadi 4 dan pelanggan menerima
+    dua ringkasan yang saling bertentangan (Rp380.000 dan Rp190.000)."""
+    import asyncio
+
+    from app.webhook import routes
+
+    _mock_agent(patch_externals["monkeypatch"])
+
+    order = []
+
+    async def slow_handle(wa, text):
+        from app.conversation.orchestrator import Reply
+        order.append(("mulai", text))
+        await asyncio.sleep(0.02)          # jendela balapan
+        order.append(("selesai", text))
+        return Reply(text="ok")
+
+    patch_externals["monkeypatch"].setattr(routes, "handle_message", slow_handle)
+    routes._locks.clear()
+
+    await asyncio.gather(routes._process(WA, "pesan A"), routes._process(WA, "pesan B"))
+
+    # Tanpa kunci, urutannya jadi mulai/mulai/selesai/selesai.
+    assert [o[0] for o in order] == ["mulai", "selesai", "mulai", "selesai"], order

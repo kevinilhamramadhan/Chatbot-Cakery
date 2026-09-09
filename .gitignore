@@ -92,3 +92,7 @@ desktop.ini
 # Catatan: `*.log` sengaja TIDAK diabaikan — log eval fine-tune (finetune/*.log)
 # memang bagian dari catatan kerja dan ikut di-commit.
 
+
+# Catatan QA lokal — permintaan ke backend, tidak untuk repo
+PERMINTAAN_BACKEND_QA.md
+qa-2026-09-09/

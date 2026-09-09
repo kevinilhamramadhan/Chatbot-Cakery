@@ -21,7 +21,6 @@ os.environ.update({
     "WWEBJS_API_KEY": "test-wwebjs-key",
     "ADMIN_WA_NUMBER": "628999000111",
     "OWNER_WA_NUMBERS": "628777000222",
-    "AUTOFILL_PHONE_FROM_WA": "true",
     "ALLOW_DOWN_PAYMENT": "true",
     "DOWN_PAYMENT_PERCENTAGE": "0.5",
     "PAYMENT_TIMEOUT_MINUTES": "30",
