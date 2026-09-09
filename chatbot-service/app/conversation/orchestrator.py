@@ -20,6 +20,7 @@ from app.conversation.context import (
 )
 from app.conversation.states import (
     State,
+    asks_for_admin,
     is_bare_greeting,
     looks_like_cart_change,
     text_is_cancel,
@@ -179,6 +180,15 @@ async def handle_message(wa_number: str, text: str) -> Reply:
                 wa_number, session.pending_escalation))
             await store.log_message(wa_number, "out", reply.text)
             return reply
+
+    # Asked outright for a human — no offer needed, and no model turn either.
+    # The offer only survives one message, and the model does not reliably
+    # re-issue it: live, "eh iya deh, sambungkan ke admin aja" was answered with
+    # the offer wording but no tool call, so the next "ya" had nothing to accept.
+    if asks_for_admin(text):
+        reply = Reply(text=await escalation.start_takeover(wa_number, text))
+        await store.log_message(wa_number, "out", reply.text)
+        return reply
 
     # 3) A bare greeting is answered from a template: it is the commonest
     # opening message on WhatsApp, the model used to refuse it outright, and

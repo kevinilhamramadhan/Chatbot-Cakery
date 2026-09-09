@@ -721,3 +721,22 @@ async def test_question_at_confirmation_is_answered_then_reasked(patch_externals
     session = await store.get_or_create_session(WA)
     assert session.state == State.AWAITING_CART_CONFIRMATION
     assert (await store.get_cart(WA))[0]["qty"] == 2      # tetap tidak berubah
+
+
+async def test_asking_for_a_human_connects_without_a_second_question(patch_externals):
+    """Uji ulang di VM: "eh iya deh, sambungkan ke admin aja" dijawab dengan
+    tawaran yang sama (tanpa memanggil tool), sehingga "ya" berikutnya tidak
+    punya apa pun untuk disetujui dan pelanggan ditanyai lagi."""
+    from app.conversation.states import asks_for_admin
+
+    assert asks_for_admin("eh iya deh, sambungkan ke admin aja") is True
+    assert asks_for_admin("mau ke admin aja deh") is True
+    # Menanyakan nomornya bukan permintaan disambungkan.
+    assert asks_for_admin("boleh minta nomor adminnya?") is False
+
+    _mock_agent(patch_externals["monkeypatch"])
+    reply = await handle_message(WA, "sambungkan ke admin aja")
+
+    assert "admin" in reply.text.lower()
+    assert await store.is_takeover_active(WA) is True
+    assert any("628999000111" == wa for wa, _ in patch_externals["sent"])

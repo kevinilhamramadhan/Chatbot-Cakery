@@ -103,6 +103,28 @@ _GREETING_WORDS = {
 }
 
 
+_ADMIN_REQUESTS = (
+    "sambungkan ke admin", "sambungkan admin", "sambungin ke admin",
+    "sambungin admin", "hubungkan ke admin", "hubungkan admin", "hubungi admin",
+    "bicara dengan admin", "bicara sama admin", "ngobrol sama admin",
+    "chat dengan admin", "chat sama admin", "panggilkan admin", "panggil admin",
+    "mau ke admin", "ke admin aja", "sama admin aja", "dengan admin aja",
+)
+
+
+def asks_for_admin(text: str) -> bool:
+    """The customer asking, in so many words, to be handed to a human.
+
+    Deterministic on purpose. The offer the bot makes is stored for one turn
+    only, and the model does not reliably re-issue it: live, "eh iya deh,
+    sambungkan ke admin aja" was answered with the offer text WITHOUT calling
+    the tool, so the customer's next "ya" had nothing to accept and they were
+    asked the same question again. An explicit request needs no confirmation.
+    """
+    t = " ".join(_tokens(text))
+    return any(p in t for p in _ADMIN_REQUESTS)
+
+
 def is_bare_greeting(text: str) -> bool:
     """A greeting and nothing else — the commonest opening message on WhatsApp.
 
