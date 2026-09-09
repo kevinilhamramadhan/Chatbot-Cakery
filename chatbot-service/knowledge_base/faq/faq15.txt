@@ -1,0 +1,2 @@
+Q: Bagaimana cara mengetahui pesanan saya sudah dibayar atau sudah siap?
+A: Setelah pembayaran masuk, sistem akan mendeteksinya otomatis dan bot mengirim konfirmasi ke chat ini tanpa perlu kamu kirimkan bukti transfer. Ketika pesanan selesai dibuat, kamu juga akan dikabari lewat chat ini beserta alamat toko untuk pengambilan. Kamu bisa menanyakan status kapan saja dengan mengetik "status pesanan".

@@ -1,0 +1,2 @@
+Q: Berapa minimal pemesanan, dan berapa lama sebelum hari H harus memesan?
+A: Sebagian besar kue bisa dipesan satuan, tetapi beberapa produk seperti cookies punya minimal pemesanan yang akan disebutkan bot saat kamu memesan. Untuk pesanan dalam jumlah besar, misalnya di atas sepuluh boks, mohon pesan minimal H-2 agar bisa kami jadwalkan produksinya.
