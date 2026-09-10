@@ -27,6 +27,17 @@ _PRICE_RE = re.compile(r"(rp\s?\d|\d[\d.,]*\s*(rupiah|ribu\b))", re.IGNORECASE)
 # Observed live: an Owner asking "produk apa yang paling laku bulan ini?" got a
 # whole "📈 *Analitik Bisnis*" block with no tool call behind it.
 _REPORT_RE = re.compile(r"(📊|📈|laporan keuangan|analitik bisnis)", re.IGNORECASE)
+# Jam buka toko adalah fakta, dan faktanya ada di dokumen FAQ — bukan di kepala
+# model. Terukur setelah dokumen jam buka hilang dari /faq: "kalian buka jam
+# berapa?" dijawab "Toko ini jam kerjanya 7.00 - 18.00 ya kak", angka yang tidak
+# pernah ditulis siapa pun. Hanya berlaku saat RAG TIDAK menemukan konteks:
+# kalau dokumennya ada, jawaban itu justru yang kita inginkan.
+_HOURS_RE = re.compile(
+    r"(buka|tutup|jam kerja|jam operasional|operasional)"
+    r"[^.\n]{0,40}\d{1,2}\s*[.:]\s*\d{2}"
+    r"|\d{1,2}\s*[.:]\s*\d{2}[^.\n]{0,20}(buka|tutup)",
+    re.IGNORECASE,
+)
 # And it has told customers "aku bisa panggil tool `get_menu` ya 😊".
 _TOOLNAME_RE = re.compile(
     r"\b(get_menu|get_product_detail|add_to_cart|compare_products|get_order_status|"
@@ -155,6 +166,15 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
             return (
                 "Boleh diulang maksudnya kak? Aku bisa bantu soal menu, pemesanan, "
                 "pembayaran, dan status pesanan 😊"
+            )
+        # Opening hours with no FAQ document behind them are invented, the same
+        # way a price with no tool behind it is invented.
+        if answer and not rag_context and _HOURS_RE.search(answer):
+            logger.warning("Ungrounded opening hours in a tool-less reply — dropping it")
+            return (
+                "Untuk jam operasional aku belum punya info yang pasti, dan aku "
+                "nggak mau salah sebut. Mau kusambungkan ke admin biar dapat "
+                "jawaban yang benar? 🙏"
             )
         # Hard scope guard: out-of-scope and the model didn't use any on-topic
         # tool -> refuse rather than answer from general knowledge.

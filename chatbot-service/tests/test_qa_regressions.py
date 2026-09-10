@@ -883,3 +883,18 @@ async def test_menu_is_not_filtered_by_a_category_the_customer_never_typed(patch
     set_turn_context(TurnContext(wa_number=WA, user_text="ada brownies apa aja?"))
     out = await get_menu.ainvoke({"kategori": "Brownies"})
     assert "Brownies Coklat" in out and "Bolu Pandan" not in out
+
+
+def test_ungrounded_opening_hours_are_recognised():
+    """Terukur setelah dokumen jam buka hilang dari /faq: "kalian buka jam
+    berapa?" dijawab "Toko ini jam kerjanya 7.00 - 18.00 ya kak" — angka yang
+    tidak pernah ditulis siapa pun. Jam buka itu fakta, dan faktanya ada di
+    dokumen FAQ, bukan di kepala model."""
+    from app.llm.agent import _HOURS_RE
+
+    assert _HOURS_RE.search("Toko ini jam kerjanya 7.00 - 18.00 ya kak")
+    assert _HOURS_RE.search("Kami buka pukul 09.00 sampai 19.00 WIB")
+    assert _HOURS_RE.search("tutup jam 21.00 ya")
+    # Angka lain tidak boleh ikut kena.
+    assert not _HOURS_RE.search("Totalnya Rp190.000 ya kak")
+    assert not _HOURS_RE.search("Batas waktu pembayaran 30 menit.")
