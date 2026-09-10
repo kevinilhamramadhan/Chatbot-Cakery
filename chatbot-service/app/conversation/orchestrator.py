@@ -20,13 +20,16 @@ from app.conversation.context import (
 )
 from app.conversation.states import (
     State,
+    bare_quantity,
     mentions_quantity,
     text_is_cancel,
     text_is_confirm,
+    text_is_gratitude,
 )
 from app.core.config import settings
 from app.core.security import mask_phone
 from app.llm.agent import run_agent
+from app.tools.add_to_cart import add_to_cart
 
 logger = logging.getLogger(__name__)
 
@@ -178,13 +181,19 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     # admin" be deleted — deciding that a message means "connect me" is the
     # model's job, and it already has a tool for it.
     if session.pending_escalation:
-        if text_is_confirm(text) and not text_is_cancel(text):
+        if await _escalation_offer_expired(wa_number):
+            # Tawaran yang menggantung terlalu lama berhenti berlaku. Kata "ya"
+            # sering muncul di kalimat biasa ("ya udah kirim aja"), dan menerima
+            # tawaran dari delapan giliran yang lalu berarti membungkam bot
+            # sehari penuh atas sesuatu yang sudah tidak dibicarakan lagi.
+            await store.set_pending_escalation(wa_number, None)
+        elif text_is_confirm(text) and not text_is_cancel(text) and not text_is_gratitude(text):
             await store.set_pending_escalation(wa_number, None)
             reply = Reply(text=await escalation.start_takeover(
                 wa_number, session.pending_escalation))
             await store.log_message(wa_number, "out", reply.text)
             return reply
-        if text_is_cancel(text):
+        elif text_is_cancel(text):
             await store.set_pending_escalation(wa_number, None)
 
     # One context per inbound message, set here rather than inside the agent
@@ -205,6 +214,52 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     if reply.text:
         await store.log_message(wa_number, "out", reply.text)
     return reply
+
+
+_MAKS_GILIRAN_TAWARAN = 3
+
+
+async def _escalation_offer_expired(wa_number: str) -> bool:
+    """Sudah berapa giliran sejak bot menawarkan sambungan ke admin?
+
+    Umurnya dihitung dari riwayat, bukan dari kolom baru: pesan tawarannya
+    berbunyi tetap, jadi cukup dicari kapan terakhir dikirim lalu dihitung
+    berapa pesan pelanggan yang datang sesudahnya (termasuk yang sekarang).
+    """
+    riwayat = await store.recent_history(wa_number, limit=12)
+    penanda = escalation.OFFER_TEXT[:40]
+    terakhir = -1
+    for i, pesan in enumerate(riwayat):
+        if pesan["role"] == "assistant" and pesan["content"].startswith(penanda):
+            terakhir = i
+    if terakhir < 0:
+        # Tawarannya sudah terlalu jauh ke belakang untuk terlihat di riwayat.
+        return True
+    sesudahnya = sum(1 for p in riwayat[terakhir + 1:] if p["role"] == "user")
+    return sesudahnya > _MAKS_GILIRAN_TAWARAN
+
+
+_TANYA_JUMLAH = "Mau pesan ini? Bilang aja jumlahnya"
+
+
+def _produk_yang_ditanyakan(history: list[dict]) -> str | None:
+    """Kue yang jumlahnya baru saja ditanyakan bot, dari pesan terakhirnya.
+
+    Bot menutup detail produk dengan pertanyaan tertutup ("Mau pesan ini?
+    Bilang aja jumlahnya ya"). Kalau pelanggan menjawab dengan jumlah saja,
+    yang dibaca adalah jawaban atas pertanyaan bot sendiri — bukan tebakan
+    maksud. Tanpa ini, "satu aja" sesudah detail Brownies Coklat dijawab
+    "boleh sebutkan nama kuenya?" berulang-ulang sampai pelanggan menyerah
+    (terukur di suite QA W2).
+    """
+    for pesan in reversed(history):
+        if pesan["role"] != "assistant":
+            continue
+        isi = pesan["content"]
+        if isi.startswith("*") and _TANYA_JUMLAH in isi and isi.count("*") >= 2:
+            return isi.split("*")[1].strip() or None
+        return None  # balasan terakhir bukan detail produk
+    return None
 
 
 def _log_turn(wa_number: str, state: str, started: float) -> None:
@@ -262,7 +317,15 @@ async def _run_agent_turn(wa_number: str, text: str) -> Reply:
     # log sebelum merutekan, jadi tanpa exclude_last_user model menerima pesan
     # yang sama dua kali dan routing-nya ambruk (lihat recent_history).
     history = await store.recent_history(wa_number, limit=7, exclude_last_user=text)
-    answer = await run_agent(wa_number, text, history)
+
+    jumlah = bare_quantity(text)
+    produk = _produk_yang_ditanyakan(history) if jumlah else None
+    if produk:
+        ctx.tools_called.append("add_to_cart")
+        answer = str(await add_to_cart.ainvoke(
+            {"items": [{"product": produk, "qty": jumlah}]}))
+    else:
+        answer = await run_agent(wa_number, text, history)
     # A tool (add_to_cart) may have requested a state transition.
     if ctx.next_state:
         await store.set_state(wa_number, ctx.next_state)

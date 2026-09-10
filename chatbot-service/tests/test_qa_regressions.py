@@ -748,7 +748,8 @@ async def test_escalation_offer_still_stands_a_few_turns_later(patch_externals):
 
     _mock_agent(patch_externals["monkeypatch"], "Menu kami ada tiga kue.")
     set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
-    await escalate_to_admin.ainvoke({"reason": "kue custom bertema frozen"})
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom bertema frozen"}))
 
     await handle_message(WA, "menu dong")                 # menyela, bukan menolak
     assert await store.is_takeover_active(WA) is False
@@ -865,3 +866,73 @@ async def test_faq_refresh_reingests_when_chroma_holds_another_source(patch_exte
     background._last_faq_fingerprint = None
     assert await background._refresh_faq_if_changed() is False
     assert embedded == []
+
+
+async def test_terima_kasih_bukan_persetujuan_tawaran_admin(patch_externals):
+    """Terukur hidup (suite W7): tawaran admin masih menggantung, pelanggan
+    menulis "makasih ya kak", dan itu lolos sebagai konfirmasi karena "ya" ada di
+    CONFIRM_WORDS — takeover menyala, lalu pesan berikutnya ("batal") dibungkam
+    tanpa balasan apa pun. Ucapan terima kasih adalah penutup, bukan izin."""
+    from app.tools.escalate import escalate_to_admin
+
+    _mock_agent(patch_externals["monkeypatch"], "Sama-sama kak 😊")
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom"}))
+
+    reply = await handle_message(WA, "makasih ya kak")
+
+    assert await store.is_takeover_active(WA) is False
+    assert patch_externals["sent"] == [], "tidak ada admin yang perlu diganggu"
+    assert (reply.text or "").strip(), "pelanggan tetap harus dijawab"
+
+
+async def test_tawaran_admin_kedaluwarsa_setelah_beberapa_giliran(patch_externals):
+    """Tawaran yang menggantung lama tidak boleh diterima kata "ya" yang
+    kebetulan lewat di kalimat lain."""
+    from app.tools.escalate import escalate_to_admin
+
+    _mock_agent(patch_externals["monkeypatch"], "Baik kak.")
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom"}))
+
+    for pesan in ("menu dong", "harganya berapa", "ada rasa lain", "jam buka kapan"):
+        await handle_message(WA, pesan)
+
+    reply = await handle_message(WA, "ya udah kirim aja")
+
+    assert await store.is_takeover_active(WA) is False
+    assert (await store.get_or_create_session(WA)).pending_escalation is None
+    assert (reply.text or "").strip()
+
+
+async def test_jumlah_polos_menjawab_pertanyaan_bot_sendiri(patch_externals):
+    """Terukur hidup (suite W2): setelah bot menampilkan detail Brownies Coklat
+    dan bertanya "mau pesan berapa?", jawaban "satu aja" dijawab "boleh sebutkan
+    nama kuenya?" berulang-ulang. Yang dibaca di sini jawaban atas pertanyaan
+    tertutup milik bot sendiri, bukan tebakan maksud."""
+    from app.tools.get_product_detail import get_product_detail
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="yang coklat itu"))
+    detail = await get_product_detail.ainvoke({"product": "brownies coklat"})
+    await store.log_message(WA, "out", detail)
+
+    _mock_agent(patch_externals["monkeypatch"], "(model tidak boleh dipakai di sini)")
+    reply = await handle_message(WA, "satu aja")
+
+    keranjang = await store.get_cart(WA)
+    assert len(keranjang) == 1
+    assert keranjang[0]["qty"] == 1
+    assert "Brownies Coklat" in (reply.text or "")
+
+
+async def test_jumlah_polos_tanpa_pertanyaan_bot_tetap_ke_model(patch_externals):
+    """Tanpa pertanyaan jumlah dari bot, "satu aja" tidak boleh menebak kue."""
+    _mock_agent(patch_externals["monkeypatch"], "Kue yang mana ya kak?")
+    await store.log_message(WA, "out", "Berikut menu Toti Cakery: …")
+
+    reply = await handle_message(WA, "satu aja")
+
+    assert await store.get_cart(WA) == []
+    assert "yang mana" in (reply.text or "").lower()

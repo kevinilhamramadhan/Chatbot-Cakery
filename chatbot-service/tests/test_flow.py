@@ -491,6 +491,9 @@ async def test_escalate_offers_first_then_takes_over_on_yes(patch_externals):
     from app.tools.escalate import escalate_to_admin
     set_turn_context(TurnContext(wa_number=WA))
     out = await escalate_to_admin.ainvoke({"reason": "kue custom ulang tahun"})
+    # Di produksi keluaran tool inilah balasan yang dikirim, jadi ikut tercatat.
+    # Umur tawaran dihitung dari catatan itu, bukan dari kolom terpisah.
+    await store.log_message(WA, "out", out)
     assert "admin" in out.lower()
     assert await store.is_takeover_active(WA) is False   # nothing muted yet
     assert patch_externals["sent"] == []                 # nobody notified yet
@@ -518,7 +521,8 @@ async def test_escalation_offer_survives_a_question_and_ends_on_cancel(patch_ext
 
     patch_externals["monkeypatch"].setattr(orchestrator, "run_agent", fake_run_agent)
     set_turn_context(TurnContext(wa_number=WA))
-    await escalate_to_admin.ainvoke({"reason": "kue custom ulang tahun"})
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom ulang tahun"}))
 
     await handle_message(WA, "batal")          # menolak -> tawaran hangus
     assert (await store.get_or_create_session(WA)).pending_escalation is None

@@ -56,6 +56,25 @@ def text_is_confirm(text: str) -> bool:
     return len(words) <= 4 and any(w in CONFIRM_WORDS for w in words)
 
 
+_TERIMA_KASIH = (
+    "makasih", "terima kasih", "terimakasih", "thanks", "thank you", "thx",
+    "tengkyu", "tengkiu", "tq", "suwun", "nuhun",
+)
+
+
+def text_is_gratitude(text: str) -> bool:
+    """Ucapan terima kasih — penutup percakapan, bukan persetujuan.
+
+    Dipakai hanya di tempat yang taruhannya besar (tawaran sambung ke admin).
+    Terukur hidup: "makasih ya kak" lolos sebagai konfirmasi karena "ya" ada di
+    CONFIRM_WORDS dan kalimatnya pendek, lalu bot ikut diam sehari penuh karena
+    takeover telanjur menyala. Di langkah konfirmasi keranjang aturan ini tidak
+    dipakai: "oke makasih" di sana memang berarti setuju.
+    """
+    t = " ".join(_tokens(text))
+    return any(w in t for w in _TERIMA_KASIH)
+
+
 def text_is_cancel(text: str) -> bool:
     t = " ".join(_tokens(text))
     return any(w in t for w in CANCEL_WORDS)
@@ -70,6 +89,40 @@ NUMBER_WORDS = {
 }
 
 
+
+
+# Kata yang boleh menempel pada jawaban jumlah tanpa mengubah artinya.
+_PELENGKAP_JUMLAH = {
+    "aja", "saja", "ya", "yaa", "dong", "dulu", "kak", "sih", "deh", "doang",
+    "pcs", "pc", "biji", "buah", "porsi", "box", "kotak", "loyang", "slice",
+    "potong", "mau", "pesan", "pesen", "ambil",
+}
+
+
+def bare_quantity(text: str) -> int | None:
+    """Jumlah kalau pesan ini isinya memang cuma jumlah ("satu aja", "2 box").
+
+    Bukan penebak maksud: ini dipakai hanya ketika bot BARU SAJA bertanya "mau
+    pesan berapa?" tentang satu kue tertentu, jadi yang dibaca di sini adalah
+    jawaban atas pertanyaan tertutup milik bot sendiri. Pesan yang membawa kata
+    lain di luar daftar pelengkap dikembalikan None supaya tetap ditangani model.
+    """
+    words = _tokens(text)
+    if not words or len(words) > 4:
+        return None
+    angka: int | None = None
+    for w in words:
+        if w.isdigit():
+            if angka is not None:
+                return None  # dua angka: bukan jawaban jumlah yang polos
+            angka = int(w)
+        elif w in NUMBER_WORDS:
+            if angka is not None:
+                return None
+            angka = NUMBER_WORDS[w]
+        elif w not in _PELENGKAP_JUMLAH:
+            return None
+    return angka if angka is not None and 1 <= angka <= 99 else None
 
 
 def mentions_quantity(text: str) -> bool:
