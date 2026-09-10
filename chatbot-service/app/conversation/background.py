@@ -11,6 +11,7 @@ triggered via the internal endpoint since the backend status webhook is out of s
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 
 from app.backend_client import api as backend
@@ -146,16 +147,57 @@ async def _purge_if_due(last_purge: float) -> float:
     return now
 
 
+_last_faq_fingerprint: str | None = None
+
+
+async def _refresh_faq_if_changed() -> bool:
+    """Re-embed the FAQ when an admin has edited it in Admin Site.
+
+    The bot's answers live in the backend's /faq table, and an admin who fixes a
+    wrong answer there should not have to wait for a redeploy — or worse, not
+    know that a redeploy is what it takes. Cheap in the common case: one GET and
+    a hash comparison; embedding only runs when the text actually changed.
+    """
+    global _last_faq_fingerprint
+    from app.rag import faq_source
+
+    docs, asal = await faq_source.current_docs()
+    if not docs:
+        return False
+    fingerprint = faq_source.fingerprint(docs)
+    if fingerprint == _last_faq_fingerprint:
+        return False
+    first_run = _last_faq_fingerprint is None
+    _last_faq_fingerprint = fingerprint
+    if first_run:
+        # Boot-time ingest already ran in its own container; don't re-embed just
+        # because this process has not seen the FAQ before.
+        logger.info("FAQ aktif: %d dokumen dari %s", len(docs), asal)
+        return False
+    chunks = await asyncio.to_thread(faq_source.ingest_documents, docs)
+    logger.info("FAQ berubah di %s — %d dokumen di-embed ulang (%d chunk)",
+                asal, len(docs), chunks)
+    return True
+
+
 async def _loop() -> None:
     interval = settings.payment_check_interval_seconds
     logger.info("Payment background worker started (interval=%ss)", interval)
     last_purge = 0.0
+    last_faq_check = 0.0
     while True:
         try:
             await _check_once()
         except Exception as exc:  # noqa: BLE001
             logger.exception("Background check error: %s", exc)
         last_purge = await _purge_if_due(last_purge)
+        if (settings.faq_refresh_seconds > 0
+                and time.monotonic() - last_faq_check >= settings.faq_refresh_seconds):
+            last_faq_check = time.monotonic()
+            try:
+                await _refresh_faq_if_changed()
+            except Exception as exc:  # noqa: BLE001 - never kill the worker
+                logger.exception("FAQ refresh failed: %s", exc)
         await asyncio.sleep(interval)
 
 

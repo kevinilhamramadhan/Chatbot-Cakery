@@ -141,9 +141,13 @@ class Settings(BaseSettings):
     # Rem brute-force di sisi kita; backend tetap punya batasnya sendiri.
     wa_verification_max_per_hour: int = 10
 
+    # Seberapa sering FAQ di backend dicek ulang, dalam detik. Admin mengedit
+    # jawaban bot lewat CRUD /faq di Admin Site, dan perubahannya harus berlaku
+    # tanpa redeploy. Hanya satu GET + bandingkan hash; embedding baru berjalan
+    # kalau teksnya benar-benar berubah. 0 mematikan pengecekan.
+    faq_refresh_seconds: int = 900
+
     # ── Admin / human takeover ────────────────────────────────────────────────
-    # Decision: single fixed admin number for now.
-    admin_wa_number: str = ""
     takeover_expiry_days: int = 1
 
     # ── Store info (used in "ready for pickup/delivery" messages) ─────────────

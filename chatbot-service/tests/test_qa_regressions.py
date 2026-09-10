@@ -66,6 +66,11 @@ def patch_externals(monkeypatch):
     async def f_payment_status(order_id):
         return {"invoice_status": "unpaid", "amount_paid": 0, "amount_due": 0}
 
+    async def f_admin():
+        # Penerima takeover datang dari user backend yang handles_takeover.
+        return ["628999000111"]
+
+    monkeypatch.setattr(backend, "get_takeover_admin_numbers", f_admin)
     monkeypatch.setattr(backend, "cancel_order", f_cancel)
     monkeypatch.setattr(backend, "get_takeover_status", f_takeover_status)
     monkeypatch.setattr(backend, "get_payment_status", f_payment_status)
@@ -742,20 +747,36 @@ async def test_asking_for_a_human_connects_without_a_second_question(patch_exter
     assert any("628999000111" == wa for wa, _ in patch_externals["sent"])
 
 
-async def test_admin_numbers_come_from_env(patch_externals):
-    """Nomor penerima takeover dibaca dari ADMIN_WA_NUMBER di .env. Daftar
-    /admin/takeover-handlers di backend berisi nomor seed berformat lokal
-    ("08111111111"), dan selama daftar itu jadi sumber utama, notifikasi
-    eskalasi tidak pernah sampai ke admin yang sebenarnya."""
+async def test_admin_numbers_come_from_the_database(patch_externals):
+    """Penerima takeover diambil dari user backend yang handles_takeover, bukan
+    dari .env — satu tempat pengelolaan, dan admin bisa menggantinya dari Admin
+    Site tanpa redeploy. Nomor berformat lokal dinormalkan, karena kolomnya
+    menerima apa pun yang diketik admin dan WhatsApp tidak bisa mengalamati 08…"""
     from app.conversation import escalation
 
-    async def seeded():
-        return ["08111111111", "08222222222"]
+    async def handlers():
+        return ["08111111111", "628123456789", "08111111111"]
 
     patch_externals["monkeypatch"].setattr(
-        patch_externals["backend"], "get_takeover_admin_numbers", seeded)
+        patch_externals["backend"], "get_takeover_admin_numbers", handlers)
 
-    assert await escalation.admin_numbers() == ["628999000111"]
+    assert await escalation.admin_numbers() == ["628111111111", "628123456789"]
+
+
+async def test_no_admin_in_database_means_no_promise(patch_externals):
+    """Kalau tidak ada satu pun admin terdaftar, bot TIDAK boleh menjanjikan
+    admin dan TIDAK boleh membungkam dirinya."""
+    from app.conversation import escalation
+
+    async def none():
+        return []
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_takeover_admin_numbers", none)
+
+    out = await escalation.start_takeover(WA, "kue custom")
+    assert "belum bisa" in out.lower()
+    assert await store.is_takeover_active(WA) is False
 
 
 async def test_unknown_product_answers_with_the_menu(patch_externals):
@@ -769,3 +790,63 @@ async def test_unknown_product_answers_with_the_menu(patch_externals):
 
     assert "Brownies Coklat" in out and "Bolu Pandan" in out
     assert "cek menu dulu" not in out.lower()
+
+
+# ── FAQ: sumbernya /faq di backend, berkas lokal cuma cadangan ───────────────
+async def test_faq_comes_from_backend_and_skips_inactive(patch_externals):
+    """Admin mengedit jawaban bot lewat CRUD /faq di Admin Site, jadi tabel itu
+    yang jadi sumber kebenaran. Item yang dinonaktifkan harus benar-benar hilang
+    dari mulut bot, bukan sekadar tersembunyi di daftar."""
+    import httpx as _httpx
+
+    from app.rag import faq_source
+
+    rows = [
+        {"id": 2, "pertanyaan": "Berapa lama daya tahan kue?",
+         "jawaban": "Tahan 3-4 hari di suhu ruang.", "is_active": True},
+        {"id": 1, "pertanyaan": "Cara pesan?", "jawaban": "Chat WhatsApp.",
+         "is_active": False},
+        {"id": 3, "pertanyaan": "", "jawaban": "kosong", "is_active": True},
+    ]
+
+    def handler(request):
+        assert request.url.path.endswith("/faq")
+        return _httpx.Response(200, json=rows)
+
+    real_client = _httpx.AsyncClient
+
+    def factory(*a, **kw):
+        kw.pop("timeout", None)
+        return real_client(transport=_httpx.MockTransport(handler), **kw)
+
+    patch_externals["monkeypatch"].setattr(faq_source.httpx, "AsyncClient", factory)
+
+    docs = await faq_source.fetch_backend_faq()
+    assert [d.source for d in docs] == ["backend-faq-2"]
+    assert "daya tahan" in docs[0].text and "Tahan 3-4 hari" in docs[0].text
+
+
+async def test_faq_falls_back_to_local_files_when_backend_has_none(patch_externals):
+    """Instalasi baru yang FAQ backendnya masih kosong tidak boleh menjawab
+    semua pertanyaan umum dengan "di luar cakupan"."""
+    from app.rag import faq_source
+
+    async def empty():
+        return []
+
+    patch_externals["monkeypatch"].setattr(faq_source, "fetch_backend_faq", empty)
+
+    docs, asal = await faq_source.current_docs()
+    assert asal == "berkas lokal"
+    assert len(docs) >= 5 and all(d.source.endswith(".txt") for d in docs)
+
+
+def test_faq_fingerprint_changes_when_an_answer_is_edited():
+    """Refresh berkala membandingkan sidik jari ini; kalau tidak berubah saat
+    teksnya berubah, editan admin tidak akan pernah ter-embed ulang."""
+    from app.rag.faq_source import FaqDoc, fingerprint
+
+    a = [FaqDoc("backend-faq-1", "Q: Buka jam berapa?\nA: 09.00-19.00")]
+    b = [FaqDoc("backend-faq-1", "Q: Buka jam berapa?\nA: 10.00-20.00")]
+    assert fingerprint(a) != fingerprint(b)
+    assert fingerprint(a) == fingerprint(list(a))

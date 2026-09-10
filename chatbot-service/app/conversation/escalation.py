@@ -12,7 +12,6 @@ import logging
 
 from app.backend_client import api as backend
 from app.conversation import store
-from app.core.config import settings
 from app.core.security import mask_phone, sanitize_relay, wa_digits
 
 logger = logging.getLogger(__name__)
@@ -48,23 +47,22 @@ def _to_wa_id(number: str) -> str:
 
 
 async def admin_numbers() -> list[str]:
-    """Who gets told about an escalation. ADMIN_WA_NUMBER in .env is the source.
+    """Who gets told about an escalation — the admins in the backend database.
 
-    The backend's /admin/takeover-handlers list is only consulted when the env
-    value is empty. It used to be the primary source, and the rows sitting in it
-    were two seeded placeholders in local format ("08111111111", "08222222222")
-    — so every escalation notice went to numbers WhatsApp cannot even address,
-    while the real admin number in .env was never used because the list was not
-    empty. Deployment owns this, and .env is the file the deployer edits.
+    GET /admin/takeover-handlers returns `nomor_wa_admin` for every active user
+    with `handles_takeover` set, so Admin Site is the one place this is managed
+    and no redeploy is needed to change who is on duty. There is deliberately no
+    .env fallback: two sources for "who is the admin" is how the wrong one ends
+    up being used.
+
+    Normalising 08… to 62… stays, because the column accepts whatever an admin
+    typed and WhatsApp cannot address a local-format number.
     """
     numbers: list[str] = []
-    if settings.admin_wa_number:
-        numbers.append(settings.admin_wa_number)
-    else:
-        try:
-            numbers = list(await backend.get_takeover_admin_numbers())
-        except Exception as exc:  # noqa: BLE001 - nothing left to fall back to
-            logger.warning("could not read takeover handlers from backend: %s", exc)
+    try:
+        numbers = list(await backend.get_takeover_admin_numbers())
+    except Exception as exc:  # noqa: BLE001 - caller refuses to promise an admin
+        logger.warning("could not read takeover handlers from backend: %s", exc)
     out: list[str] = []
     for n in numbers:
         norm = _to_wa_id(n)

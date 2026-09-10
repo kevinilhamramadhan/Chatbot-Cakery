@@ -24,6 +24,7 @@ server tidak perlu langkah manual apa pun sesudah `docker compose up -d`:
 """
 
 import argparse
+import asyncio
 import hashlib
 import json
 import logging
@@ -36,51 +37,18 @@ from pathlib import Path
 # Allow running as a plain script from chatbot-service/.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: E402
-
 from app.core.config import settings  # noqa: E402
+from app.rag import faq_source  # noqa: E402
 from app.rag.store import get_collection  # noqa: E402
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger("ingest")
-
-# chunk_size/overlap in config are token-oriented; approximate ~4 chars/token.
-CHARS_PER_TOKEN = 4
 
 BOOT_WAIT_INTERVAL_SECONDS = 10
 
 # Sidik jari ditaruh di dalam direktori Chroma, jadi ia ikut volume datanya:
 # volume dihapus -> sidik jari hilang -> ingest jalan lagi. Persis yang diinginkan.
 MARKER_NAME = ".ingest-fingerprint"
-
-
-def _file_id(path: Path, idx: int) -> str:
-    h = hashlib.sha1(str(path.name).encode()).hexdigest()[:10]
-    return f"{h}-{idx}"
-
-
-def _fingerprint(files: list[Path]) -> str:
-    """Identitas hasil ingest: isi FAQ + semua setelan yang mengubah vektornya.
-
-    Ganti model embedding atau ukuran chunk = vektor lama tidak sebanding lagi,
-    jadi keduanya ikut dihitung — bukan cuma isi berkasnya.
-    """
-    h = hashlib.sha256()
-    for path in files:
-        h.update(path.name.encode())
-        h.update(path.read_bytes())
-    h.update(
-        json.dumps(
-            {
-                "embedding_model": settings.embedding_model,
-                "chunk_size": settings.rag_chunk_size,
-                "chunk_overlap": settings.rag_chunk_overlap,
-                "collection": settings.chroma_collection,
-            },
-            sort_keys=True,
-        ).encode()
-    )
-    return h.hexdigest()
 
 
 def _marker_path() -> Path:
@@ -128,35 +96,6 @@ def _wait_for_embedding_model(timeout: float | None = None) -> bool:
     return False
 
 
-def ingest(files: list[Path]) -> int:
-    collection = get_collection()
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=settings.rag_chunk_size * CHARS_PER_TOKEN,
-        chunk_overlap=settings.rag_chunk_overlap * CHARS_PER_TOKEN,
-    )
-
-    total_chunks = 0
-    for path in files:
-        text = path.read_text(encoding="utf-8").strip()
-        if not text:
-            continue
-        # Drop any previous chunks for this file (idempotent re-ingest).
-        collection.delete(where={"source": path.name})
-
-        chunks = splitter.split_text(text)
-        ids = [_file_id(path, i) for i in range(len(chunks))]
-        metadatas = [{"source": path.name, "chunk": i} for i in range(len(chunks))]
-        collection.upsert(ids=ids, documents=chunks, metadatas=metadatas)
-        total_chunks += len(chunks)
-        logger.info("Ingested %s -> %d chunk(s)", path.name, len(chunks))
-
-    logger.info(
-        "Done. %d file(s), %d chunk(s) in collection '%s' at %s",
-        len(files), total_chunks, settings.chroma_collection, settings.chroma_persist_dir,
-    )
-    return total_chunks
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -166,20 +105,21 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    kb_dir = Path(settings.knowledge_base_dir)
-    files = sorted(kb_dir.glob("*.txt")) if kb_dir.exists() else []
-    if not files:
-        logger.error("Tidak ada berkas FAQ di %s", kb_dir)
+    docs, asal = asyncio.run(faq_source.current_docs())
+    if not docs:
+        logger.error("Tidak ada FAQ sama sekali — /faq backend kosong DAN tidak "
+                     "ada berkas di %s", settings.knowledge_base_dir)
         return 0 if args.boot else 1
+    logger.info("Sumber FAQ: %s (%d dokumen)", asal, len(docs))
 
     if not args.boot:
-        ingest(files)
+        faq_source.ingest_documents(docs)
         return 0
 
     marker = _marker_path()
-    fingerprint = _fingerprint(files)
+    fp = faq_source.fingerprint(docs)
     try:
-        if marker.read_text().strip() == fingerprint and get_collection().count() > 0:
+        if marker.read_text().strip() == fp and get_collection().count() > 0:
             # Dua syarat, bukan satu: sidik jari bisa saja tertinggal padahal
             # koleksinya kosong (mis. volume Chroma diganti isinya).
             logger.info("FAQ sudah mutakhir di Chroma — tidak ada yang perlu dikerjakan.")
@@ -191,9 +131,9 @@ def main() -> int:
         return 0  # pesan errornya sudah dicetak; jangan gagalkan stack
 
     try:
-        if ingest(files) > 0:
+        if faq_source.ingest_documents(docs) > 0:
             marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.write_text(fingerprint)
+            marker.write_text(fp)
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "Ingest FAQ GAGAL (%s). Chatbot tetap dijalankan tanpa basis "

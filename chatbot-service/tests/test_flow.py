@@ -80,7 +80,8 @@ def patch_externals(monkeypatch):
         return {"nomor_wa": wa, "human_takeover_active": active}
 
     async def f_admin():
-        return []
+        # Penerima takeover datang dari user backend yang handles_takeover.
+        return ["628999000111"]
 
     async def f_takeover_status(wa):
         # Mirror the local flag so suppress tests behave like a synced backend.

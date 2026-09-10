@@ -19,7 +19,6 @@ os.environ.update({
     "WEBHOOK_TOKEN": "test-webhook-token",
     "INTERNAL_API_KEY": "test-internal-key",
     "WWEBJS_API_KEY": "test-wwebjs-key",
-    "ADMIN_WA_NUMBER": "628999000111",
     "OWNER_WA_NUMBERS": "628777000222",
     "ALLOW_DOWN_PAYMENT": "true",
     "DOWN_PAYMENT_PERCENTAGE": "0.5",
