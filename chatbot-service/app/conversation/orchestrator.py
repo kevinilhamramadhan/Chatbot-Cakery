@@ -87,6 +87,17 @@ def _looks_like_question(text: str) -> bool:
     return bool(t) and (t.endswith("?") or t.startswith(_QUESTION_STARTERS))
 
 
+# Cara pelanggan sebenarnya menjawab langkah pengiriman. "anter" ada di daftar
+# karena ejaan sehari-harinya begitu: "dianter aja ke rumah" dulu tidak cocok
+# dengan "antar" dan pelanggan disuruh mengetik *delivery* padahal jawabannya
+# sudah jelas (terukur di suite QA W2).
+_KATA_PICKUP = ("pickup", "pick up", "ambil", "mampir", "jemput")
+_KATA_DELIVERY = (
+    "delivery", "kirim", "antar", "anter", "kurir", "ojol", "gosend", "gojek",
+    "grab", "grabexpress", "ke rumah", "ke alamat",
+)
+
+
 # ── Identity validation ───────────────────────────────────────────────────────
 # Words that answer a LATER step. Alone they are not names, and accepting them
 # produced "Halo dikirim! Sekarang, boleh minta *alamat*-mu?".
@@ -417,9 +428,9 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
     # Step 3: delivery method
     if "metode_pengiriman" not in cust:
         low = text.lower()
-        if "pickup" in low or "ambil" in low:
+        if any(k in low for k in _KATA_PICKUP):
             cust["metode_pengiriman"] = "pickup"
-        elif "delivery" in low or "kirim" in low or "antar" in low:
+        elif any(k in low for k in _KATA_DELIVERY):
             cust["metode_pengiriman"] = "delivery"
         else:
             return Reply(text="Ketik *pickup* (ambil sendiri) atau *delivery* (dikirim) ya.")

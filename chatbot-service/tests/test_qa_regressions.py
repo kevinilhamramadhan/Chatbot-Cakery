@@ -936,3 +936,23 @@ async def test_jumlah_polos_tanpa_pertanyaan_bot_tetap_ke_model(patch_externals)
 
     assert await store.get_cart(WA) == []
     assert "yang mana" in (reply.text or "").lower()
+
+
+async def test_metode_pengiriman_menerima_kalimat_sehari_hari(patch_externals):
+    """Terukur hidup (suite W2): "dianter aja ke rumah" tidak cocok dengan kata
+    "antar" — ejaan sehari-harinya "anter" — jadi pelanggan disuruh mengetik
+    *delivery* padahal jawabannya sudah jelas."""
+    from app.conversation.states import State
+
+    for pesan, harapan in (
+        ("dianter aja ke rumah", "delivery"),
+        ("dikirim aja ya", "delivery"),
+        ("pakai gosend", "delivery"),
+        ("mau ambil sendiri di toko", "pickup"),
+        ("aku mampir aja nanti", "pickup"),
+    ):
+        await store.set_customer(WA, {"nama": "Kevin", "alamat": "Jl. Mawar No. 3 Batam"})
+        await store.set_state(WA, State.COLLECTING_IDENTITY)
+        await handle_message(WA, pesan)
+        cust = await store.get_customer(WA)
+        assert cust.get("metode_pengiriman") == harapan, f"{pesan!r} -> {cust}"
