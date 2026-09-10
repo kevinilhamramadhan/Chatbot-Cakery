@@ -11,7 +11,7 @@ inside something the model can fire on its own.
 import logging
 
 from app.backend_client import api as backend
-from app.conversation import store
+from app.conversation import rbac, store
 from app.core.security import mask_phone, sanitize_relay, wa_digits
 
 logger = logging.getLogger(__name__)
@@ -33,47 +33,20 @@ _NO_ADMIN_TEXT = (
 )
 
 
-def _to_wa_id(number: str) -> str:
-    """Normalise an admin number to the international form wwebjs can address.
-
-    The backend hands back numbers exactly as an admin typed them, and the live
-    list was "08111111111"/"08222222222" — local format that WhatsApp cannot
-    resolve, so every takeover notice was quietly dropped.
-    """
-    digits = wa_digits(number)
-    if digits.startswith("0"):
-        digits = "62" + digits[1:]
-    return digits
-
-
 async def admin_numbers() -> list[str]:
-    """Who gets told about an escalation — read from the backend database.
+    """Siapa yang diberi tahu saat ada eskalasi — dari direktori peran.
 
-    GET /admin/takeover-handlers returns `nomor_wa_admin` for every active user
-    with `handles_takeover` set, so Admin Site is the one place this is managed
-    and no redeploy is needed to change who is on duty. There is deliberately no
-    .env fallback: two sources for "who is the admin" is how the wrong one ends
-    up being used.
+    Isinya user aktif ber-`handles_takeover` di basis data backend, jadi Admin
+    Site adalah satu-satunya tempat mengaturnya dan tidak perlu deploy ulang
+    untuk mengganti siapa yang bertugas. Sengaja tidak ada cadangan di .env: dua
+    sumber untuk "siapa adminnya" adalah cara paling rapi untuk memakai yang
+    salah.
 
-    The list is filtered by that flag, NOT by role: an Owner on duty receives
-    escalations exactly like an Admin, and one of the two people on duty in
-    production is an Owner. Do not narrow this to role Admin — that customer
-    would simply stop being answered, with no error anywhere.
-
-    Normalising 08… to 62… stays, because the column accepts whatever an admin
-    typed and WhatsApp cannot address a local-format number.
+    Penyaringnya flag, BUKAN peran — Owner yang bertugas menerima eskalasi sama
+    seperti Admin, dan di produksi satu dari dua penerimanya memang Owner.
+    Lihat app/conversation/rbac.py.
     """
-    numbers: list[str] = []
-    try:
-        numbers = list(await backend.get_takeover_admin_numbers())
-    except Exception as exc:  # noqa: BLE001 - caller refuses to promise an admin
-        logger.warning("could not read takeover handlers from backend: %s", exc)
-    out: list[str] = []
-    for n in numbers:
-        norm = _to_wa_id(n)
-        if len(norm) >= 10 and norm not in out:
-            out.append(norm)
-    return out
+    return await rbac.nomor_penerima_takeover()
 
 
 async def start_takeover(wa_number: str, reason: str) -> str:

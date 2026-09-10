@@ -3,7 +3,9 @@
 Both consume one backend endpoint: GET /reports/summary (X-Service-Key).
 Until the backend ships it, get_report_summary returns None and the tools say
 so honestly — no dummy numbers.
-Access is gated on the sender's WA number being in OWNER_WA_NUMBERS.
+Access is gated by role: the sender must be Owner (rbac level 1). The role
+comes from the backend user directory, so promoting someone to Owner in Admin
+Site is enough — no .env edit, no redeploy.
 """
 
 from datetime import datetime, timezone
@@ -11,8 +13,8 @@ from datetime import datetime, timezone
 from langchain_core.tools import tool
 
 from app.backend_client import api as backend
+from app.conversation import rbac
 from app.conversation.context import get_turn_context
-from app.core.config import settings
 from app.tools.formatting import rupiah
 
 _DENIED = (
@@ -25,10 +27,8 @@ _UNAVAILABLE = (
 )
 
 
-def _is_owner(wa: str) -> bool:
-    digits = "".join(c for c in wa if c.isdigit())
-    owners = ["".join(c for c in o if c.isdigit()) for o in settings.owner_wa_list]
-    return digits in owners
+async def _is_owner(wa: str) -> bool:
+    return await rbac.boleh(wa, rbac.OWNER)
 
 
 def _month_range() -> tuple[str, str]:
@@ -46,7 +46,7 @@ async def financial_report() -> str:
     """Laporan keuangan bulan berjalan (khusus Owner): omzet, pengeluaran, laba.
     Gunakan hanya jika pelanggan adalah Owner dan meminta laporan keuangan.
     """
-    if not _is_owner(get_turn_context().wa_number):
+    if not await _is_owner(get_turn_context().wa_number):
         return _DENIED
     data = await _summary()
     if data is None:
@@ -67,7 +67,7 @@ async def business_analytics() -> str:
     """Analitik bisnis bulan berjalan (khusus Owner): produk terlaris, rata-rata
     nilai pesanan. Gunakan hanya jika pelanggan adalah Owner.
     """
-    if not _is_owner(get_turn_context().wa_number):
+    if not await _is_owner(get_turn_context().wa_number):
         return _DENIED
     data = await _summary()
     if data is None:

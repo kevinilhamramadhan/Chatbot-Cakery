@@ -203,6 +203,30 @@ async def get_takeover_admin_numbers() -> list[str]:
         return []
 
 
+async def get_staff_directory() -> list[dict] | None:
+    """Direktori orang internal: nomor WA + peran + level + flag takeover.
+
+    GET /users/wa-directory (X-Service-Key) ->
+      {"users": [{"nomor_wa", "role", "level", "handles_takeover"}, ...]}
+
+    None berarti endpointnya belum ada (atau backend sedang tidak bisa
+    dihubungi) — pemanggilnya lalu menyusun direktori dari sumber lama. Daftar
+    kosong berarti backend memang bilang tidak ada satu pun orang internal, dan
+    itu jawaban yang sah, bukan kegagalan.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+            r = await c.get(f"{_base()}/users/wa-directory", headers=_headers())
+            if r.status_code >= 400:
+                return None
+            data = r.json()
+    except Exception:  # noqa: BLE001
+        return None
+    if isinstance(data, dict):
+        data = data.get("users") or data.get("data") or []
+    return data if isinstance(data, list) else None
+
+
 async def confirm_wa_verification(code: str, phone: str) -> dict:
     """Teruskan bukti verifikasi ke backend: kode ini datang dari nomor ini.
 

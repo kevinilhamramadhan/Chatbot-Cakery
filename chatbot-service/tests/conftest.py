@@ -31,6 +31,7 @@ os.environ.update({
 
 import pytest_asyncio  # noqa: E402
 
+from app.conversation import rbac  # noqa: E402
 from app.core.database import Base, engine  # noqa: E402
 
 # Last line of defence: `fresh_db` drops every table, so a misconfigured run
@@ -43,6 +44,9 @@ assert str(engine.url).endswith("toti_test_chatbot.db"), (
 @pytest_asyncio.fixture(autouse=True)
 async def fresh_db():
     """Recreate all tables before each test for isolation."""
+    # Direktori peran di-cache di level modul; tanpa ini satu test bisa mewarisi
+    # daftar Owner milik test sebelumnya.
+    rbac.bersihkan_cache()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
