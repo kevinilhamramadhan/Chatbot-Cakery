@@ -94,5 +94,8 @@ desktop.ini
 
 
 # Catatan QA lokal — permintaan ke backend, tidak untuk repo
-PERMINTAAN_BACKEND_QA.md
+UNTUK_BACKEND.md
 qa-2026-09-09/
+
+# Berkas kunci LibreOffice saat dokumen catatan dibuka
+.~lock.*#
