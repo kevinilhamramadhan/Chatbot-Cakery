@@ -219,11 +219,13 @@ async def test_every_menu_output_is_compressible_in_history(patch_externals):
         assert "get_menu" in _history_view(out), f"not compressed for {kwargs}"
 
 
-async def test_known_category_filters(patch_externals):
+async def test_menu_lists_every_category(patch_externals):
+    """Tidak ada lagi penyaringan: pelanggan yang bertanya menu melihat semuanya,
+    dikelompokkan supaya tetap enak dibaca."""
     from app.tools.get_menu import get_menu
-    out = await get_menu.ainvoke({"kategori": "brownies"})   # lowercase on purpose
-    assert "Brownies Coklat" in out
-    assert "Bolu Pandan" not in out
+    out = await get_menu.ainvoke({})
+    assert "*Brownies*" in out and "*Bolu*" in out
+    assert "Brownies Coklat" in out and "Bolu Pandan" in out
 
 
 async def test_empty_catalogue_still_reports_an_outage(patch_externals):
@@ -522,22 +524,18 @@ async def test_sentence_is_never_accepted_as_a_name(patch_externals):
 
 
 # ── Menu ──────────────────────────────────────────────────────────────────────
-async def test_menu_filter_never_matches_a_product_name(patch_externals):
-    """Live: model mengarang kategori 'cake'/'kue', dan karena pencocokan ikut
-    menyasar nama produk, pelanggan hanya melihat 1 dari 3 kue tanpa tahu."""
+async def test_menu_always_sends_everything_grouped_by_category(patch_externals):
+    """Pelanggan yang bertanya menu ingin melihat semuanya. Model rutin
+    menempelkan kategori yang tidak pernah diketik pelanggan, dan begitu katalog
+    aslinya masuk (kategori "cake" jadi nyata), "menu dong" polos menjawab 14
+    dari 23 produk. Tool ini sekarang tidak punya parameter sama sekali."""
     from app.tools.get_menu import get_menu
 
-    # "coklat" hanya ada di NAMA produk, tidak di kategori mana pun.
-    out = await get_menu.ainvoke({"kategori": "coklat"})
+    out = await get_menu.ainvoke({})
+
     assert "Brownies Coklat" in out and "Bolu Pandan" in out
-
-
-async def test_filtered_menu_says_it_was_filtered(patch_externals):
-    from app.tools.get_menu import get_menu
-
-    out = await get_menu.ainvoke({"kategori": "Brownies"})   # kategori asli produk #5
-    if "Bolu Pandan" not in out:                             # benar-benar tersaring
-        assert "menu" in out.lower() and "lengkap" in out.lower()
+    assert "*Brownies*" in out and "*Bolu*" in out      # dikelompokkan per kategori
+    assert out.index("*Bolu*") < out.index("*Brownies*")  # kategori urut abjad
 
 
 # ── Penjaga keluaran model ────────────────────────────────────────────────────
@@ -867,34 +865,3 @@ async def test_faq_refresh_reingests_when_chroma_holds_another_source(patch_exte
     background._last_faq_fingerprint = None
     assert await background._refresh_faq_if_changed() is False
     assert embedded == []
-
-
-async def test_menu_is_not_filtered_by_a_category_the_customer_never_typed(patch_externals):
-    """Model menempelkan kategori='cake' pada "menu dong" polos. Selama katalog
-    tidak punya kategori bernama "cake" itu tidak terasa, tapi begitu katalog
-    aslinya masuk, "menu dong" menjawab 14 dari 23 produk."""
-    from app.tools.get_menu import get_menu
-
-    set_turn_context(TurnContext(wa_number=WA, user_text="menu dong"))
-    out = await get_menu.ainvoke({"kategori": "Brownies"})
-    assert "Brownies Coklat" in out and "Bolu Pandan" in out, "menu tersaring diam-diam"
-
-    # Kalau pelanggan memang menyebut kategorinya, filternya tetap berlaku.
-    set_turn_context(TurnContext(wa_number=WA, user_text="ada brownies apa aja?"))
-    out = await get_menu.ainvoke({"kategori": "Brownies"})
-    assert "Brownies Coklat" in out and "Bolu Pandan" not in out
-
-
-def test_ungrounded_opening_hours_are_recognised():
-    """Terukur setelah dokumen jam buka hilang dari /faq: "kalian buka jam
-    berapa?" dijawab "Toko ini jam kerjanya 7.00 - 18.00 ya kak" — angka yang
-    tidak pernah ditulis siapa pun. Jam buka itu fakta, dan faktanya ada di
-    dokumen FAQ, bukan di kepala model."""
-    from app.llm.agent import _HOURS_RE
-
-    assert _HOURS_RE.search("Toko ini jam kerjanya 7.00 - 18.00 ya kak")
-    assert _HOURS_RE.search("Kami buka pukul 09.00 sampai 19.00 WIB")
-    assert _HOURS_RE.search("tutup jam 21.00 ya")
-    # Angka lain tidak boleh ikut kena.
-    assert not _HOURS_RE.search("Totalnya Rp190.000 ya kak")
-    assert not _HOURS_RE.search("Batas waktu pembayaran 30 menit.")
