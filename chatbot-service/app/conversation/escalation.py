@@ -47,13 +47,18 @@ def _to_wa_id(number: str) -> str:
 
 
 async def admin_numbers() -> list[str]:
-    """Who gets told about an escalation — the admins in the backend database.
+    """Who gets told about an escalation — read from the backend database.
 
     GET /admin/takeover-handlers returns `nomor_wa_admin` for every active user
     with `handles_takeover` set, so Admin Site is the one place this is managed
     and no redeploy is needed to change who is on duty. There is deliberately no
     .env fallback: two sources for "who is the admin" is how the wrong one ends
     up being used.
+
+    The list is filtered by that flag, NOT by role: an Owner on duty receives
+    escalations exactly like an Admin, and one of the two people on duty in
+    production is an Owner. Do not narrow this to role Admin — that customer
+    would simply stop being answered, with no error anywhere.
 
     Normalising 08… to 62… stays, because the column accepts whatever an admin
     typed and WhatsApp cannot address a local-format number.
