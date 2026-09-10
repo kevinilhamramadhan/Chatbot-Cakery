@@ -12,9 +12,11 @@ berlaku, waktu "siapa Owner" dan "siapa yang menerima takeover" hidup sebagai
 dua daftar terpisah yang bisa saling bertentangan.
 
 Sumber datanya backend, bukan .env: menambah orang cukup lewat Admin Site.
-Selama endpoint direktori belum ada, dua sumber lama dipakai sebagai penambal
-(lihat `_direktori_tambalan`), dan begitu endpointnya terbit tambalan itu
-berhenti terpakai dengan sendirinya.
+Endpointnya `GET /admin/takeover-handlers` — nama lamanya dipertahankan supaya
+backend tidak perlu memindahkan apa pun. Selama balasannya masih berisi nomor
+saja tanpa peran, peran disusun dari dua sumber lama sebagai penambal (lihat
+`_direktori_tambalan`); begitu balasannya membawa peran, tambalan itu berhenti
+terpakai dengan sendirinya.
 """
 
 import logging
@@ -78,8 +80,8 @@ def _level_dari_peran(peran: str, level) -> int:
 
 
 async def _direktori_backend() -> list[Orang] | None:
-    """Direktori resmi: satu endpoint, nomor + peran + level + flag takeover."""
-    baris = await backend.get_staff_directory()
+    """Direktori dengan peran, kalau backend sudah mengirimkannya."""
+    baris = await backend.get_role_directory()
     if baris is None:
         return None
     orang: list[Orang] = []

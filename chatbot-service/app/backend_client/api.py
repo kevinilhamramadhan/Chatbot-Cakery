@@ -203,28 +203,64 @@ async def get_takeover_admin_numbers() -> list[str]:
         return []
 
 
-async def get_staff_directory() -> list[dict] | None:
-    """Direktori orang internal: nomor WA + peran + level + flag takeover.
+async def _takeover_payload() -> dict | list | None:
+    """Isi mentah GET /admin/takeover-handlers (X-Service-Key).
 
-    GET /users/wa-directory (X-Service-Key) ->
-      {"users": [{"nomor_wa", "role", "level", "handles_takeover"}, ...]}
+    Satu endpoint, dua bentuk balasan yang sama-sama sah:
 
-    None berarti endpointnya belum ada (atau backend sedang tidak bisa
-    dihubungi) — pemanggilnya lalu menyusun direktori dari sumber lama. Daftar
-    kosong berarti backend memang bilang tidak ada satu pun orang internal, dan
-    itu jawaban yang sah, bukan kegagalan.
+      {"numbers": ["62…", …]}                     bentuk lama, hanya nomor
+      {"users":  [{"nomor_wa", "role", "level",   bentuk yang diminta di BE1b
+                   "handles_takeover"}, …]}
+
+    None berarti backend tidak bisa dihubungi atau menjawab galat — pemanggilnya
+    memutuskan sendiri mau memakai cache lama atau menyerah.
     """
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-            r = await c.get(f"{_base()}/users/wa-directory", headers=_headers())
+            r = await c.get(f"{_base()}/admin/takeover-handlers", headers=_headers())
             if r.status_code >= 400:
                 return None
-            data = r.json()
+            return r.json()
     except Exception:  # noqa: BLE001
         return None
-    if isinstance(data, dict):
-        data = data.get("users") or data.get("data") or []
-    return data if isinstance(data, list) else None
+
+
+def _rows(payload) -> list:
+    if isinstance(payload, dict):
+        for kunci in ("users", "handlers", "data"):
+            nilai = payload.get(kunci)
+            if isinstance(nilai, list):
+                return nilai
+        nomor = payload.get("numbers")
+        return list(nomor) if isinstance(nomor, list) else []
+    return list(payload) if isinstance(payload, list) else []
+
+
+async def get_role_directory() -> list[dict] | None:
+    """Direktori orang internal beserta perannya, kalau backend sudah mengirimnya.
+
+    None berarti balasannya masih bentuk lama (nomor saja, tanpa peran) atau
+    backend tidak terjangkau — chatbot lalu menyusun peran dari sumber lama.
+    """
+    baris = _rows(await _takeover_payload())
+    kaya = [b for b in baris if isinstance(b, dict)]
+    if not kaya:
+        return None
+    return kaya
+
+
+async def get_takeover_admin_numbers() -> list[str]:
+    """Nomor WhatsApp yang siap menerima takeover. Kosong -> pemanggil mencari sendiri."""
+    nomor: list[str] = []
+    for b in _rows(await _takeover_payload()):
+        if isinstance(b, dict):
+            # Bentuk kaya memuat semua orang internal; yang bertugas saja diambil.
+            if not b.get("handles_takeover", True):
+                continue
+            b = b.get("nomor_wa") or b.get("nomor_wa_admin") or ""
+        if b:
+            nomor.append(str(b))
+    return nomor
 
 
 async def confirm_wa_verification(code: str, phone: str) -> dict:

@@ -24,7 +24,7 @@ def direktori(monkeypatch):
     async def f():
         return DIREKTORI
 
-    monkeypatch.setattr(backend, "get_staff_directory", f)
+    monkeypatch.setattr(backend, "get_role_directory", f)
     rbac.bersihkan_cache()
     return DIREKTORI
 
@@ -75,7 +75,7 @@ async def test_tambalan_dipakai_saat_endpoint_belum_ada(monkeypatch):
     async def f_penerima():
         return ["0" + ADMIN_WA[2:]]
 
-    monkeypatch.setattr(backend, "get_staff_directory", f_direktori)
+    monkeypatch.setattr(backend, "get_role_directory", f_direktori)
     monkeypatch.setattr(backend, "get_takeover_admin_numbers", f_penerima)
     rbac.bersihkan_cache()
 
@@ -93,7 +93,7 @@ async def test_direktori_gagal_pakai_cache_lama(monkeypatch, direktori):
     async def f_meledak():
         raise RuntimeError("backend mati")
 
-    monkeypatch.setattr(backend, "get_staff_directory", f_meledak)
+    monkeypatch.setattr(backend, "get_role_directory", f_meledak)
     assert await rbac.direktori(paksa_segar=True) != []
     assert await rbac.level(OWNER_WA) == rbac.OWNER
 
@@ -114,3 +114,24 @@ async def test_laporan_hanya_untuk_owner(monkeypatch, direktori):
         set_turn_context(TurnContext(wa_number=f"{nomor}@c.us"))
         assert "hanya untuk Owner" in await reports.financial_report.ainvoke({})
         assert "hanya untuk Owner" in await reports.business_analytics.ainvoke({})
+
+
+@pytest.mark.asyncio
+async def test_dua_bentuk_balasan_dari_endpoint_yang_sama(monkeypatch):
+    """`/admin/takeover-handlers` boleh menjawab bentuk lama maupun bentuk berperan."""
+
+    async def bentuk_lama():
+        return {"numbers": [ADMIN_WA, "0" + STAF_WA[2:]]}
+
+    monkeypatch.setattr(backend, "_takeover_payload", bentuk_lama)
+    assert await backend.get_role_directory() is None, "tanpa peran = tambalan"
+    assert await backend.get_takeover_admin_numbers() == [ADMIN_WA, "0" + STAF_WA[2:]]
+
+    async def bentuk_berperan():
+        return {"users": DIREKTORI}
+
+    monkeypatch.setattr(backend, "_takeover_payload", bentuk_berperan)
+    rbac.bersihkan_cache()
+    assert await rbac.level(OWNER_WA) == rbac.OWNER
+    # Staff tidak bertugas takeover, jadi tidak ikut diberi tahu.
+    assert await backend.get_takeover_admin_numbers() == [OWNER_WA, ADMIN_WA]
