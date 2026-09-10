@@ -867,3 +867,19 @@ async def test_faq_refresh_reingests_when_chroma_holds_another_source(patch_exte
     background._last_faq_fingerprint = None
     assert await background._refresh_faq_if_changed() is False
     assert embedded == []
+
+
+async def test_menu_is_not_filtered_by_a_category_the_customer_never_typed(patch_externals):
+    """Model menempelkan kategori='cake' pada "menu dong" polos. Selama katalog
+    tidak punya kategori bernama "cake" itu tidak terasa, tapi begitu katalog
+    aslinya masuk, "menu dong" menjawab 14 dari 23 produk."""
+    from app.tools.get_menu import get_menu
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="menu dong"))
+    out = await get_menu.ainvoke({"kategori": "Brownies"})
+    assert "Brownies Coklat" in out and "Bolu Pandan" in out, "menu tersaring diam-diam"
+
+    # Kalau pelanggan memang menyebut kategorinya, filternya tetap berlaku.
+    set_turn_context(TurnContext(wa_number=WA, user_text="ada brownies apa aja?"))
+    out = await get_menu.ainvoke({"kategori": "Brownies"})
+    assert "Brownies Coklat" in out and "Bolu Pandan" not in out

@@ -3,6 +3,7 @@
 from langchain_core.tools import tool
 
 from app.backend_client import products as products_api
+from app.conversation.context import get_turn_context_or_none
 from app.tools.formatting import product_label, rupiah
 
 
@@ -19,6 +20,22 @@ def _matches(product: dict, needle: str) -> bool:
         str(product.get(key) or "") for key in ("kategori", "parent_category")
     )
     return needle in haystack.casefold()
+
+
+def _customer_asked_for(kategori: str) -> bool:
+    """Only filter by a category the customer actually typed.
+
+    The model attaches `kategori='cake'` to plain "menu dong" more often than
+    not. That was harmless while no product carried the category "cake" — the
+    filter matched nothing and the whole menu came back. Once the real catalogue
+    arrived, "cake" became a genuine category, and a bare "menu dong" started
+    answering with 14 of 23 products. Same rule as quantities: an argument the
+    customer never wrote is an argument the model made up.
+    """
+    ctx = get_turn_context_or_none()
+    if ctx is None or not ctx.user_text:
+        return True  # called outside a turn (tests, scripts): trust the caller
+    return kategori.strip().casefold() in ctx.user_text.casefold()
 
 
 @tool
@@ -39,7 +56,7 @@ async def get_menu(kategori: str | None = None) -> str:
 
     heading = "Berikut menu Toti Cakery:"
     filtered = False
-    if kategori and kategori.strip():
+    if kategori and kategori.strip() and _customer_asked_for(kategori):
         needle = kategori.strip().casefold()
         matched = [p for p in items if _matches(p, needle)]
         if matched and len(matched) < len(items):
