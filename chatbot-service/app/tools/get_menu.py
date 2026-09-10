@@ -48,7 +48,10 @@ async def get_menu() -> str:
     # menu dari ingatan.
     lines = ["Berikut menu Toti Cakery:"]
     for nama_kategori in urutan:
-        lines.append(f"\n*{nama_kategori}*")
+        # Kapitalisasi disamakan saat ditampilkan: katalog memuat "Brownies",
+        # "cake", "cookies", dan "Chiffon" berdampingan, dan pelanggan tidak
+        # perlu ikut melihat ketidakrapian data itu.
+        lines.append(f"\n*{nama_kategori.title()}*")
         for p in sorted(grup[nama_kategori], key=lambda x: product_label(x).casefold()):
             # is_available dihitung backend (resep vs stok). Absen -> tersedia.
             status = "" if p.get("is_available", True) else "  (sedang tidak tersedia)"
