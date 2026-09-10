@@ -503,13 +503,26 @@ async def test_escalate_offers_first_then_takes_over_on_yes(patch_externals):
     assert reply.suppressed is True
 
 
-async def test_escalation_offer_declined_leaves_bot_running(patch_externals):
+async def test_escalation_offer_survives_a_question_and_ends_on_cancel(patch_externals):
+    """Tawaran admin bertahan beberapa giliran, bukan satu.
+
+    Bentuk percakapan yang paling lazim: bot menawarkan, pelanggan bertanya satu
+    hal lagi, BARU bilang ya. Kalau tawarannya hangus di pesan berikutnya, "ya"
+    itu tidak punya apa pun untuk disetujui — dan pelanggan ditanyai lagi.
+    """
+    from app.conversation import orchestrator
     from app.tools.escalate import escalate_to_admin
+
+    async def fake_run_agent(wa, text, history):
+        return "Oke, aku batalkan ya."
+
+    patch_externals["monkeypatch"].setattr(orchestrator, "run_agent", fake_run_agent)
     set_turn_context(TurnContext(wa_number=WA))
     await escalate_to_admin.ainvoke({"reason": "kue custom ulang tahun"})
-    await handle_message(WA, "halo")                     # anything that isn't yes
-    assert await store.is_takeover_active(WA) is False
+
+    await handle_message(WA, "batal")          # menolak -> tawaran hangus
     assert (await store.get_or_create_session(WA)).pending_escalation is None
+    assert await store.is_takeover_active(WA) is False
 
 
 # ── Owner reports (real backend data; honest fallback while endpoint absent) ──

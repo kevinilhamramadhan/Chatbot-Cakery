@@ -20,9 +20,7 @@ from app.conversation.context import (
 )
 from app.conversation.states import (
     State,
-    asks_for_admin,
-    is_bare_greeting,
-    looks_like_cart_change,
+    mentions_quantity,
     text_is_cancel,
     text_is_confirm,
 )
@@ -170,37 +168,24 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     await store.log_message(wa_number, "in", text)
     state = session.state
 
-    # 2) An escalation we OFFERED on the previous turn. Takeover is a big hammer
-    # — it silences the bot for days — so it only swings when the customer says
-    # yes. Anything else clears the offer and the message routes normally.
+    # 2) An escalation the model OFFERED earlier. Takeover is a big hammer — it
+    # silences the bot for a day — so it only swings on an explicit yes.
+    #
+    # The offer stands for a few turns rather than one. It used to be cleared by
+    # the very next message, which broke the commonest shape of the exchange:
+    # the bot offers, the customer asks one more thing, and only then says yes.
+    # Widening the window is what let the keyword matcher for "sambungkan ke
+    # admin" be deleted — deciding that a message means "connect me" is the
+    # model's job, and it already has a tool for it.
     if session.pending_escalation:
-        await store.set_pending_escalation(wa_number, None)
         if text_is_confirm(text) and not text_is_cancel(text):
+            await store.set_pending_escalation(wa_number, None)
             reply = Reply(text=await escalation.start_takeover(
                 wa_number, session.pending_escalation))
             await store.log_message(wa_number, "out", reply.text)
             return reply
-
-    # Asked outright for a human — no offer needed, and no model turn either.
-    # The offer only survives one message, and the model does not reliably
-    # re-issue it: live, "eh iya deh, sambungkan ke admin aja" was answered with
-    # the offer wording but no tool call, so the next "ya" had nothing to accept.
-    if asks_for_admin(text):
-        reply = Reply(text=await escalation.start_takeover(wa_number, text))
-        await store.log_message(wa_number, "out", reply.text)
-        return reply
-
-    # 3) A bare greeting is answered from a template: it is the commonest
-    # opening message on WhatsApp, the model used to refuse it outright, and
-    # skipping inference saves the customer ~8 seconds on their first message.
-    if is_bare_greeting(text) and state == State.IDLE:
-        reply = Reply(text=(
-            f"Halo! 👋 Aku asisten {settings.store_name}. "
-            "Ketik *menu* untuk lihat daftar kue, atau langsung sebutkan kue "
-            "dan jumlahnya kalau mau pesan ya 😊"
-        ))
-        await store.log_message(wa_number, "out", reply.text)
-        return reply
+        if text_is_cancel(text):
+            await store.set_pending_escalation(wa_number, None)
 
     # One context per inbound message, set here rather than inside the agent
     # branch: the deterministic steps need it too (tools read `user_text`), and
@@ -291,12 +276,7 @@ async def _handle_confirmation(wa_number: str, text: str) -> Reply:
         await store.set_state(wa_number, State.IDLE)
         return Reply(text="Oke, pesanan dibatalkan ya. Ada lagi yang bisa kubantu? 😊")
 
-    # A modification is checked BEFORE agreement, because "iya, tambah 1 lagi"
-    # is both at once and the change has to win.
-    if looks_like_cart_change(text):
-        return await _run_agent_turn(wa_number, text)
-
-    if text_is_confirm(text):
+    if text_is_confirm(text) and not mentions_quantity(text):
         cust = await store.get_customer(wa_number)
         if cust.get("channel"):
             # Re-confirmation after checkout bounced the cart back (e.g. a price
@@ -309,27 +289,19 @@ async def _handle_confirmation(wa_number: str, text: str) -> Reply:
                  "(ketik *batal* kalau berubah pikiran)"
         )
 
-    # A question here is still a question — "berapa totalnya sekarang?" or
-    # "kalian buka jam berapa?" must be answered, then the step repeated. Only
-    # the model can answer those, but the state is pinned back afterwards.
-    if _looks_like_question(text) or len(text.split()) > 3:
-        return await _answer_then_reask(
-            wa_number, text,
-            "Balik ke pesanan ya — ketik *sudah sesuai* kalau totalnya sudah pas, "
-            "atau *batal* untuk membatalkan.",
-            State.AWAITING_CART_CONFIRMATION,
-        )
-
-    # Short and unrecognised: answer deterministically rather than hand it to the
-    # model. Handing it over is what doubled orders — with the cart summary still
-    # in the window, the model answered "iya udah bener" by calling add_to_cart
-    # again (2 brownies -> 4, measured live).
-    return Reply(text=(
-        "Maaf, aku belum menangkap maksudnya 🙏\n"
-        "• Ketik *sudah sesuai* kalau pesanannya sudah pas\n"
-        "• Ketik *batal* kalau berubah pikiran\n"
-        "• Atau sebutkan perubahannya, mis. \"tambah 1 brownies\""
-    ))
+    # Everything else goes to the model: a question to answer, a change to the
+    # order, a new product — all of it is intent, and reading intent is its job.
+    # What used to make this dangerous was the model answering "iya udah bener"
+    # by calling add_to_cart again and silently doubling the order. That is now
+    # blocked inside the tool itself (it will not grow a line the customer did
+    # not put a number on), so the routing here does not have to guess.
+    reply = await _run_agent_turn(wa_number, text)
+    if (await store.get_or_create_session(wa_number)).state == State.AWAITING_CART_CONFIRMATION:
+        body = (reply.text or "").strip()
+        reask = ("Kalau pesanannya sudah pas, ketik *sudah sesuai* ya — "
+                 "atau *batal* kalau berubah pikiran.")
+        return Reply(text=f"{body}\n\n{reask}" if body else reask, media=reply.media)
+    return reply
 
 
 # ── Identity + payment-type collection (PROMPT §10.6-8) ───────────────────────
@@ -339,16 +311,6 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
         await store.set_customer(wa_number, {})
         await store.set_state(wa_number, State.IDLE)
         return Reply(text="Oke, pesanan dibatalkan ya. 😊")
-
-    # A request to change the order is not an answer to the step we are on.
-    # Without this, "eh tambahin 1 brownies fudgy almond dong" typed at the name
-    # step was stored as the customer's NAME and sent to the backend that way.
-    if looks_like_cart_change(text):
-        reply = await _run_agent_turn(wa_number, text)
-        # The cart moved, so the total the customer agreed to is stale: send
-        # them back to confirmation instead of continuing to collect identity.
-        await store.set_state(wa_number, State.AWAITING_CART_CONFIRMATION)
-        return reply
 
     cust = await store.get_customer(wa_number)
 

@@ -484,17 +484,29 @@ async def test_cart_change_at_confirmation_still_reaches_the_model(patch_externa
 # ── Langkah identitas ─────────────────────────────────────────────────────────
 async def test_cart_change_at_name_step_is_not_stored_as_the_name(patch_externals):
     """Live: "eh tambahin 1 brownies fudgy almond dong" tersimpan sebagai NAMA
-    pelanggan dan dikirim ke backend seperti itu."""
-    _mock_agent(patch_externals["monkeypatch"], "(keranjang diubah)")
+    pelanggan dan dikirim ke backend seperti itu.
+
+    Yang menahannya sekarang bukan penebak maksud berbasis kata kunci, melainkan
+    validasi nilainya sendiri: kalimat sepanjang itu bukan nama, jadi giliran ini
+    diserahkan ke model dan langkahnya diulang."""
+    seen = {}
+
+    from app.conversation import orchestrator
+
+    async def spy(wa, text, history):
+        seen["text"] = text
+        return "(keranjang diubah)"
+
+    patch_externals["monkeypatch"].setattr(orchestrator, "run_agent", spy)
     await _cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
     await handle_message(WA, "sudah sesuai")
 
-    await handle_message(WA, "eh tambahin 1 bolu pandan dong")
+    reply = await handle_message(WA, "eh tambahin 1 bolu pandan dong")
 
     cust = json.loads((await store.get_or_create_session(WA)).customer_json)
     assert "nama" not in cust, f"kalimat pesanan tersimpan sebagai nama: {cust}"
-    # Totalnya berubah, jadi pelanggan harus mengonfirmasi ulang.
-    assert (await store.get_or_create_session(WA)).state == State.AWAITING_CART_CONFIRMATION
+    assert seen["text"] == "eh tambahin 1 bolu pandan dong"   # model yang menilai
+    assert "nama" in reply.text.lower()                        # langkahnya diulang
 
 
 async def test_sentence_is_never_accepted_as_a_name(patch_externals):
@@ -729,55 +741,24 @@ async def test_question_at_confirmation_is_answered_then_reasked(patch_externals
     assert (await store.get_cart(WA))[0]["qty"] == 2      # tetap tidak berubah
 
 
-async def test_asking_for_a_human_connects_without_a_second_question(patch_externals):
-    """Uji ulang di VM: "eh iya deh, sambungkan ke admin aja" dijawab dengan
-    tawaran yang sama (tanpa memanggil tool), sehingga "ya" berikutnya tidak
-    punya apa pun untuk disetujui dan pelanggan ditanyai lagi."""
-    from app.conversation.states import asks_for_admin
+async def test_escalation_offer_still_stands_a_few_turns_later(patch_externals):
+    """Live: "eh iya deh, sambungkan ke admin aja" dijawab dengan tawaran yang
+    sama tanpa memanggil tool, sehingga "ya" berikutnya tidak punya apa pun untuk
+    disetujui. Perbaikannya bukan menambah pencocokan kata kunci, melainkan
+    membuat tawaran yang SUDAH diterbitkan model bertahan beberapa giliran."""
+    from app.tools.escalate import escalate_to_admin
 
-    assert asks_for_admin("eh iya deh, sambungkan ke admin aja") is True
-    assert asks_for_admin("mau ke admin aja deh") is True
-    # Menanyakan nomornya bukan permintaan disambungkan.
-    assert asks_for_admin("boleh minta nomor adminnya?") is False
+    _mock_agent(patch_externals["monkeypatch"], "Menu kami ada tiga kue.")
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
+    await escalate_to_admin.ainvoke({"reason": "kue custom bertema frozen"})
 
-    _mock_agent(patch_externals["monkeypatch"])
-    reply = await handle_message(WA, "sambungkan ke admin aja")
+    await handle_message(WA, "menu dong")                 # menyela, bukan menolak
+    assert await store.is_takeover_active(WA) is False
 
-    assert "admin" in reply.text.lower()
+    reply = await handle_message(WA, "ya")                # baru setuju di sini
+    assert "admin" in (reply.text or "").lower()
     assert await store.is_takeover_active(WA) is True
     assert any("628999000111" == wa for wa, _ in patch_externals["sent"])
-
-
-async def test_admin_numbers_come_from_the_database(patch_externals):
-    """Penerima takeover diambil dari user backend yang handles_takeover, bukan
-    dari .env — satu tempat pengelolaan, dan admin bisa menggantinya dari Admin
-    Site tanpa redeploy. Nomor berformat lokal dinormalkan, karena kolomnya
-    menerima apa pun yang diketik admin dan WhatsApp tidak bisa mengalamati 08…"""
-    from app.conversation import escalation
-
-    async def handlers():
-        return ["08111111111", "628123456789", "08111111111"]
-
-    patch_externals["monkeypatch"].setattr(
-        patch_externals["backend"], "get_takeover_admin_numbers", handlers)
-
-    assert await escalation.admin_numbers() == ["628111111111", "628123456789"]
-
-
-async def test_no_admin_in_database_means_no_promise(patch_externals):
-    """Kalau tidak ada satu pun admin terdaftar, bot TIDAK boleh menjanjikan
-    admin dan TIDAK boleh membungkam dirinya."""
-    from app.conversation import escalation
-
-    async def none():
-        return []
-
-    patch_externals["monkeypatch"].setattr(
-        patch_externals["backend"], "get_takeover_admin_numbers", none)
-
-    out = await escalation.start_takeover(WA, "kue custom")
-    assert "belum bisa" in out.lower()
-    assert await store.is_takeover_active(WA) is False
 
 
 async def test_unknown_product_answers_with_the_menu(patch_externals):

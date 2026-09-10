@@ -123,6 +123,15 @@ async def add_to_cart(items: list[dict]) -> str:
         # Merge with existing line if same product.
         existing = next((c for c in cart if c.get("product_id") == p.get("id")), None)
         if existing:
+            # A line already in the cart only grows when the customer wrote a
+            # number in THIS message. Without that, "iya udah bener" at the
+            # confirmation step came back as add_to_cart for the same item and
+            # the order silently doubled — 2 brownies became 4, Rp190.000 became
+            # Rp380.000. The guard lives here rather than in the router because
+            # it is about the data, not about guessing what the message meant.
+            if ctx.user_text and not mentions_quantity(ctx.user_text):
+                unclear_qty.append(product_label(p))
+                continue
             existing["qty"] += qty
         else:
             cart.append(
