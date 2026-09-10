@@ -167,14 +167,18 @@ async def _refresh_faq_if_changed() -> bool:
     fingerprint = faq_source.fingerprint(docs)
     if fingerprint == _last_faq_fingerprint:
         return False
-    first_run = _last_faq_fingerprint is None
-    _last_faq_fingerprint = fingerprint
-    if first_run:
-        # Boot-time ingest already ran in its own container; don't re-embed just
-        # because this process has not seen the FAQ before.
+    # Compared against the marker the boot ingest wrote, not against "have I
+    # looked before": the ingest container and this service can disagree about
+    # the source (it once had no BACKEND_BASE_URL and silently embedded the
+    # local .txt fallback while the service could see the backend's FAQ fine).
+    # Reconciling against what is actually in Chroma fixes that by itself.
+    if faq_source.read_marker() == fingerprint:
+        _last_faq_fingerprint = fingerprint
         logger.info("FAQ aktif: %d dokumen dari %s", len(docs), asal)
         return False
+    _last_faq_fingerprint = fingerprint
     chunks = await asyncio.to_thread(faq_source.ingest_documents, docs)
+    faq_source.write_marker(fingerprint)
     logger.info("FAQ berubah di %s — %d dokumen di-embed ulang (%d chunk)",
                 asal, len(docs), chunks)
     return True

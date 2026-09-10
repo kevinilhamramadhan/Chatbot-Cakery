@@ -15,6 +15,7 @@ from app.conversation import background, store
 from app.conversation.context import TurnContext, set_turn_context
 from app.conversation.orchestrator import handle_message
 from app.conversation.states import State
+from app.core.config import settings as settings_module
 
 WA = "628123456789@c.us"
 
@@ -850,3 +851,38 @@ def test_faq_fingerprint_changes_when_an_answer_is_edited():
     b = [FaqDoc("backend-faq-1", "Q: Buka jam berapa?\nA: 10.00-20.00")]
     assert fingerprint(a) != fingerprint(b)
     assert fingerprint(a) == fingerprint(list(a))
+
+
+async def test_faq_refresh_reingests_when_chroma_holds_another_source(patch_externals, tmp_path):
+    """Container ingest dan service bisa melihat sumber FAQ yang berbeda — pernah
+    terjadi: chatbot-ingest tidak punya BACKEND_BASE_URL lalu diam-diam
+    meng-embed berkas .txt cadangan, sementara service membaca /faq backend
+    dengan baik. Refresh harus mendamaikan itu, bukan menunggu FAQ berubah."""
+    from app.conversation import background
+    from app.rag import faq_source
+
+    docs = [faq_source.FaqDoc("backend-faq-1", "Q: Buka jam berapa?\nA: 09.00-19.00")]
+
+    async def from_backend():
+        return docs, "backend"
+
+    embedded = []
+
+    patch_externals["monkeypatch"].setattr(faq_source, "current_docs", from_backend)
+    patch_externals["monkeypatch"].setattr(
+        faq_source, "ingest_documents", lambda d: embedded.append(d) or len(d))
+    patch_externals["monkeypatch"].setattr(
+        settings_module, "chroma_persist_dir", str(tmp_path), raising=False)
+
+    background._last_faq_fingerprint = None
+    faq_source.write_marker("sidik-jari-dari-berkas-lokal")
+
+    assert await background._refresh_faq_if_changed() is True
+    assert embedded == [docs]
+    assert faq_source.read_marker() == faq_source.fingerprint(docs)
+
+    # Sudah sinkron: pengecekan berikutnya tidak meng-embed apa pun lagi.
+    embedded.clear()
+    background._last_faq_fingerprint = None
+    assert await background._refresh_faq_if_changed() is False
+    assert embedded == []

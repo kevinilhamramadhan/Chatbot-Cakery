@@ -46,14 +46,6 @@ logger = logging.getLogger("ingest")
 
 BOOT_WAIT_INTERVAL_SECONDS = 10
 
-# Sidik jari ditaruh di dalam direktori Chroma, jadi ia ikut volume datanya:
-# volume dihapus -> sidik jari hilang -> ingest jalan lagi. Persis yang diinginkan.
-MARKER_NAME = ".ingest-fingerprint"
-
-
-def _marker_path() -> Path:
-    return Path(settings.chroma_persist_dir) / MARKER_NAME
-
 
 def _wait_for_embedding_model(timeout: float | None = None) -> bool:
     """Tunggu sampai Ollama benar-benar PUNYA model embeddingnya.
@@ -116,10 +108,9 @@ def main() -> int:
         faq_source.ingest_documents(docs)
         return 0
 
-    marker = _marker_path()
     fp = faq_source.fingerprint(docs)
     try:
-        if marker.read_text().strip() == fp and get_collection().count() > 0:
+        if faq_source.read_marker() == fp and get_collection().count() > 0:
             # Dua syarat, bukan satu: sidik jari bisa saja tertinggal padahal
             # koleksinya kosong (mis. volume Chroma diganti isinya).
             logger.info("FAQ sudah mutakhir di Chroma — tidak ada yang perlu dikerjakan.")
@@ -132,8 +123,7 @@ def main() -> int:
 
     try:
         if faq_source.ingest_documents(docs) > 0:
-            marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.write_text(fp)
+            faq_source.write_marker(fp)
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "Ingest FAQ GAGAL (%s). Chatbot tetap dijalankan tanpa basis "

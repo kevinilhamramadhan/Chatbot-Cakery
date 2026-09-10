@@ -99,6 +99,32 @@ async def current_docs() -> tuple[list[FaqDoc], str]:
     return local_faq_docs(), "berkas lokal"
 
 
+# Sidik jari hasil ingest terakhir, ditaruh di dalam direktori Chroma supaya ia
+# ikut volume datanya: volume dihapus -> sidik jari hilang -> ingest jalan lagi.
+# Dibaca DUA proses: container ingest saat boot, dan service yang berjalan saat
+# memeriksa perubahan FAQ. Keduanya harus sepakat, kalau tidak service akan
+# meng-embed ulang tiap restart (atau lebih buruk: tidak pernah meng-embed
+# ulang padahal isi Chroma datang dari sumber yang berbeda).
+MARKER_NAME = ".ingest-fingerprint"
+
+
+def marker_path() -> Path:
+    return Path(settings.chroma_persist_dir) / MARKER_NAME
+
+
+def read_marker() -> str | None:
+    try:
+        return marker_path().read_text().strip()
+    except OSError:
+        return None
+
+
+def write_marker(value: str) -> None:
+    path = marker_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value)
+
+
 def fingerprint(docs: list[FaqDoc]) -> str:
     """Identity of an ingest result: the FAQ text plus every setting that
     changes the vectors. A different embedding model or chunk size means the old
