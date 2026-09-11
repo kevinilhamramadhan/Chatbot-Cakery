@@ -21,31 +21,25 @@ from app.core.security import mask_phone, sanitize_relay
 logger = logging.getLogger(__name__)
 
 def _teks() -> str:
-    """Permintaan maaf yang tetap; email tindak lanjut diambil dari setelan.
+    """Permintaan maaf yang tetap; alamat emailnya diambil dari setelan.
 
     Pelanggan sengaja TIDAK diminta menceritakan ulang kejadiannya di chat:
-    yang dia butuhkan saat mengeluh adalah permintaan maaf dan satu jalan yang
-    jelas untuk ditindaklanjuti, bukan formulir. Kalau STORE_SUPPORT_EMAIL belum
-    diisi, kalimat emailnya dilewati — lebih baik tidak menyebut alamat daripada
-    mengirim pelanggan ke alamat yang tidak ada.
+    yang dia butuhkan saat mengeluh adalah permintaan maaf dan satu jalan tindak
+    lanjut yang jelas, bukan formulir. Kalau STORE_SUPPORT_EMAIL belum diisi,
+    kalimat emailnya dilewati — lebih baik tidak menyebut alamat sama sekali
+    daripada mengirim pelanggan ke alamat yang tidak ada.
     """
     baris = [
-        "Mohon maaf sekali atas ketidaknyamanannya 🙏 Ini bukan pengalaman yang "
-        f"kami harapkan dari {settings.store_name}, dan masukanmu jadi bahan "
-        "perbaikan kami ke depannya.",
+        "Mohon maaf sekali atas ketidaknyamanan yang dialami. Masukanmu akan "
+        "menjadi bahan perbaikan kami ke depannya.",
     ]
     email = settings.store_support_email.strip()
     if email:
         baris.append(
-            f"Kalau mau ditindaklanjuti, silakan kirim keluhanmu ke *{email}* ya — "
-            "nanti tim kami yang menangani."
+            f"Jika ada keluhan lebih lanjut, anda dapat mengirimkannya ke alamat "
+            f"email kami di {email} agar tim kami dapat merespon dengan lebih akurat."
         )
-    else:
-        baris.append(
-            "Kalau mau ditindaklanjuti, keluhanmu bisa disampaikan ke kontak "
-            "resmi Toti Cakery ya."
-        )
-    baris.append("Terima kasih sudah memberi tahu kami 🙏")
+    baris.append("Terima kasih")
     return "\n\n".join(baris)
 
 

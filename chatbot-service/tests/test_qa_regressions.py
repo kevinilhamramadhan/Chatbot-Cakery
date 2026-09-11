@@ -953,7 +953,7 @@ async def test_keluhan_dijawab_permintaan_maaf_yang_tetap(patch_externals):
     set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
     out = await sampaikan_maaf.ainvoke({"keluhan": "kue diterima sudah basi"})
 
-    assert "Mohon maaf" in out
+    assert out.startswith("Mohon maaf sekali atas ketidaknyamanan yang dialami.")
     assert "bahan perbaikan" in out
     # Pelanggan yang sedang kecewa tidak dimintai cerita ulang.
     assert "nomor pesanan" not in out.lower() and "fotonya" not in out.lower()
