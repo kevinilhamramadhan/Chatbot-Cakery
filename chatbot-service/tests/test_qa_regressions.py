@@ -1089,7 +1089,7 @@ async def test_batal_setelah_bayar_minta_konfirmasi_dulu(patch_externals):
 async def test_konfirmasi_batal_tanpa_dukungan_backend_tidak_membuntukan(patch_externals):
     """Selama backend belum mengizinkan chatbot me-refund, jawaban "ya" tidak
     boleh berakhir buntu — pelanggan diberi alamat yang benar-benar ditangani."""
-    from app.tools.cancel_order import proses_batal_berbayar
+    from app.tools.cancel_order import proses_pembatalan
 
     await _seed_awaiting_payment(order_ref="9102")
     pesanan = await store.get_active_pending(WA)
@@ -1108,7 +1108,7 @@ async def test_konfirmasi_batal_tanpa_dukungan_backend_tidak_membuntukan(patch_e
     patch_externals["monkeypatch"].setattr(
         settings_module, "store_support_email", "halo@toticakery.id", raising=False)
 
-    out = await proses_batal_berbayar(WA)
+    out = await proses_pembatalan(WA)
 
     assert "halo@toticakery.id" in out
     assert "hubungi admin" not in out.lower()
@@ -1118,7 +1118,7 @@ async def test_konfirmasi_batal_tanpa_dukungan_backend_tidak_membuntukan(patch_e
 async def test_konfirmasi_batal_berhasil_saat_backend_mengizinkan(patch_externals):
     """Begitu backend mengizinkan (cancel berbayar ATAU refund lewat service key),
     jalurnya langsung hidup tanpa perubahan kode lagi."""
-    from app.tools.cancel_order import proses_batal_berbayar
+    from app.tools.cancel_order import proses_pembatalan
 
     await _seed_awaiting_payment(order_ref="9103")
     pesanan = await store.get_active_pending(WA)
@@ -1138,7 +1138,7 @@ async def test_konfirmasi_batal_berhasil_saat_backend_mengizinkan(patch_external
     patch_externals["monkeypatch"].setattr(
         patch_externals["backend"], "refund_order", f_refund)
 
-    out = await proses_batal_berbayar(WA)
+    out = await proses_pembatalan(WA)
 
     assert dipanggil and dipanggil[0][0] == "9103"
     assert "dibatalkan" in out and "pengembalian dananya" in out
@@ -1167,7 +1167,34 @@ async def test_pesanan_yang_sudah_diproses_tidak_ditawari_pembatalan(patch_exter
 
     out = await cancel_order.ainvoke({})
 
-    assert "sudah mulai kami proses" in out
+    assert "tahap pengerjaan sehingga tidak bisa dibatalkan" in out
     assert "halo@toticakery.id" in out
     assert "*ya*" not in out, "jangan menawarkan konfirmasi yang pasti gagal"
     assert (await store.get_or_create_session(WA)).state != State.AWAITING_CANCEL_CONFIRMATION
+
+
+async def test_pesanan_belum_dibayar_juga_dikonfirmasi_dulu(patch_externals):
+    """Kebijakan 12 Sep: SETIAP pembatalan pesanan ditanyakan dulu, termasuk yang
+    belum dibayar — pesanannya sudah tercatat di backend dan Admin Site."""
+    from app.tools.cancel_order import cancel_order, proses_pembatalan
+
+    await _seed_awaiting_payment(order_ref="9105")
+    dibatalkan = []
+
+    async def f_cancel(order_ref):
+        dibatalkan.append(order_ref)
+        return {"status": "success"}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "cancel_order", f_cancel)
+    set_turn_context(TurnContext(wa_number=WA, user_text="batalin pesananku"))
+
+    tanya = await cancel_order.ainvoke({})
+    assert "*ya*" in tanya
+    assert "pengembalian dana" not in tanya, "belum dibayar: jangan menjanjikan refund"
+    assert not dibatalkan, "belum boleh dibatalkan sebelum dijawab"
+
+    hasil = await proses_pembatalan(WA)
+    assert dibatalkan == ["9105"]
+    assert "dibatalkan" in hasil.lower()
+    assert await store.get_active_pending(WA) is None

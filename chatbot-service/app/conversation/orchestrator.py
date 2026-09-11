@@ -332,10 +332,10 @@ async def _handle_cancel_confirmation(wa_number: str, text: str) -> Reply:
     dana dikembalikan dan pesanan hangus, jadi izinnya harus eksplisit dan tidak
     boleh disimpulkan model dari kalimat bebas.
     """
-    from app.tools.cancel_order import proses_batal_berbayar
+    from app.tools.cancel_order import proses_pembatalan
 
     if text_is_confirm(text) and not text_is_cancel(text) and not mentions_quantity(text):
-        return Reply(text=await proses_batal_berbayar(wa_number))
+        return Reply(text=await proses_pembatalan(wa_number))
 
     # "tidak", "gajadi", atau apa pun yang bukan persetujuan: pesanan diteruskan.
     if text_is_cancel(text) or _menolak(text):

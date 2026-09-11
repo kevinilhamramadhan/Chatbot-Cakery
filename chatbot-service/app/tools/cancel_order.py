@@ -40,35 +40,29 @@ async def cancel_order() -> str:
         await store.set_state(wa, State.IDLE)
         return "Oke, draft pesanan dikosongkan. Ada lagi yang bisa kubantu?"
 
-    # Pesanan yang sudah dibayar tidak dibatalkan diam-diam: uangnya berpindah,
-    # jadi pelanggan harus menjawab "ya" dulu. Pertanyaannya tertutup dan bot
-    # sendiri yang mengajukannya, sehingga jawabannya boleh dibaca kode.
-    if order.status in ("paid", "ready"):
-        if not await _masih_boleh_refund(wa):
-            # Kebijakan toko: refund mandiri hanya selama pesanan masih pending.
-            # Begitu admin memindahkannya ke "sedang diproses", kuenya sudah
-            # dikerjakan. Lebih baik dikatakan sekarang daripada menawarkan
-            # pembatalan yang pasti ditolak backend beberapa detik kemudian.
-            return (
-                "Pesanan ini sudah mulai kami proses, jadi pembatalannya tidak "
-                "bisa otomatis lewat chat." + _jalur_tindak_lanjut()
-            )
-        get_turn_context().next_state = State.AWAITING_CANCEL_CONFIRMATION
-        return konfirmasi_batal(order)
+    # SETIAP pembatalan pesanan ditanyakan dulu — bukan hanya yang sudah dibayar.
+    # Pesanan sudah masuk ke backend dan ke Admin Site, jadi menghapusnya karena
+    # satu kalimat yang bisa saja salah baca terlalu mahal. Draft keranjang yang
+    # belum jadi pesanan tetap langsung dikosongkan (lihat di atas): tidak ada
+    # yang hilang di sisi toko.
+    sudah_dibayar = order.status in ("paid", "ready")
+    if sudah_dibayar and not await _masih_boleh_refund(wa):
+        # Kebijakan toko: begitu admin memindahkan pesanan ke "sedang diproses",
+        # kuenya sudah dikerjakan dan pembatalan mandiri tidak berlaku lagi.
+        return _teks_sudah_dikerjakan()
 
-    try:
-        await backend.cancel_order(order.order_ref)  # order_ref = backend order id
-    except Exception as exc:  # noqa: BLE001 - backend menolak 409 kalau sudah dibayar
-        logger.warning("cancel failed for %s: %s", order.order_ref, exc)
-        # 409 berarti pembayarannya sudah masuk walau catatan lokal belum sempat
-        # diperbarui — perlakukan sama: tanya dulu, jangan tutup percakapan.
-        get_turn_context().next_state = State.AWAITING_CANCEL_CONFIRMATION
-        return konfirmasi_batal(order)
+    get_turn_context().next_state = State.AWAITING_CANCEL_CONFIRMATION
+    return konfirmasi_batal(order, sudah_dibayar)
 
-    await store.update_pending_order(order.id, status="cancelled")
-    await store.set_cart(wa, [])
-    await store.set_state(wa, State.IDLE)
-    return "Pesanan kamu sudah dibatalkan. Terima kasih 🙏"
+
+def _teks_sudah_dikerjakan() -> str:
+    email = settings.store_support_email.strip()
+    alamat = email or "kontak resmi Toti Cakery"
+    return (
+        "Pesanan ini sudah dalam tahap pengerjaan sehingga tidak bisa dibatalkan.\n"
+        f"Jika ada keluhan mohon kirim ke alamat email kami di {alamat}\n"
+        "Terima Kasih"
+    )
 
 
 async def _masih_boleh_refund(wa_number: str) -> bool:
@@ -89,19 +83,24 @@ async def _masih_boleh_refund(wa_number: str) -> bool:
     return str(o.get("status") or "").lower() == "pending"
 
 
-def konfirmasi_batal(order) -> str:
-    """Pertanyaan tertutup sebelum uang pelanggan diputuskan kembali."""
+def konfirmasi_batal(order, sudah_dibayar: bool) -> str:
+    """Pertanyaan tertutup sebelum pesanan benar-benar dibatalkan."""
     label = order.nomor_invoice or f"#{order.order_ref}"
+    if sudah_dibayar:
+        return (
+            f"Pesanan *{label}* sudah dibayar, jadi pembatalannya sekalian dengan "
+            "pengembalian dana.\n\n"
+            "Mau aku proses sekarang? Ketik *ya* untuk membatalkan dan mengembalikan "
+            "dananya, atau *tidak* kalau pesanannya diteruskan saja 🙏"
+        )
     return (
-        f"Pesanan *{label}* sudah dibayar, jadi pembatalannya sekalian dengan "
-        "pengembalian dana.\n\n"
-        "Mau aku proses sekarang? Ketik *ya* untuk membatalkan dan mengembalikan "
-        "dananya, atau *tidak* kalau pesanannya diteruskan saja 🙏"
+        f"Pesanan *{label}* mau dibatalkan ya?\n\n"
+        "Ketik *ya* untuk membatalkan, atau *tidak* kalau pesanannya diteruskan 🙏"
     )
 
 
-async def proses_batal_berbayar(wa_number: str) -> str:
-    """Jalankan pembatalan + refund sesudah pelanggan menjawab ya.
+async def proses_pembatalan(wa_number: str) -> str:
+    """Jalankan pembatalan sesudah pelanggan menjawab ya.
 
     Dua jalur dicoba karena backend boleh memilih bentuknya: endpoint cancel
     yang sudah ada (kalau nanti diizinkan menangani pesanan berbayar), lalu

@@ -476,6 +476,13 @@ async def test_cancel_calls_backend():
     )
     set_turn_context(TurnContext(wa_number=WA))
     out = await cancel_order.ainvoke({})
+    # Sejak 12 Sep setiap pembatalan PESANAN ditanyakan dulu — pesanan sudah
+    # tercatat di backend dan Admin Site, jadi tidak dihapus karena satu kalimat.
+    assert "*ya*" in out and "dibatalkan" in out.lower()
+    assert await store.get_active_pending(WA) is not None
+
+    from app.tools.cancel_order import proses_pembatalan
+    out = await proses_pembatalan(WA)
     assert "dibatalkan" in out.lower()
     assert await store.get_active_pending(WA) is None
 
