@@ -203,3 +203,16 @@ async def mark_ready(order_id: int, x_internal_key: str | None = Header(default=
     _require_internal_key(x_internal_key)
     ok = await background.notify_ready(order_id)
     return {"status": "ok" if ok else "not_found", "order_id": order_id}
+
+
+@router.post("/internal/orders/{order_id}/refunded")
+async def mark_refunded(order_id: int, x_internal_key: str | None = Header(default=None)):
+    """Kabari pelanggan begitu refund selesai — tanpa menunggu siklus polling.
+
+    Pola persis sama dengan /ready yang sudah dipakai backend. Polling 30 detik
+    tetap berjalan sebagai jaring pengaman, jadi kalau panggilan ini gagal atau
+    chatbot sedang restart, kabarnya cuma telat, tidak hilang.
+    """
+    _require_internal_key(x_internal_key)
+    ok = await background.notify_refunded(order_id)
+    return {"status": "ok" if ok else "not_found", "order_id": order_id}

@@ -64,6 +64,30 @@ def _teks_refund(order) -> str:
     return "\n\n".join(baris)
 
 
+async def tutup_karena_refund(order) -> bool:
+    """Tutup pesanan lokal dan kabari pelanggan. Dipakai polling DAN webhook."""
+    if order.status == "cancelled":
+        return False
+    await store.update_pending_order(order.id, status="refunded")
+    await store.set_state(order.wa_number, State.IDLE)
+    logger.info("Pesanan %s di-refund — pelanggan dikabari", order.order_ref)
+    await _notify(order.wa_number, _teks_refund(order))
+    return True
+
+
+async def notify_refunded(order_id: int) -> bool:
+    """Dipanggil backend lewat webhook internal begitu refund selesai.
+
+    Polling 30 detik tetap jalan sebagai jaring pengaman — kalau chatbot
+    kebetulan sedang restart saat webhook dikirim, kabarnya tidak hilang, cuma
+    telat paling lama setengah menit.
+    """
+    for order in await store.list_orders_by_status("pending", "paid", "ready"):
+        if str(order.order_ref) == str(order_id):
+            return await tutup_karena_refund(order)
+    return False
+
+
 async def _check_refunded() -> None:
     """Pesanan yang SUDAH dibayar bisa dibatalkan admin lewat refund.
 
@@ -81,10 +105,7 @@ async def _check_refunded() -> None:
             continue
         if str((res or {}).get("invoice_status") or "").lower() != "refunded":
             continue
-        await store.update_pending_order(order.id, status="refunded")
-        await store.set_state(order.wa_number, State.IDLE)
-        logger.info("Pesanan %s di-refund — pelanggan dikabari", order.order_ref)
-        await _notify(order.wa_number, _teks_refund(order))
+        await tutup_karena_refund(order)
 
 
 async def _check_once() -> None:

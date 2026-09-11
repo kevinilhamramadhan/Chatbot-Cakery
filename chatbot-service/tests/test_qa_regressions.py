@@ -1199,3 +1199,26 @@ async def test_pesanan_belum_dibayar_juga_dikonfirmasi_dulu(patch_externals):
     assert "dibatalkan" in hasil.lower()
     assert "dana" not in hasil.lower(), "belum dibayar: jangan menjanjikan pengembalian"
     assert await store.get_active_pending(WA) is None
+
+
+async def test_webhook_refund_mengabari_pelanggan_tanpa_menunggu_polling(patch_externals):
+    """Polling 30 detik itu jaring pengaman, bukan satu-satunya jalan: backend
+    bisa menembak webhook internal begitu refund selesai, persis pola /ready."""
+    from app.conversation import background
+
+    await store.create_pending_order(
+        wa_number=WA, order_ref="90", payment_ref="MID", payment_type="dp",
+        total_amount=120000, amount_due=60000, items_json="[]", customer_json="{}",
+        delivery_method="pickup", status="paid", nomor_invoice="INV-20260912-90",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2),
+    )
+
+    ok = await background.notify_refunded(90)
+
+    assert ok is True
+    assert await store.get_active_pending(WA) is None
+    kabar = [t for _wa, t in patch_externals["sent"]]
+    assert kabar and "dikembalikan" in kabar[-1]
+
+    # Pesanan yang tidak dikenal tidak bikin galat, cuma dilaporkan not_found.
+    assert await background.notify_refunded(999999) is False
