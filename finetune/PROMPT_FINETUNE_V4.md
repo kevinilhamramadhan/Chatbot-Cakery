@@ -87,9 +87,11 @@ tapi akar model-nya baru benar-benar sembuh lewat dataset v4):
 - **GGUF DILARANG masuk git** (GitHub limit 100MB; `.gitignore` sudah punya
   `*.gguf` & `*.gguf.*` — jangan dilonggarkan). Arsip resmi: HuggingFace
   `LasagnaS/toti-qwen-gguf`.
-- Import: `ollama create toti-qwen-1.7b-v4 -f Modelfile.qwen3-1.7b`
-  (sesuaikan path FROM). Model store host: `/usr/share/ollama/.ollama`
-  (di-mount juga oleh container `toti-ollama`).
+- Import: lewat container, bukan host. Ollama jalan sebagai container
+  (`ollama/ollama:latest`) dan model store-nya ada di named volume
+  `ollama_models:/root/.ollama` — **tidak ada Ollama terinstal di host**.
+  Baris "model store host: /usr/share/ollama/.ollama" di versi lama file ini
+  SUDAH TIDAK BERLAKU. Cara benarnya ada di `scripts/bootstrap.sh` §3.
 
 ## 5. EVAL — syarat rilis (JANGAN dilonggarkan)
 
