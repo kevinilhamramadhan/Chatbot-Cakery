@@ -1197,4 +1197,5 @@ async def test_pesanan_belum_dibayar_juga_dikonfirmasi_dulu(patch_externals):
     hasil = await proses_pembatalan(WA)
     assert dibatalkan == ["9105"]
     assert "dibatalkan" in hasil.lower()
+    assert "dana" not in hasil.lower(), "belum dibayar: jangan menjanjikan pengembalian"
     assert await store.get_active_pending(WA) is None

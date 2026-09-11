@@ -112,6 +112,7 @@ async def proses_pembatalan(wa_number: str) -> str:
         await store.set_state(wa_number, State.IDLE)
         return "Tidak ada pesanan aktif yang perlu dibatalkan 😊"
 
+    sudah_dibayar = order.status in ("paid", "ready")
     berhasil = False
     try:
         await backend.cancel_order(order.order_ref)
@@ -131,6 +132,9 @@ async def proses_pembatalan(wa_number: str) -> str:
     await store.update_pending_order(order.id, status="cancelled")
     await store.set_cart(wa_number, [])
     await store.set_state(wa_number, State.IDLE)
+    if not sudah_dibayar:
+        # Belum ada uang yang masuk — jangan menjanjikan pengembalian dana.
+        return "Pesanan kamu sudah dibatalkan. Terima kasih 🙏"
     return (
         "Pesanan kamu sudah dibatalkan dan pengembalian dananya diproses ✅\n\n"
         "Dananya kembali lewat metode pembayaran yang kamu pakai, dan bisa makan "
