@@ -956,3 +956,19 @@ async def test_metode_pengiriman_menerima_kalimat_sehari_hari(patch_externals):
         await handle_message(WA, pesan)
         cust = await store.get_customer(WA)
         assert cust.get("metode_pengiriman") == harapan, f"{pesan!r} -> {cust}"
+
+
+async def test_jawaban_jumlah_bukan_izin_menyambungkan_ke_admin(patch_externals):
+    """Terukur: tawaran admin menggantung, pelanggan menjawab jumlah kue dengan
+    "dua ya", dan "ya" membuatnya dibaca sebagai persetujuan — bot bungkam."""
+    from app.tools.escalate import escalate_to_admin
+
+    _mock_agent(patch_externals["monkeypatch"], "Oke kak.")
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom"}))
+
+    await handle_message(WA, "dua ya")
+
+    assert await store.is_takeover_active(WA) is False
+    assert patch_externals["sent"] == []

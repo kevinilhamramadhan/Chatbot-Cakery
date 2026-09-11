@@ -64,7 +64,10 @@ def _history_view(content: str) -> str:
         return "[Aku sudah meneruskan permintaan itu ke admin via tool escalate_to_admin]"
     if content.startswith("*") and "Harga:" in content:
         produk = content.split("*")[1] if content.count("*") >= 2 else "produk"
-        return f"[Aku sudah menampilkan detail {produk} + fotonya via tool get_product_detail]"
+        return (
+            f"[Aku sudah menampilkan detail {produk} + fotonya via tool "
+            f"get_product_detail, dan menanyakan mau pesan berapa banyak]"
+        )
     if len(content) > 200:
         return content[:200] + " …(dipotong)"
     return content

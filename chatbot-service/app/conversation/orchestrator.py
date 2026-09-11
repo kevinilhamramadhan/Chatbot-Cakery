@@ -198,7 +198,17 @@ async def handle_message(wa_number: str, text: str) -> Reply:
             # tawaran dari delapan giliran yang lalu berarti membungkam bot
             # sehari penuh atas sesuatu yang sudah tidak dibicarakan lagi.
             await store.set_pending_escalation(wa_number, None)
-        elif text_is_confirm(text) and not text_is_cancel(text) and not text_is_gratitude(text):
+        elif (
+            text_is_confirm(text)
+            and not text_is_cancel(text)
+            and not text_is_gratitude(text)
+            # Pesan yang membawa angka adalah jawaban tentang pesanan, bukan izin
+            # menyambungkan ke admin. Terukur: "dua ya" (jawaban jumlah kue)
+            # diterima sebagai persetujuan karena "ya" ada di CONFIRM_WORDS, dan
+            # bot langsung bungkam. Aturan yang sama sudah dipakai di langkah
+            # konfirmasi keranjang.
+            and not mentions_quantity(text)
+        ):
             await store.set_pending_escalation(wa_number, None)
             reply = Reply(text=await escalation.start_takeover(
                 wa_number, session.pending_escalation))
@@ -329,14 +339,27 @@ async def _run_agent_turn(wa_number: str, text: str) -> Reply:
     # yang sama dua kali dan routing-nya ambruk (lihat recent_history).
     history = await store.recent_history(wa_number, limit=7, exclude_last_user=text)
 
-    jumlah = bare_quantity(text)
-    produk = _produk_yang_ditanyakan(history) if jumlah else None
-    if produk:
-        ctx.tools_called.append("add_to_cart")
-        answer = str(await add_to_cart.ainvoke(
-            {"items": [{"product": produk, "qty": jumlah}]}))
-    else:
-        answer = await run_agent(wa_number, text, history)
+    answer = await run_agent(wa_number, text, history)
+
+    # Jaring pengaman, BUKAN routing: model tetap yang memutuskan lebih dulu, dan
+    # ini hanya menangkap satu kelalaian yang terukur. Kalau balasan terakhir bot
+    # menampilkan detail satu kue dan bertanya "mau pesan berapa?", lalu
+    # pelanggan menjawab dengan jumlah saja, jawabannya sudah tidak ambigu —
+    # namun model 1,7 B kadang tetap tidak memanggil tool apa pun dan pelanggan
+    # dijawab "boleh sebutkan nama kuenya?" berulang kali sampai menyerah
+    # (terukur di suite W2). Diukur ulang sesudah petunjuk promptnya diperbaiki,
+    # 18 percobaan dengan jalur ini dimatikan: model berhasil sendiri 13 kali,
+    # dan "satu aja" gagal 3 dari 3. Jadi cabang ini memang masih perlu, tapi
+    # dipasang SESUDAH model — model tetap yang memutuskan, ini hanya menangkap
+    # giliran yang tidak diputuskan sama sekali.
+    if not ctx.tools_called:
+        jumlah = bare_quantity(text)
+        produk = _produk_yang_ditanyakan(history) if jumlah else None
+        if produk:
+            logger.info("jaring pengaman: jawaban jumlah untuk %s", produk)
+            ctx.tools_called.append("add_to_cart")
+            answer = str(await add_to_cart.ainvoke(
+                {"items": [{"product": produk, "qty": jumlah}]}))
     # A tool (add_to_cart) may have requested a state transition.
     if ctx.next_state:
         await store.set_state(wa_number, ctx.next_state)

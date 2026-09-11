@@ -21,11 +21,18 @@ logger = logging.getLogger(__name__)
 
 @tool
 async def escalate_to_admin(reason: str) -> str:
-    """Tawarkan menyambungkan pelanggan ke admin manusia (human takeover).
+    """Tawarkan menyambungkan pelanggan ke admin, KHUSUS untuk pesanan kue custom.
 
-    Gunakan untuk kue custom atau permintaan di luar kemampuanmu. `reason`
-    berisi ringkasan singkat kebutuhan pelanggan. Tool ini hanya MENAWARKAN —
-    penyambungan baru terjadi setelah pelanggan menjawab "ya".
+    Kue custom = desain, rasa, ukuran, atau tulisan yang tidak ada di menu dan
+    harus dibicarakan orang, misalnya "kue ulang tahun tema Frozen tiga tingkat".
+
+    JANGAN panggil tool ini untuk hal lain — bukan untuk pertanyaan yang belum
+    kamu tahu jawabannya, bukan untuk keluhan, bukan untuk pelanggan yang minta
+    bicara dengan orang, dan bukan untuk pesanan biasa dari menu. Kalau kamu
+    tidak tahu jawabannya, katakan apa adanya.
+
+    `reason` berisi ringkasan singkat kue custom yang diminta. Tool ini hanya
+    MENAWARKAN — penyambungan terjadi setelah pelanggan menjawab "ya".
     """
     wa = get_turn_context().wa_number
     await store.set_pending_escalation(wa, reason)
