@@ -1072,6 +1072,12 @@ async def test_batal_setelah_bayar_minta_konfirmasi_dulu(patch_externals):
     await _seed_awaiting_payment(order_ref="9101")
     pesanan = await store.get_active_pending(WA)
     await store.update_pending_order(pesanan.id, status="paid")
+
+    async def f_latest(wa):
+        return {"id": 9101, "status": "pending"}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_latest_order", f_latest)
     set_turn_context(TurnContext(wa_number=WA, user_text="batalin pesananku"))
 
     out = await cancel_order.ainvoke({})
@@ -1138,3 +1144,30 @@ async def test_konfirmasi_batal_berhasil_saat_backend_mengizinkan(patch_external
     assert "dibatalkan" in out and "pengembalian dananya" in out
     assert await store.get_active_pending(WA) is None
     assert (await store.get_or_create_session(WA)).state == State.IDLE
+
+
+async def test_pesanan_yang_sudah_diproses_tidak_ditawari_pembatalan(patch_externals):
+    """Kebijakan toko: refund mandiri hanya selama pesanan masih `pending`.
+    Perpindahan ke `in_process` dilakukan admin manual, dan itu penanda kuenya
+    mulai dikerjakan — jangan menawarkan pembatalan yang pasti ditolak backend."""
+    from app.tools.cancel_order import cancel_order
+
+    await _seed_awaiting_payment(order_ref="9104")
+    pesanan = await store.get_active_pending(WA)
+    await store.update_pending_order(pesanan.id, status="paid")
+
+    async def f_latest(wa):
+        return {"id": 9104, "status": "in_process"}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_latest_order", f_latest)
+    patch_externals["monkeypatch"].setattr(
+        settings_module, "store_support_email", "halo@toticakery.id", raising=False)
+    set_turn_context(TurnContext(wa_number=WA, user_text="batalin pesananku"))
+
+    out = await cancel_order.ainvoke({})
+
+    assert "sudah mulai kami proses" in out
+    assert "halo@toticakery.id" in out
+    assert "*ya*" not in out, "jangan menawarkan konfirmasi yang pasti gagal"
+    assert (await store.get_or_create_session(WA)).state != State.AWAITING_CANCEL_CONFIRMATION

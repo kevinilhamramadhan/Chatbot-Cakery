@@ -44,6 +44,15 @@ async def cancel_order() -> str:
     # jadi pelanggan harus menjawab "ya" dulu. Pertanyaannya tertutup dan bot
     # sendiri yang mengajukannya, sehingga jawabannya boleh dibaca kode.
     if order.status in ("paid", "ready"):
+        if not await _masih_boleh_refund(wa):
+            # Kebijakan toko: refund mandiri hanya selama pesanan masih pending.
+            # Begitu admin memindahkannya ke "sedang diproses", kuenya sudah
+            # dikerjakan. Lebih baik dikatakan sekarang daripada menawarkan
+            # pembatalan yang pasti ditolak backend beberapa detik kemudian.
+            return (
+                "Pesanan ini sudah mulai kami proses, jadi pembatalannya tidak "
+                "bisa otomatis lewat chat." + _jalur_tindak_lanjut()
+            )
         get_turn_context().next_state = State.AWAITING_CANCEL_CONFIRMATION
         return konfirmasi_batal(order)
 
@@ -60,6 +69,24 @@ async def cancel_order() -> str:
     await store.set_cart(wa, [])
     await store.set_state(wa, State.IDLE)
     return "Pesanan kamu sudah dibatalkan. Terima kasih 🙏"
+
+
+async def _masih_boleh_refund(wa_number: str) -> bool:
+    """Hanya pesanan berstatus `pending` di backend yang boleh dibatalkan sendiri.
+
+    Perpindahan `pending` -> `in_process` dilakukan admin secara manual, dan
+    itulah penanda bahwa kuenya mulai dikerjakan. Kalau status tidak terbaca
+    (backend sedang tidak bisa dihubungi), pelanggan tetap ditanya — keputusan
+    akhirnya toh ada di backend saat pembatalan dieksekusi.
+    """
+    try:
+        o = await backend.get_latest_order(wa_number)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("status pesanan tidak terbaca saat cek refund: %s", exc)
+        return True
+    if not o:
+        return True
+    return str(o.get("status") or "").lower() == "pending"
 
 
 def konfirmasi_batal(order) -> str:
