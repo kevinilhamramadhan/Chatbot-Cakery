@@ -38,6 +38,18 @@ TOOLS_JSON = json.dumps([convert_to_openai_tool(t) for t in ALL_TOOLS],
                         ensure_ascii=False)
 
 KELUHAN = "Pelanggan komplain pesanan diduga salah kirim"
+
+# Balasan lama yang menawarkan sambungan ke admin untuk pertanyaan biasa. Di v6
+# tawaran itu dihapus (eskalasi khusus kue custom), dan meski teks baris non-tool
+# TIDAK ikut dinilai harness — yang dihitung cuma "memanggil tool atau tidak" —
+# membiarkannya berarti berkas acuan mengajarkan hal yang sudah tidak berlaku.
+TAWARAN_ADMIN = ("mau dibantu admin", "sambungkan ke admin", "kusambungkan",
+                 "kuteruskan ke admin", "forward you to our admin",
+                 "connect you with our admin")
+GANTI_TAWARAN = {
+    "id": "Info soal itu belum aku pegang kak 🙏 Ada lagi yang bisa kubantu soal menu atau pesanan?",
+    "en": "I'm not sure about that one 🙏 Happy to help with the menu or your order, though!",
+}
 JAWAB_NEGO = ("Harga kami mengikuti daftar menu ya kak 🙏 Tapi untuk pesanan banyak, "
               "sebutkan saja kuenya dan jumlahnya — nanti kubuatkan ringkasan totalnya 😊")
 
@@ -70,6 +82,17 @@ def main() -> None:
             row["meta"]["type"] = "N9"
             diubah.append(("nego -> jawab sendiri, tanpa tool", teks[:60]))
 
+    # Balasan non-tool yang masih menawarkan admin.
+    ditawar = 0
+    for row in rows:
+        akhir = row["messages"][-1]
+        if akhir.get("tool_calls"):
+            continue
+        isi = (akhir.get("content") or "")
+        if any(k in isi.lower() for k in TAWARAN_ADMIN):
+            akhir["content"] = GANTI_TAWARAN[row["meta"].get("lang", "id")]
+            ditawar += 1
+
     with PATH.open("w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -77,6 +100,7 @@ def main() -> None:
     n_tool = len(json.loads(TOOLS_JSON))
     print(f"{len(rows)} baris test | tools_json disegarkan ke {n_tool} tool "
           f"pada {disegarkan} baris")
+    print(f"{ditawar} balasan yang menawarkan admin diganti")
     print(f"{len(diubah)} baris diselaraskan ke aturan v6:")
     for alasan, teks in diubah:
         print(f"  - {alasan}: {teks!r}")

@@ -75,6 +75,12 @@ dua jadi `sampaikan_maaf`, satu jadi jawaban teks tanpa tool. Percakapan pada 97
 baris lain **tidak disentuh**, jadi perbandingan v3→v4→v5→v6 tetap berlaku
 dengan catatan kaki ini.
 
+Skrip yang sama juga mengganti **3 balasan acuan** yang masih menawarkan
+sambungan ke admin untuk pertanyaan biasa ("mau dibantu admin langsung?"). Teks
+baris non-tool tidak ikut dinilai harness — yang dihitung hanya "memanggil tool
+atau tidak" — jadi metriknya tidak berubah sama sekali; yang diperbaiki adalah
+berkas acuan yang kalau dibaca orang mengajarkan aturan yang sudah dicabut.
+
 Skrip yang sama juga **menyegarkan `tools_json`** di seluruh 100 baris menjadi
 13 tool runtime. Ini bukan kosmetik: notebook memakai `tools_json` milik tiap
 baris sebagai daftar tool yang ditawarkan ke model, sementara baris test masih
@@ -84,6 +90,24 @@ tidak pernah ditawarkan, dan sejak v5 `lihat_keranjang`, `check_payment_status`,
 serta `kirim_ulang_pembayaran` juga tidak pernah ikut diuji. Harness lokal tidak
 pernah punya masalah ini — ia memang mem-`bind_tools(ALL_TOOLS)` dari kode
 runtime.
+
+## 3b. Audit dataset
+
+`audit_dataset.py` menjalankan 22 pemeriksaan: jumlah baris, keberadaan tipe
+baru, daftar tool = 13 tool runtime di semua split, paritas system prompt dengan
+kode runtime, keabsahan argumen tiap tool, aturan perilaku v6 (tidak ada
+keluhan/permintaan-orang/nego yang dieskalasi, tidak ada tawaran admin di luar
+kue custom), rujukan produk pada jawaban jumlah polos, kebocoran teks test ke
+train/val, dan teks user kembar.
+
+```bash
+chatbot-service/.venv/bin/python finetune/audit_dataset.py finetune/data
+```
+
+**Jalankan juga terhadap salinan yang diunduh dari HF sebelum training** — itu
+yang benar-benar dibaca notebook, sementara berkas lokal bisa saja lebih baru.
+Terakhir dijalankan 11 Sep 2026 terhadap salinan HF: 22/22 lolos, dan sha256
+ketiga berkas sama persis dengan salinan lokal.
 
 ## 4. Urutan kerja
 
