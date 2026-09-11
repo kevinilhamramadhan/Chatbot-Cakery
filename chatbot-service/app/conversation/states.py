@@ -9,6 +9,9 @@ class State(StrEnum):
     AWAITING_CART_CONFIRMATION = "awaiting_cart_confirmation"
     COLLECTING_IDENTITY = "collecting_identity"
     AWAITING_PAYMENT = "awaiting_payment"
+    # Pesanan yang SUDAH dibayar hanya dibatalkan setelah pelanggan menjawab ya:
+    # konsekuensinya uang berpindah, jadi tidak boleh ditebak dari satu kalimat.
+    AWAITING_CANCEL_CONFIRMATION = "awaiting_cancel_confirm"
     ORDER_ACTIVE = "order_active"       # paid, awaiting ready/pickup
 
 

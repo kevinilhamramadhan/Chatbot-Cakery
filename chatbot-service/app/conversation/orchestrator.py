@@ -19,6 +19,7 @@ from app.conversation.context import (
     set_turn_context,
 )
 from app.conversation.states import (
+    _PUNCT_RE,
     State,
     mentions_quantity,
     text_is_cancel,
@@ -221,7 +222,9 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     set_turn_context(TurnContext(wa_number=wa_number, user_text=text))
 
     started = time.monotonic()
-    if state == State.AWAITING_CART_CONFIRMATION:
+    if state == State.AWAITING_CANCEL_CONFIRMATION:
+        reply = await _handle_cancel_confirmation(wa_number, text)
+    elif state == State.AWAITING_CART_CONFIRMATION:
         reply = await _handle_confirmation(wa_number, text)
     elif state == State.COLLECTING_IDENTITY:
         reply = await _handle_identity(wa_number, text)
@@ -319,6 +322,40 @@ async def _run_agent_turn(wa_number: str, text: str) -> Reply:
     if ctx.next_state:
         await store.set_state(wa_number, ctx.next_state)
     return Reply(text=answer, media=ctx.media)
+
+
+# ── Konfirmasi pembatalan pesanan yang sudah dibayar ─────────────────────────
+async def _handle_cancel_confirmation(wa_number: str, text: str) -> Reply:
+    """Jawaban atas pertanyaan tertutup milik bot sendiri: "yakin batal?".
+
+    Deterministik karena taruhannya uang pelanggan: pembatalan berbayar berarti
+    dana dikembalikan dan pesanan hangus, jadi izinnya harus eksplisit dan tidak
+    boleh disimpulkan model dari kalimat bebas.
+    """
+    from app.tools.cancel_order import proses_batal_berbayar
+
+    if text_is_confirm(text) and not text_is_cancel(text) and not mentions_quantity(text):
+        return Reply(text=await proses_batal_berbayar(wa_number))
+
+    # "tidak", "gajadi", atau apa pun yang bukan persetujuan: pesanan diteruskan.
+    if text_is_cancel(text) or _menolak(text):
+        await store.set_state(wa_number, State.ORDER_ACTIVE)
+        return Reply(text="Oke, pesanannya tetap kami proses ya 😊")
+
+    # Pertanyaan lain dijawab model dulu, lalu pertanyaannya diulang.
+    return await _answer_then_reask(
+        wa_number, text,
+        "Balik ke tadi ya — pesanannya jadi dibatalkan? Ketik *ya* atau *tidak* 🙏",
+        back_to=State.AWAITING_CANCEL_CONFIRMATION)
+
+
+_KATA_TOLAK = {"tidak", "ga", "gak", "nggak", "engga", "enggak", "jangan", "lanjut",
+               "lanjutkan", "teruskan", "no"}
+
+
+def _menolak(text: str) -> bool:
+    kata = _PUNCT_RE.sub(" ", (text or "").lower()).split()
+    return bool(kata) and len(kata) <= 4 and any(k in _KATA_TOLAK for k in kata)
 
 
 # ── Cart confirmation step (PROMPT §10.4-5) ───────────────────────────────────

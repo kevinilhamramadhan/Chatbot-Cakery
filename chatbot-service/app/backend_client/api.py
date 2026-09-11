@@ -126,6 +126,32 @@ async def cancel_order(order_id) -> dict:
         return r.json()
 
 
+async def refund_order(order_id, reason: str, wa_number: str = "") -> dict | None:
+    """Minta backend membatalkan pesanan yang SUDAH dibayar sekaligus me-refund.
+
+    POST /orders/{id}/refund. Hari ini endpoint itu minta JWT Admin/Owner, jadi
+    panggilan dengan X-Service-Key dijawab 401 dan fungsi ini mengembalikan
+    None — pemanggilnya lalu mengarahkan pelanggan ke email. Begitu backend
+    mengizinkan service key (lihat permintaan BE-Refund), jalur ini langsung
+    hidup tanpa perlu mengubah apa pun lagi di sini.
+    """
+    payload = {"reason": reason or "Dibatalkan pelanggan lewat chatbot"}
+    if wa_number:
+        payload["nomor_wa"] = canonical_wa_number(wa_number) or wa_number
+    try:
+        async with httpx.AsyncClient(timeout=_WRITE_TIMEOUT) as c:
+            r = await c.post(f"{_base()}/orders/{int(order_id)}/refund",
+                             json=payload, headers=_headers())
+            if r.status_code >= 400:
+                logger.info("refund ditolak backend (%s): %s",
+                            r.status_code, r.text[:200])
+                return None
+            return r.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("refund gagal dipanggil: %s", exc)
+        return None
+
+
 def _path_number(wa_number: str) -> str:
     """Guard before a phone number is interpolated into a backend URL path.
 

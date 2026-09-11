@@ -1064,26 +1064,77 @@ async def test_tool_status_pembayaran_mengenali_refund(patch_externals):
     assert "dikembalikan" in out and "belum terdeteksi" not in out
 
 
-async def test_batal_setelah_bayar_memberi_jalan_yang_nyata(patch_externals):
-    """Refund hanya bisa dilakukan Admin/Owner lewat JWT, jadi chatbot memang
-    tidak bisa mengeksekusinya. Yang tidak boleh: menutup percakapan dengan
-    "silakan hubungi admin" — pelanggan tidak punya nomor admin, dan sejak
-    eskalasi dipersempit ke kue custom, bot juga tidak menawarkan sambungan."""
+async def test_batal_setelah_bayar_minta_konfirmasi_dulu(patch_externals):
+    """Uang pelanggan tidak berpindah karena satu kalimat: pesanan yang sudah
+    dibayar dijawab pertanyaan tertutup dulu, bukan langsung dibatalkan."""
     from app.tools.cancel_order import cancel_order
 
     await _seed_awaiting_payment(order_ref="9101")
-
-    async def f_cancel(order_ref):
-        raise httpx.HTTPStatusError("409", request=None, response=None)
-
-    patch_externals["monkeypatch"].setattr(
-        patch_externals["backend"], "cancel_order", f_cancel)
-    patch_externals["monkeypatch"].setattr(
-        settings_module, "store_support_email", "halo@toticakery.id", raising=False)
+    pesanan = await store.get_active_pending(WA)
+    await store.update_pending_order(pesanan.id, status="paid")
     set_turn_context(TurnContext(wa_number=WA, user_text="batalin pesananku"))
 
     out = await cancel_order.ainvoke({})
 
+    assert "*ya*" in out and "dana" in out.lower()
+    assert await store.get_active_pending(WA) is not None, "belum boleh dibatalkan"
+
+
+async def test_konfirmasi_batal_tanpa_dukungan_backend_tidak_membuntukan(patch_externals):
+    """Selama backend belum mengizinkan chatbot me-refund, jawaban "ya" tidak
+    boleh berakhir buntu — pelanggan diberi alamat yang benar-benar ditangani."""
+    from app.tools.cancel_order import proses_batal_berbayar
+
+    await _seed_awaiting_payment(order_ref="9102")
+    pesanan = await store.get_active_pending(WA)
+    await store.update_pending_order(pesanan.id, status="paid")
+
+    async def f_cancel(order_ref):
+        raise httpx.HTTPStatusError("409", request=None, response=None)
+
+    async def f_refund(order_ref, reason, wa_number=""):
+        return None
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "cancel_order", f_cancel)
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "refund_order", f_refund)
+    patch_externals["monkeypatch"].setattr(
+        settings_module, "store_support_email", "halo@toticakery.id", raising=False)
+
+    out = await proses_batal_berbayar(WA)
+
     assert "halo@toticakery.id" in out
     assert "hubungi admin" not in out.lower()
-    assert "dikembalikan" in out
+    assert await store.get_active_pending(WA) is not None, "tidak ada yang dibatalkan"
+
+
+async def test_konfirmasi_batal_berhasil_saat_backend_mengizinkan(patch_externals):
+    """Begitu backend mengizinkan (cancel berbayar ATAU refund lewat service key),
+    jalurnya langsung hidup tanpa perubahan kode lagi."""
+    from app.tools.cancel_order import proses_batal_berbayar
+
+    await _seed_awaiting_payment(order_ref="9103")
+    pesanan = await store.get_active_pending(WA)
+    await store.update_pending_order(pesanan.id, status="paid")
+
+    dipanggil = []
+
+    async def f_cancel(order_ref):
+        raise httpx.HTTPStatusError("409", request=None, response=None)
+
+    async def f_refund(order_ref, reason, wa_number=""):
+        dipanggil.append((order_ref, wa_number))
+        return {"id": int(order_ref), "status": "cancelled"}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "cancel_order", f_cancel)
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "refund_order", f_refund)
+
+    out = await proses_batal_berbayar(WA)
+
+    assert dipanggil and dipanggil[0][0] == "9103"
+    assert "dibatalkan" in out and "pengembalian dananya" in out
+    assert await store.get_active_pending(WA) is None
+    assert (await store.get_or_create_session(WA)).state == State.IDLE
