@@ -974,7 +974,7 @@ async def test_balasan_keluhan_menyebut_email_kalau_disetel(patch_externals):
 
     set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
     patch_externals["monkeypatch"].setattr(
-        settings, "store_support_email", "halo@toticakery.id", raising=False)
+        settings_module, "store_support_email", "halo@toticakery.id", raising=False)
     out = await keluhan.sampaikan_maaf.ainvoke({"keluhan": "kue basi"})
     assert "halo@toticakery.id" in out
 
@@ -1062,3 +1062,28 @@ async def test_tool_status_pembayaran_mengenali_refund(patch_externals):
     out = await check_payment_status.ainvoke({})
 
     assert "dikembalikan" in out and "belum terdeteksi" not in out
+
+
+async def test_batal_setelah_bayar_memberi_jalan_yang_nyata(patch_externals):
+    """Refund hanya bisa dilakukan Admin/Owner lewat JWT, jadi chatbot memang
+    tidak bisa mengeksekusinya. Yang tidak boleh: menutup percakapan dengan
+    "silakan hubungi admin" — pelanggan tidak punya nomor admin, dan sejak
+    eskalasi dipersempit ke kue custom, bot juga tidak menawarkan sambungan."""
+    from app.tools.cancel_order import cancel_order
+
+    await _seed_awaiting_payment(order_ref="9101")
+
+    async def f_cancel(order_ref):
+        raise httpx.HTTPStatusError("409", request=None, response=None)
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "cancel_order", f_cancel)
+    patch_externals["monkeypatch"].setattr(
+        settings_module, "store_support_email", "halo@toticakery.id", raising=False)
+    set_turn_context(TurnContext(wa_number=WA, user_text="batalin pesananku"))
+
+    out = await cancel_order.ainvoke({})
+
+    assert "halo@toticakery.id" in out
+    assert "hubungi admin" not in out.lower()
+    assert "dikembalikan" in out

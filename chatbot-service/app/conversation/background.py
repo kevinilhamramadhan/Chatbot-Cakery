@@ -112,9 +112,12 @@ async def _check_once() -> None:
                         "melewati batas waktu pembayaran. Silakan pesan lagi "
                         "kapan saja ya 🙏")
             else:
+                surel = settings.store_support_email.strip()
+                lanjut = (f"kirim bukti transfernya ke {surel} ya" if surel
+                          else "sampaikan bukti transfernya ke kontak resmi kami ya")
                 text = (f"Batas waktu pembayaran pesanan *{_label(order)}* sudah "
                         "lewat, jadi pesanannya tidak kami proses. Kalau kamu "
-                        "terlanjur membayar, hubungi admin ya 🙏")
+                        f"terlanjur membayar, {lanjut} 🙏")
             await _notify(order.wa_number, text)
             continue
 
