@@ -153,6 +153,9 @@ class Settings(BaseSettings):
     # ── Store info (used in "ready for pickup/delivery" messages) ─────────────
     store_name: str = "Toti Cakery"
     store_address: str = "Jl. Contoh No. 123, Jakarta (ganti di .env)"
+    # Alamat email untuk tindak lanjut keluhan. Kosong -> balasan keluhan tidak
+    # menyebut email sama sekali, daripada mengirim pelanggan ke alamat karangan.
+    store_support_email: str = ""
 
     # ── Owner gating for financial_report / business_analytics ────────────────
     owner_wa_numbers: str = ""  # comma-separated

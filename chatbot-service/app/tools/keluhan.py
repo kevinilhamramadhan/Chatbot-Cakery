@@ -20,14 +20,33 @@ from app.core.security import mask_phone, sanitize_relay
 
 logger = logging.getLogger(__name__)
 
-_TEKS = (
-    "Mohon maaf sekali atas ketidaknyamanannya 🙏 Ini jelas bukan pengalaman "
-    f"yang kami harapkan dari {settings.store_name}.\n\n"
-    "Boleh dibantu ceritakan sedikit lagi — *nomor pesanan* (kalau ada), "
-    "*kapan* kuenya diterima, dan kalau memungkinkan *fotonya*? Keluhanmu akan "
-    "kami catat dan tindak lanjuti.\n\n"
-    "Terima kasih sudah memberi tahu kami ya."
-)
+def _teks() -> str:
+    """Permintaan maaf yang tetap; email tindak lanjut diambil dari setelan.
+
+    Pelanggan sengaja TIDAK diminta menceritakan ulang kejadiannya di chat:
+    yang dia butuhkan saat mengeluh adalah permintaan maaf dan satu jalan yang
+    jelas untuk ditindaklanjuti, bukan formulir. Kalau STORE_SUPPORT_EMAIL belum
+    diisi, kalimat emailnya dilewati — lebih baik tidak menyebut alamat daripada
+    mengirim pelanggan ke alamat yang tidak ada.
+    """
+    baris = [
+        "Mohon maaf sekali atas ketidaknyamanannya 🙏 Ini bukan pengalaman yang "
+        f"kami harapkan dari {settings.store_name}, dan masukanmu jadi bahan "
+        "perbaikan kami ke depannya.",
+    ]
+    email = settings.store_support_email.strip()
+    if email:
+        baris.append(
+            f"Kalau mau ditindaklanjuti, silakan kirim keluhanmu ke *{email}* ya — "
+            "nanti tim kami yang menangani."
+        )
+    else:
+        baris.append(
+            "Kalau mau ditindaklanjuti, keluhanmu bisa disampaikan ke kontak "
+            "resmi Toti Cakery ya."
+        )
+    baris.append("Terima kasih sudah memberi tahu kami 🙏")
+    return "\n\n".join(baris)
 
 
 @tool
@@ -45,4 +64,4 @@ async def sampaikan_maaf(keluhan: str) -> str:
     logger.warning(
         "KELUHAN dari %s: %s", mask_phone(ctx.wa_number), sanitize_relay(keluhan or "")[:200]
     )
-    return _TEKS
+    return _teks()

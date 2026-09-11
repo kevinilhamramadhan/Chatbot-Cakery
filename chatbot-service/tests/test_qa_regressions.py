@@ -954,7 +954,9 @@ async def test_keluhan_dijawab_permintaan_maaf_yang_tetap(patch_externals):
     out = await sampaikan_maaf.ainvoke({"keluhan": "kue diterima sudah basi"})
 
     assert "Mohon maaf" in out
-    assert "nomor pesanan" in out.lower()
+    assert "bahan perbaikan" in out
+    # Pelanggan yang sedang kecewa tidak dimintai cerita ulang.
+    assert "nomor pesanan" not in out.lower() and "fotonya" not in out.lower()
     assert await store.is_takeover_active(WA) is False, "keluhan tidak membungkam bot"
 
 
@@ -963,3 +965,20 @@ async def test_tool_keluhan_terdaftar_untuk_model(patch_externals):
     from app.tools.registry import TOOLS_BY_NAME
 
     assert "sampaikan_maaf" in TOOLS_BY_NAME
+
+
+async def test_balasan_keluhan_menyebut_email_kalau_disetel(patch_externals):
+    """Alamat tindak lanjut diambil dari setelan, dan tidak pernah dikarang."""
+    from app.core.config import settings
+    from app.tools import keluhan
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
+    patch_externals["monkeypatch"].setattr(
+        settings, "store_support_email", "halo@toticakery.id", raising=False)
+    out = await keluhan.sampaikan_maaf.ainvoke({"keluhan": "kue basi"})
+    assert "halo@toticakery.id" in out
+
+    patch_externals["monkeypatch"].setattr(
+        settings, "store_support_email", "", raising=False)
+    out = await keluhan.sampaikan_maaf.ainvoke({"keluhan": "kue basi"})
+    assert "@" not in out, "tanpa setelan, jangan menyebut alamat apa pun"
