@@ -6,6 +6,7 @@ from app.tools.compare_products import compare_products
 from app.tools.escalate import escalate_to_admin
 from app.tools.get_menu import get_menu
 from app.tools.get_product_detail import get_product_detail
+from app.tools.keluhan import sampaikan_maaf
 from app.tools.order_status import get_order_status
 from app.tools.payment_info import kirim_ulang_pembayaran
 from app.tools.payment_status import check_payment_status
@@ -23,6 +24,7 @@ ALL_TOOLS = [
     kirim_ulang_pembayaran,
     cancel_order,
     escalate_to_admin,
+    sampaikan_maaf,
     financial_report,
     business_analytics,
 ]

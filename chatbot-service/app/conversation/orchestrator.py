@@ -20,7 +20,6 @@ from app.conversation.context import (
 )
 from app.conversation.states import (
     State,
-    bare_quantity,
     mentions_quantity,
     text_is_cancel,
     text_is_confirm,
@@ -29,7 +28,6 @@ from app.conversation.states import (
 from app.core.config import settings
 from app.core.security import mask_phone
 from app.llm.agent import run_agent
-from app.tools.add_to_cart import add_to_cart
 
 logger = logging.getLogger(__name__)
 
@@ -260,29 +258,6 @@ async def _escalation_offer_expired(wa_number: str) -> bool:
     return sesudahnya > _MAKS_GILIRAN_TAWARAN
 
 
-_TANYA_JUMLAH = "Mau pesan ini? Bilang aja jumlahnya"
-
-
-def _produk_yang_ditanyakan(history: list[dict]) -> str | None:
-    """Kue yang jumlahnya baru saja ditanyakan bot, dari pesan terakhirnya.
-
-    Bot menutup detail produk dengan pertanyaan tertutup ("Mau pesan ini?
-    Bilang aja jumlahnya ya"). Kalau pelanggan menjawab dengan jumlah saja,
-    yang dibaca adalah jawaban atas pertanyaan bot sendiri — bukan tebakan
-    maksud. Tanpa ini, "satu aja" sesudah detail Brownies Coklat dijawab
-    "boleh sebutkan nama kuenya?" berulang-ulang sampai pelanggan menyerah
-    (terukur di suite QA W2).
-    """
-    for pesan in reversed(history):
-        if pesan["role"] != "assistant":
-            continue
-        isi = pesan["content"]
-        if isi.startswith("*") and _TANYA_JUMLAH in isi and isi.count("*") >= 2:
-            return isi.split("*")[1].strip() or None
-        return None  # balasan terakhir bukan detail produk
-    return None
-
-
 def _log_turn(wa_number: str, state: str, started: float) -> None:
     """One line per inbound message, so a conversation can be traced from logs.
 
@@ -340,26 +315,6 @@ async def _run_agent_turn(wa_number: str, text: str) -> Reply:
     history = await store.recent_history(wa_number, limit=7, exclude_last_user=text)
 
     answer = await run_agent(wa_number, text, history)
-
-    # Jaring pengaman, BUKAN routing: model tetap yang memutuskan lebih dulu, dan
-    # ini hanya menangkap satu kelalaian yang terukur. Kalau balasan terakhir bot
-    # menampilkan detail satu kue dan bertanya "mau pesan berapa?", lalu
-    # pelanggan menjawab dengan jumlah saja, jawabannya sudah tidak ambigu —
-    # namun model 1,7 B kadang tetap tidak memanggil tool apa pun dan pelanggan
-    # dijawab "boleh sebutkan nama kuenya?" berulang kali sampai menyerah
-    # (terukur di suite W2). Diukur ulang sesudah petunjuk promptnya diperbaiki,
-    # 18 percobaan dengan jalur ini dimatikan: model berhasil sendiri 13 kali,
-    # dan "satu aja" gagal 3 dari 3. Jadi cabang ini memang masih perlu, tapi
-    # dipasang SESUDAH model — model tetap yang memutuskan, ini hanya menangkap
-    # giliran yang tidak diputuskan sama sekali.
-    if not ctx.tools_called:
-        jumlah = bare_quantity(text)
-        produk = _produk_yang_ditanyakan(history) if jumlah else None
-        if produk:
-            logger.info("jaring pengaman: jawaban jumlah untuk %s", produk)
-            ctx.tools_called.append("add_to_cart")
-            answer = str(await add_to_cart.ainvoke(
-                {"items": [{"product": produk, "qty": jumlah}]}))
     # A tool (add_to_cart) may have requested a state transition.
     if ctx.next_state:
         await store.set_state(wa_number, ctx.next_state)

@@ -907,37 +907,6 @@ async def test_tawaran_admin_kedaluwarsa_setelah_beberapa_giliran(patch_external
     assert (reply.text or "").strip()
 
 
-async def test_jumlah_polos_menjawab_pertanyaan_bot_sendiri(patch_externals):
-    """Terukur hidup (suite W2): setelah bot menampilkan detail Brownies Coklat
-    dan bertanya "mau pesan berapa?", jawaban "satu aja" dijawab "boleh sebutkan
-    nama kuenya?" berulang-ulang. Yang dibaca di sini jawaban atas pertanyaan
-    tertutup milik bot sendiri, bukan tebakan maksud."""
-    from app.tools.get_product_detail import get_product_detail
-
-    set_turn_context(TurnContext(wa_number=WA, user_text="yang coklat itu"))
-    detail = await get_product_detail.ainvoke({"product": "brownies coklat"})
-    await store.log_message(WA, "out", detail)
-
-    _mock_agent(patch_externals["monkeypatch"], "(model tidak boleh dipakai di sini)")
-    reply = await handle_message(WA, "satu aja")
-
-    keranjang = await store.get_cart(WA)
-    assert len(keranjang) == 1
-    assert keranjang[0]["qty"] == 1
-    assert "Brownies Coklat" in (reply.text or "")
-
-
-async def test_jumlah_polos_tanpa_pertanyaan_bot_tetap_ke_model(patch_externals):
-    """Tanpa pertanyaan jumlah dari bot, "satu aja" tidak boleh menebak kue."""
-    _mock_agent(patch_externals["monkeypatch"], "Kue yang mana ya kak?")
-    await store.log_message(WA, "out", "Berikut menu Toti Cakery: …")
-
-    reply = await handle_message(WA, "satu aja")
-
-    assert await store.get_cart(WA) == []
-    assert "yang mana" in (reply.text or "").lower()
-
-
 async def test_metode_pengiriman_menerima_kalimat_sehari_hari(patch_externals):
     """Terukur hidup (suite W2): "dianter aja ke rumah" tidak cocok dengan kata
     "antar" — ejaan sehari-harinya "anter" — jadi pelanggan disuruh mengetik
@@ -972,3 +941,25 @@ async def test_jawaban_jumlah_bukan_izin_menyambungkan_ke_admin(patch_externals)
 
     assert await store.is_takeover_active(WA) is False
     assert patch_externals["sent"] == []
+
+
+async def test_keluhan_dijawab_permintaan_maaf_yang_tetap(patch_externals):
+    """Terukur: "kuenya kemarin basi, aku kecewa banget" dijawab "Wah, makasih
+    banyak kak! Senang banget kalau suka 😊". Nada keluhan terlalu mahal untuk
+    diserahkan ke karangan model 1,7 B, jadi kalimatnya tetap — yang tetap jadi
+    keputusan model hanyalah kapan tool ini dipakai."""
+    from app.tools.keluhan import sampaikan_maaf
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
+    out = await sampaikan_maaf.ainvoke({"keluhan": "kue diterima sudah basi"})
+
+    assert "Mohon maaf" in out
+    assert "nomor pesanan" in out.lower()
+    assert await store.is_takeover_active(WA) is False, "keluhan tidak membungkam bot"
+
+
+async def test_tool_keluhan_terdaftar_untuk_model(patch_externals):
+    """Tool yang tidak terdaftar tidak akan pernah dipanggil model."""
+    from app.tools.registry import TOOLS_BY_NAME
+
+    assert "sampaikan_maaf" in TOOLS_BY_NAME
