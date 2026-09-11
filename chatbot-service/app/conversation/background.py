@@ -167,15 +167,52 @@ async def _check_once() -> None:
             continue
 
         inv_status = (res or {}).get("invoice_status")
-        if inv_status in ("paid", "partial") and not order.notified_paid:
-            await store.update_pending_order(order.id, status="paid", notified_paid=True)
-            await store.set_state(order.wa_number, State.ORDER_ACTIVE)
-            await _notify(
-                order.wa_number,
-                "Pembayaran sudah kami terima ✅\n"
-                f"Jumlah: {rupiah(order.amount_due)}. Pesananmu akan segera kami proses. "
-                "Terima kasih! 🎂",
-            )
+        if inv_status in ("paid", "partial"):
+            await tandai_lunas(order)
+
+
+async def tandai_lunas(order) -> bool:
+    """Kabari pelanggan pembayarannya masuk, lalu tandai pesanannya lunas.
+
+    Dipakai polling DAN webhook. Sama seperti refund: kabari dulu, tandai
+    belakangan — kalau pengiriman gagal, barisnya tetap dipantau dan dicoba lagi.
+    """
+    if order.notified_paid:
+        return False
+    terkirim = await _notify(
+        order.wa_number,
+        "Pembayaran sudah kami terima ✅\n"
+        f"Jumlah: {rupiah(order.amount_due)}. Pesananmu akan segera kami proses. "
+        "Terima kasih! 🎂",
+    )
+    if not terkirim:
+        logger.warning("Kabar pembayaran %s gagal terkirim — dicoba lagi siklus berikutnya",
+                       order.order_ref)
+        return False
+    await store.update_pending_order(order.id, status="paid", notified_paid=True)
+    await store.set_state(order.wa_number, State.ORDER_ACTIVE)
+    logger.info("Pembayaran %s masuk — pelanggan sudah dikabari", order.order_ref)
+    return True
+
+
+async def notify_paid(order_id: int) -> bool:
+    """Dipanggil backend lewat webhook internal begitu pembayaran lunas/DP masuk.
+
+    Statusnya tetap dipastikan ke backend dulu: webhook cuma pemicu supaya tidak
+    menunggu siklus polling, bukan sumber kebenaran soal uang.
+    """
+    for order in await store.list_orders_by_status("pending"):
+        if str(order.order_ref) != str(order_id):
+            continue
+        try:
+            res = await backend.get_payment_status(order.order_ref)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cek pembayaran %s gagal: %s", order.order_ref, exc)
+            return False
+        if str((res or {}).get("invoice_status") or "").lower() not in ("paid", "partial"):
+            return False
+        return await tandai_lunas(order)
+    return False
 
 
 async def notify_ready(order_id: int) -> bool:

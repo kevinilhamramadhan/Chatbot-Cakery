@@ -205,6 +205,18 @@ async def mark_ready(order_id: int, x_internal_key: str | None = Header(default=
     return {"status": "ok" if ok else "not_found", "order_id": order_id}
 
 
+@router.post("/internal/orders/{order_id}/paid")
+async def mark_paid(order_id: int, x_internal_key: str | None = Header(default=None)):
+    """Kabari pelanggan begitu pembayarannya masuk, tanpa menunggu polling.
+
+    Status pembayarannya tetap dipastikan ke backend di dalam notify_paid —
+    webhook ini pemicu, bukan sumber kebenaran soal uang.
+    """
+    _require_internal_key(x_internal_key)
+    ok = await background.notify_paid(order_id)
+    return {"status": "ok" if ok else "not_found", "order_id": order_id}
+
+
 @router.post("/internal/orders/{order_id}/refunded")
 async def mark_refunded(order_id: int, x_internal_key: str | None = Header(default=None)):
     """Kabari pelanggan begitu refund selesai — tanpa menunggu siklus polling.

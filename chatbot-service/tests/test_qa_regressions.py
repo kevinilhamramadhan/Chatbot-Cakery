@@ -1255,3 +1255,41 @@ async def test_kabar_refund_gagal_kirim_dicoba_lagi(patch_externals):
     patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", kirim_ok)
     assert await background.notify_refunded(91) is True
     assert await store.get_active_pending(WA) is None
+
+
+async def test_webhook_pembayaran_mengabari_tanpa_menunggu_polling(patch_externals):
+    """Pembayaran adalah kabar yang paling ditunggu pelanggan — begitu QRIS-nya
+    discan, dia menatap layar. Webhook dari backend memangkas jeda 30 detik itu,
+    tapi statusnya tetap dipastikan ke backend dulu."""
+    from app.conversation import background
+
+    await _seed_awaiting_payment(order_ref="9201")
+
+    async def f_status(order_ref):
+        return {"invoice_status": "paid", "amount_paid": 100000, "amount_due": 0}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_payment_status", f_status)
+
+    assert await background.notify_paid(9201) is True
+    kabar = [t for _wa, t in patch_externals["sent"]]
+    assert kabar and "Pembayaran sudah kami terima" in kabar[-1]
+    assert (await store.get_or_create_session(WA)).state == State.ORDER_ACTIVE
+    # Panggilan kedua tidak mengirim kabar dua kali.
+    assert await background.notify_paid(9201) is False
+
+
+async def test_webhook_pembayaran_menolak_kalau_backend_bilang_belum_lunas(patch_externals):
+    """Webhook cuma pemicu, bukan sumber kebenaran soal uang."""
+    from app.conversation import background
+
+    await _seed_awaiting_payment(order_ref="9202")
+
+    async def f_status(order_ref):
+        return {"invoice_status": "unpaid", "amount_paid": 0, "amount_due": 100000}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_payment_status", f_status)
+
+    assert await background.notify_paid(9202) is False
+    assert patch_externals["sent"] == []
