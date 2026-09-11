@@ -982,3 +982,29 @@ async def test_balasan_keluhan_menyebut_email_kalau_disetel(patch_externals):
         settings, "store_support_email", "", raising=False)
     out = await keluhan.sampaikan_maaf.ainvoke({"keluhan": "kue basi"})
     assert "@" not in out, "tanpa setelan, jangan menyebut alamat apa pun"
+
+
+async def test_add_to_cart_menerima_argumen_tanpa_bungkus_items(patch_externals):
+    """Terukur pada toti-qwen-1.7b-v6b: giliran "satu aja" memanggil add_to_cart
+    dengan {"product": "Brownies Coklat", "qty": 1} — produk dan jumlahnya sudah
+    benar, cuma tanpa bungkus `items`. Ditolak mentah, pelanggan menerima "Maaf,
+    ada kendala saat memproses permintaanmu" untuk maksud yang sudah terbaca."""
+    from app.tools.add_to_cart import add_to_cart
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="satu aja"))
+    out = await add_to_cart.ainvoke({"product": "Brownies Coklat", "qty": 1})
+
+    keranjang = await store.get_cart(WA)
+    assert len(keranjang) == 1 and keranjang[0]["qty"] == 1
+    assert "Brownies Coklat" in out
+
+
+async def test_add_to_cart_tanpa_produk_menampilkan_menu(patch_externals):
+    """Argumen kosong tidak boleh jadi galat teknis di depan pelanggan."""
+    from app.tools.add_to_cart import add_to_cart
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau pesan"))
+    out = await add_to_cart.ainvoke({"items": []})
+
+    assert await store.get_cart(WA) == []
+    assert "Brownies Coklat" in out, "jatuhnya ke daftar menu, bukan pesan galat"

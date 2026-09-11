@@ -50,14 +50,36 @@ def cart_summary(cart: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _as_items(items, product=None, qty=None, nama=None, jumlah=None) -> list[dict]:
+    """Terima dua bentuk argumen: berbungkus `items`, dan satu item polos.
+
+    Model 1,7 B kadang memanggil tool ini tanpa bungkus `items`, mis.
+    {"product": "Brownies Coklat", "qty": 1} — produk dan jumlahnya SUDAH benar,
+    hanya bungkusnya kurang. Ditolak mentah-mentah, pelanggan menerima "Maaf, ada
+    kendala saat memproses permintaanmu" padahal maksudnya sudah terbaca utuh
+    (terukur pada toti-qwen-1.7b-v6b, giliran "satu aja"). Ini normalisasi bentuk
+    argumen, bukan menebak maksud: tidak ada isi yang dikarang di sini.
+    """
+    if isinstance(items, dict):
+        items = [items]
+    if items:
+        return [it for it in items if isinstance(it, dict)]
+    polos = {"product": product or nama, "qty": qty if qty is not None else jumlah}
+    return [polos] if polos["product"] else []
+
+
 @tool
-async def add_to_cart(items: list[dict]) -> str:
+async def add_to_cart(items: list[dict] | None = None, product: str | None = None,
+                      qty: int | None = None) -> str:
     """Tambahkan item ke draft pesanan pelanggan.
 
     `items` adalah list objek berisi `product` (nama/id kue) dan `qty` (jumlah).
     Contoh: [{"product": "Brownies Coklat", "qty": 2}].
     Gunakan saat pelanggan menyatakan ingin memesan kue tertentu dengan jumlahnya.
     """
+    items = _as_items(items, product=product, qty=qty)
+    if not items:
+        return await menu_fallback("Maaf, aku belum menangkap kue mana yang kamu maksud.")
     ctx = get_turn_context()
     wa = ctx.wa_number
 
