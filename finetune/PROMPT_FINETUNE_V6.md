@@ -71,9 +71,19 @@ mengandung aturan yang sengaja kita ubah: dua keluhan "salah kirim" dan satu
 v6 akan dihitung SALAH justru pada perilaku yang diperbaiki.
 
 `patch_test_v6.py` menyelaraskan ketiganya (idempoten, aman dijalankan ulang):
-dua jadi `sampaikan_maaf`, satu jadi jawaban teks tanpa tool. **97 baris lain
-byte-identik**, jadi perbandingan v3→v4→v5→v6 tetap berlaku dengan catatan kaki
-ini.
+dua jadi `sampaikan_maaf`, satu jadi jawaban teks tanpa tool. Percakapan pada 97
+baris lain **tidak disentuh**, jadi perbandingan v3→v4→v5→v6 tetap berlaku
+dengan catatan kaki ini.
+
+Skrip yang sama juga **menyegarkan `tools_json`** di seluruh 100 baris menjadi
+13 tool runtime. Ini bukan kosmetik: notebook memakai `tools_json` milik tiap
+baris sebagai daftar tool yang ditawarkan ke model, sementara baris test masih
+membawa daftar 9 tool dari v1 — tertinggal dua versi di belakang produksi. Tanpa
+disegarkan, dua baris keluhan itu mustahil dijawab benar karena `sampaikan_maaf`
+tidak pernah ditawarkan, dan sejak v5 `lihat_keranjang`, `check_payment_status`,
+serta `kirim_ulang_pembayaran` juga tidak pernah ikut diuji. Harness lokal tidak
+pernah punya masalah ini — ia memang mem-`bind_tools(ALL_TOOLS)` dari kode
+runtime.
 
 ## 4. Urutan kerja
 

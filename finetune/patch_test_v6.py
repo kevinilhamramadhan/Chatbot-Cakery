@@ -16,9 +16,26 @@ dengan satu catatan kaki.
 """
 
 import json
+import sys
 from pathlib import Path
 
-PATH = Path(__file__).resolve().parent / "data" / "test.jsonl"
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "chatbot-service"))
+
+from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
+
+from app.tools.registry import ALL_TOOLS  # noqa: E402
+
+PATH = ROOT / "finetune" / "data" / "test.jsonl"
+
+# Daftar tool yang ditawarkan ke model saat evaluasi. Notebook memakai
+# `tools_json` milik tiap baris, dan baris test masih membawa daftar 9 tool dari
+# v1 — dua versi tertinggal di belakang runtime. Akibatnya tool yang lebih baru
+# (termasuk sampaikan_maaf) tidak pernah bisa dipanggil saat eval, sehingga dua
+# baris keluhan di bawah mustahil dijawab benar. Daftar ini disegarkan dari kode
+# runtime, sama seperti yang dilakukan harness lokal (bind_tools(ALL_TOOLS)).
+TOOLS_JSON = json.dumps([convert_to_openai_tool(t) for t in ALL_TOOLS],
+                        ensure_ascii=False)
 
 KELUHAN = "Pelanggan komplain pesanan diduga salah kirim"
 JAWAB_NEGO = ("Harga kami mengikuti daftar menu ya kak 🙏 Tapi untuk pesanan banyak, "
@@ -35,6 +52,9 @@ def tool_turn(nama: str, args: dict) -> dict:
 def main() -> None:
     rows = [json.loads(l) for l in PATH.open(encoding="utf-8")]
     diubah = []
+    disegarkan = sum(1 for row in rows if row["tools_json"] != TOOLS_JSON)
+    for row in rows:
+        row["tools_json"] = TOOLS_JSON
     for row in rows:
         teks = [m for m in row["messages"] if m["role"] == "user"][-1]["content"].lower()
         if row["meta"]["type"] not in ("T10", "T14", "N9"):
@@ -54,7 +74,10 @@ def main() -> None:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    print(f"{len(rows)} baris test, {len(diubah)} diselaraskan ke aturan v6:")
+    n_tool = len(json.loads(TOOLS_JSON))
+    print(f"{len(rows)} baris test | tools_json disegarkan ke {n_tool} tool "
+          f"pada {disegarkan} baris")
+    print(f"{len(diubah)} baris diselaraskan ke aturan v6:")
     for alasan, teks in diubah:
         print(f"  - {alasan}: {teks!r}")
     if not diubah:
