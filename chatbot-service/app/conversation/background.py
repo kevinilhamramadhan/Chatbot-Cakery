@@ -100,8 +100,22 @@ async def notify_refunded(order_id: int) -> bool:
     telat paling lama setengah menit.
     """
     for order in await store.list_orders_by_status("pending", "paid", "ready"):
-        if str(order.order_ref) == str(order_id):
-            return await tutup_karena_refund(order)
+        if str(order.order_ref) != str(order_id):
+            continue
+        # Status refund-nya dipastikan dulu ke backend, sama seperti jalur
+        # pembayaran: webhook itu pemicu, bukan sumber kebenaran soal uang.
+        # Tanpa ini, satu panggilan keliru cukup untuk memberi tahu pelanggan
+        # "dananya dikembalikan" padahal tidak ada yang dikembalikan.
+        try:
+            res = await backend.get_payment_status(order.order_ref)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cek status refund %s gagal: %s", order.order_ref, exc)
+            return False
+        if str((res or {}).get("invoice_status") or "").lower() != "refunded":
+            logger.info("webhook refund %s diabaikan — invoice belum refunded",
+                        order.order_ref)
+            return False
+        return await tutup_karena_refund(order)
     return False
 
 

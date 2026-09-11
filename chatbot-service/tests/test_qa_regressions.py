@@ -1213,6 +1213,12 @@ async def test_webhook_refund_mengabari_pelanggan_tanpa_menunggu_polling(patch_e
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2),
     )
 
+    async def f_status(order_ref):
+        return {"invoice_status": "refunded", "amount_paid": 0, "amount_due": 0}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_payment_status", f_status)
+
     ok = await background.notify_refunded(90)
 
     assert ok is True
@@ -1236,6 +1242,12 @@ async def test_kabar_refund_gagal_kirim_dicoba_lagi(patch_externals):
         delivery_method="pickup", status="paid", nomor_invoice="INV-20260912-91",
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2),
     )
+
+    async def f_status(order_ref):
+        return {"invoice_status": "refunded", "amount_paid": 0, "amount_due": 0}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_payment_status", f_status)
 
     from app.whatsapp_client.client import whatsapp_client
 
@@ -1293,3 +1305,27 @@ async def test_webhook_pembayaran_menolak_kalau_backend_bilang_belum_lunas(patch
 
     assert await background.notify_paid(9202) is False
     assert patch_externals["sent"] == []
+
+
+async def test_webhook_refund_ditolak_kalau_backend_bilang_belum_refund(patch_externals):
+    """Webhook refund cuma pemicu. Tanpa memastikan ke backend, satu panggilan
+    keliru cukup untuk memberi tahu pelanggan "dananya dikembalikan" padahal
+    tidak ada uang yang kembali, dan pesanannya telanjur ditutup."""
+    from app.conversation import background
+
+    await store.create_pending_order(
+        wa_number=WA, order_ref="92", payment_ref="MID", payment_type="dp",
+        total_amount=80000, amount_due=40000, items_json="[]", customer_json="{}",
+        delivery_method="pickup", status="paid", nomor_invoice="INV-20260912-92",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2),
+    )
+
+    async def f_status(order_ref):
+        return {"invoice_status": "paid", "amount_paid": 40000, "amount_due": 40000}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_payment_status", f_status)
+
+    assert await background.notify_refunded(92) is False
+    assert patch_externals["sent"] == []
+    assert await store.get_active_pending(WA) is not None
