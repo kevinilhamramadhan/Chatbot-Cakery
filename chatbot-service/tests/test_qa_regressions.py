@@ -1222,3 +1222,36 @@ async def test_webhook_refund_mengabari_pelanggan_tanpa_menunggu_polling(patch_e
 
     # Pesanan yang tidak dikenal tidak bikin galat, cuma dilaporkan not_found.
     assert await background.notify_refunded(999999) is False
+
+
+async def test_kabar_refund_gagal_kirim_dicoba_lagi(patch_externals):
+    """Kalau pesannya gagal terkirim, pesanan JANGAN ditandai selesai — kalau
+    ditandai, pelanggan yang uangnya dikembalikan tidak pernah diberi tahu dan
+    tidak ada yang mengulang."""
+    from app.conversation import background
+
+    await store.create_pending_order(
+        wa_number=WA, order_ref="91", payment_ref="MID", payment_type="dp",
+        total_amount=80000, amount_due=40000, items_json="[]", customer_json="{}",
+        delivery_method="pickup", status="paid", nomor_invoice="INV-20260912-91",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2),
+    )
+
+    from app.whatsapp_client.client import whatsapp_client
+
+    async def kirim_gagal(wa, text):
+        raise httpx.HTTPStatusError("404 session", request=None, response=None)
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", kirim_gagal)
+
+    assert await background.notify_refunded(91) is False
+    assert await store.get_active_pending(WA) is not None, "belum dikabari, jangan ditutup"
+
+    # Gateway pulih -> percobaan berikutnya berhasil dan barulah ditutup.
+    async def kirim_ok(wa, text):
+        patch_externals["sent"].append((wa, text))
+        return {"ok": True}
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", kirim_ok)
+    assert await background.notify_refunded(91) is True
+    assert await store.get_active_pending(WA) is None

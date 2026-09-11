@@ -27,12 +27,20 @@ logger = logging.getLogger(__name__)
 _task: asyncio.Task | None = None
 
 
-async def _notify(wa_number: str, text: str) -> None:
+async def _notify(wa_number: str, text: str) -> bool:
+    """True kalau pesannya benar-benar terkirim. Pemanggilnya perlu tahu.
+
+    Dulu kegagalan kirim cuma dicatat di log, dan pemanggil tetap menandai
+    urusannya selesai — pelanggan tidak pernah diberi tahu, dan tidak ada yang
+    mencoba lagi.
+    """
     try:
         await whatsapp_client.send_text(wa_number, text)
         await store.log_message(wa_number, "out", text, intent="proactive")
+        return True
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to notify %s: %s", mask_phone(wa_number), exc)
+        return False
 
 
 def _label(order) -> str:
@@ -65,13 +73,22 @@ def _teks_refund(order) -> str:
 
 
 async def tutup_karena_refund(order) -> bool:
-    """Tutup pesanan lokal dan kabari pelanggan. Dipakai polling DAN webhook."""
-    if order.status == "cancelled":
+    """Kabari pelanggan, lalu tutup pesanan lokalnya. Dipakai polling DAN webhook.
+
+    Urutannya disengaja: kalau pesannya gagal terkirim (gateway WhatsApp mati,
+    sesi putus), baris pesanannya TIDAK ditandai selesai — siklus polling
+    berikutnya mencoba lagi. Kalau ditandai lebih dulu, pelanggan yang uangnya
+    dikembalikan tidak akan pernah diberi tahu, dan tidak ada yang mengulang.
+    """
+    if order.status in ("cancelled", "refunded"):
+        return False
+    if not await _notify(order.wa_number, _teks_refund(order)):
+        logger.warning("Kabar refund %s gagal terkirim — dicoba lagi siklus berikutnya",
+                       order.order_ref)
         return False
     await store.update_pending_order(order.id, status="refunded")
     await store.set_state(order.wa_number, State.IDLE)
-    logger.info("Pesanan %s di-refund — pelanggan dikabari", order.order_ref)
-    await _notify(order.wa_number, _teks_refund(order))
+    logger.info("Pesanan %s di-refund — pelanggan sudah dikabari", order.order_ref)
     return True
 
 
