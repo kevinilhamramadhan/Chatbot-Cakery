@@ -50,7 +50,45 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _teks_refund(order) -> str:
+    """Kabar untuk pelanggan saat pesanannya di-refund admin."""
+    baris = [
+        f"Pesanan *{_label(order)}* dibatalkan dan pembayaranmu dikembalikan ✅",
+        "Dananya kembali lewat metode pembayaran yang kamu pakai. Prosesnya bisa "
+        "beberapa hari kerja tergantung bank atau e-wallet-nya ya 🙏",
+    ]
+    email = settings.store_support_email.strip()
+    if email:
+        baris.append(f"Kalau lewat dari itu belum masuk, kabari kami di {email}.")
+    baris.append("Terima kasih sudah menunggu 😊")
+    return "\n\n".join(baris)
+
+
+async def _check_refunded() -> None:
+    """Pesanan yang SUDAH dibayar bisa dibatalkan admin lewat refund.
+
+    Backend punya `POST /orders/{id}/refund` (khusus Admin/Owner): pembayaran
+    jadi Refunded, invoice Refunded, pesanan induk Cancelled, dan stok kembali.
+    Tanpa pemeriksaan ini chatbot tidak pernah tahu: pelanggan tidak diberi
+    kabar dananya kembali, dan baris pesanan lokalnya tetap "aktif" sehingga
+    dia diblokir memesan lagi ("kamu masih punya pesanan yang sedang diproses").
+    """
+    for order in await store.list_orders_by_status("paid", "ready"):
+        try:
+            res = await backend.get_payment_status(order.order_ref)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cek status refund gagal untuk %s: %s", order.order_ref, exc)
+            continue
+        if str((res or {}).get("invoice_status") or "").lower() != "refunded":
+            continue
+        await store.update_pending_order(order.id, status="refunded")
+        await store.set_state(order.wa_number, State.IDLE)
+        logger.info("Pesanan %s di-refund — pelanggan dikabari", order.order_ref)
+        await _notify(order.wa_number, _teks_refund(order))
+
+
 async def _check_once() -> None:
+    await _check_refunded()
     pending = await store.list_orders_by_status("pending")
     now = datetime.now(timezone.utc)
 

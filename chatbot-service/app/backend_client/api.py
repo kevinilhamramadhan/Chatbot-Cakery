@@ -236,6 +236,26 @@ def _rows(payload) -> list:
     return list(payload) if isinstance(payload, list) else []
 
 
+async def get_owner_numbers() -> list[str] | None:
+    """Nomor WhatsApp user aktif ber-role Owner (level 1).
+
+    GET /users/owner-numbers (X-Service-Key) -> {"numbers": ["62…", …]}
+    Backend sudah menormalkan ke E.164. None berarti endpointnya belum ada di
+    backend yang sedang jalan — pemanggilnya lalu memakai sumber lama.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+            r = await c.get(f"{_base()}/users/owner-numbers", headers=_headers())
+            if r.status_code >= 400:
+                return None
+            data = r.json()
+    except Exception:  # noqa: BLE001
+        return None
+    if isinstance(data, dict):
+        data = data.get("numbers")
+    return [str(n) for n in data] if isinstance(data, list) else None
+
+
 async def get_role_directory() -> list[dict] | None:
     """Direktori orang internal beserta perannya, kalau backend sudah mengirimnya.
 

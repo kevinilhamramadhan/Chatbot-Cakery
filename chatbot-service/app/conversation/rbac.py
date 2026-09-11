@@ -104,13 +104,17 @@ async def _direktori_tambalan() -> list[Orang]:
     """Susun direktori dari dua sumber lama selama endpoint resminya belum ada.
 
     `/admin/takeover-handlers` hanya mengembalikan nomor, tanpa peran — jadi
-    level penerima takeover ditebak ADMIN, dan nomor yang juga terdaftar sebagai
-    Owner di .env dinaikkan ke OWNER. Menebak seperti ini persis alasan endpoint
-    direktori diminta: perannya seharusnya datang dari basis data, bukan dari
-    tebakan chatbot.
+    level penerima takeover ditebak ADMIN. Siapa yang Owner TIDAK ditebak:
+    diambil dari `GET /users/owner-numbers`, dan `.env` cuma dipakai kalau
+    backend yang sedang jalan belum punya endpoint itu.
     """
     penerima = [nomor_wa(n) for n in await backend.get_takeover_admin_numbers()]
-    pemilik = [nomor_wa(n) for n in settings.owner_wa_list]
+    # Owner: dari backend kalau endpointnya sudah ada (BE1b, terbit 12 Sep),
+    # kalau belum barulah .env. Urutan ini yang membuat OWNER_WA_NUMBERS bisa
+    # dikosongkan tanpa menunggu deploy chatbot.
+    dari_backend = await backend.get_owner_numbers()
+    sumber_pemilik = dari_backend if dari_backend is not None else settings.owner_wa_list
+    pemilik = [nomor_wa(n) for n in sumber_pemilik]
     orang: dict[str, Orang] = {}
     for nomor in penerima:
         if len(nomor) >= 10:

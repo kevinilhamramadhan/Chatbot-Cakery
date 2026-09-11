@@ -39,7 +39,17 @@ async def check_payment_status() -> str:
         logger.warning("payment status check failed for %s: %s", order.order_ref, exc)
         return ("Maaf, status pembayaran belum bisa kucek sekarang. "
                 "Coba tanya lagi sebentar lagi ya 🙏")
-    if (res or {}).get("invoice_status") in ("paid", "partial"):
+    inv = str((res or {}).get("invoice_status") or "").lower()
+    if inv == "refunded":
+        # Admin sudah me-refund lewat backend: pesanannya batal dan uangnya
+        # kembali. Tanpa cabang ini pelanggan dijawab "pembayaranmu belum
+        # terdeteksi" — benar secara harfiah, menyesatkan pada kenyataannya.
+        await store.update_pending_order(order.id, status="refunded")
+        ctx.next_state = State.IDLE
+        return ("Pesanan ini sudah dibatalkan dan pembayarannya dikembalikan ✅\n"
+                "Dananya kembali lewat metode pembayaran yang kamu pakai, dan bisa "
+                "makan beberapa hari kerja tergantung bank atau e-wallet-nya ya 🙏")
+    if inv in ("paid", "partial"):
         await store.update_pending_order(order.id, status="paid", notified_paid=True)
         ctx.next_state = State.ORDER_ACTIVE
         return ("Pembayaran sudah kami terima ✅\n"

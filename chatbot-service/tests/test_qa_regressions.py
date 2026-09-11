@@ -1008,3 +1008,57 @@ async def test_add_to_cart_tanpa_produk_menampilkan_menu(patch_externals):
 
     assert await store.get_cart(WA) == []
     assert "Brownies Coklat" in out, "jatuhnya ke daftar menu, bukan pesan galat"
+
+
+async def test_refund_admin_mengosongkan_pesanan_lokal_dan_mengabari_pelanggan(patch_externals):
+    """Backend punya POST /orders/{id}/refund (khusus Admin/Owner): invoice jadi
+    Refunded dan pesanan induk Cancelled. Tanpa pemeriksaan ini chatbot tidak
+    pernah tahu — pelanggan tidak dikabari dananya kembali, dan baris pesanan
+    lokalnya tetap 'aktif' sehingga dia diblokir memesan lagi."""
+    from app.conversation import background
+
+    pesanan = await store.create_pending_order(
+        wa_number=WA, order_ref="77", payment_ref="MID", payment_type="full",
+        total_amount=150000, amount_due=150000, items_json="[]", customer_json="{}",
+        delivery_method="pickup", status="paid", nomor_invoice="INV-20260912-77",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+
+    async def f_status(order_ref):
+        return {"invoice_status": "refunded", "amount_paid": 0, "amount_due": 0}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_payment_status", f_status)
+
+    await background._check_refunded()
+
+    assert await store.get_active_pending(WA) is None, "pelanggan harus bisa memesan lagi"
+    assert (await store.get_or_create_session(WA)).state == State.IDLE
+    kabar = [t for _wa, t in patch_externals["sent"]]
+    assert kabar and "dikembalikan" in kabar[-1]
+    assert "INV-20260912-77" in kabar[-1]
+    assert pesanan.id
+
+
+async def test_tool_status_pembayaran_mengenali_refund(patch_externals):
+    """"Sudah saya bayar?" untuk pesanan yang sudah di-refund tidak boleh dijawab
+    "pembayaranmu belum terdeteksi" — benar secara harfiah, menyesatkan nyatanya."""
+    from app.tools.payment_status import check_payment_status
+
+    await store.create_pending_order(
+        wa_number=WA, order_ref="78", payment_ref="MID", payment_type="full",
+        total_amount=90000, amount_due=90000, items_json="[]", customer_json="{}",
+        delivery_method="pickup", status="paid", nomor_invoice="INV-20260912-78",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+
+    async def f_status(order_ref):
+        return {"invoice_status": "refunded", "amount_paid": 0, "amount_due": 0}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_payment_status", f_status)
+    set_turn_context(TurnContext(wa_number=WA, user_text="udah aku bayar kok"))
+
+    out = await check_payment_status.ainvoke({})
+
+    assert "dikembalikan" in out and "belum terdeteksi" not in out
