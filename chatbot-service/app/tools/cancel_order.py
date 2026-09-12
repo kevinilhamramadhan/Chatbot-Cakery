@@ -1,5 +1,6 @@
 """Tool: cancel_order — cancels a still-unpaid order on the backend (B4)."""
 
+import json
 import logging
 
 from langchain_core.tools import tool
@@ -83,13 +84,31 @@ async def _masih_boleh_refund(wa_number: str) -> bool:
     return str(o.get("status") or "").lower() == "pending"
 
 
+def _bayar_pakai_va(order) -> bool:
+    """Pembayaran lewat VA tidak bisa dikembalikan otomatis oleh Midtrans.
+
+    Metode yang mendukung refund otomatis: QRIS (semua e-wallet dan m-banking
+    lewat satu kode) dan kartu. Transfer VA tidak, jadi dananya dikembalikan
+    manual oleh tim toko — itu harus dikatakan sejak awal, bukan sesudah
+    pelanggan menjawab ya.
+    """
+    try:
+        cust = json.loads(order.customer_json or "{}")
+    except (TypeError, ValueError):
+        return False
+    return str(cust.get("channel") or "") == "bank_transfer"
+
+
 def konfirmasi_batal(order, sudah_dibayar: bool) -> str:
     """Pertanyaan tertutup sebelum pesanan benar-benar dibatalkan."""
     label = order.nomor_invoice or f"#{order.order_ref}"
     if sudah_dibayar:
+        cara = ("Dananya dikembalikan tim kami lewat transfer, jadi butuh waktu "
+                "beberapa hari kerja." if _bayar_pakai_va(order) else
+                "Dananya kembali otomatis ke aplikasi yang kamu pakai buat bayar.")
         return (
             f"Pesanan *{label}* sudah dibayar, jadi pembatalannya sekalian dengan "
-            "pengembalian dana.\n\n"
+            f"pengembalian dana. {cara}\n\n"
             "Mau aku proses sekarang? Ketik *ya* untuk membatalkan dan mengembalikan "
             "dananya, atau *tidak* kalau pesanannya diteruskan saja 🙏"
         )
@@ -114,13 +133,18 @@ async def proses_pembatalan(wa_number: str) -> str:
 
     sudah_dibayar = order.status in ("paid", "ready")
     berhasil = False
+    mode = ""
     try:
         await backend.cancel_order(order.order_ref)
         berhasil = True
-    except Exception:  # noqa: BLE001 - 409 selama backend belum mengizinkan
+    except Exception:  # noqa: BLE001 - 409 kalau pesanannya sudah dibayar
         hasil = await backend.refund_order(
             order.order_ref, "Dibatalkan pelanggan lewat chatbot", wa_number)
         berhasil = hasil is not None
+        # Backend menandai apakah Midtrans benar-benar mengembalikan dananya
+        # ("auto") atau cuma dicatat dan uangnya ditransfer orang ("manual").
+        # Bedanya nyata untuk pelanggan: yang manual butuh beberapa hari kerja.
+        mode = str((hasil or {}).get("refund_mode") or "")
 
     if not berhasil:
         logger.info("refund pelanggan belum bisa otomatis untuk %s", order.order_ref)
@@ -135,8 +159,17 @@ async def proses_pembatalan(wa_number: str) -> str:
     if not sudah_dibayar:
         # Belum ada uang yang masuk — jangan menjanjikan pengembalian dana.
         return "Pesanan kamu sudah dibatalkan. Terima kasih 🙏"
+    if mode == "manual" or (not mode and _bayar_pakai_va(order)):
+        email = settings.store_support_email.strip()
+        tutup = (f"Kalau dalam 3 hari kerja belum masuk, kabari kami di {email} ya 🙏"
+                 if email else "Kalau dalam 3 hari kerja belum masuk, kabari kami ya 🙏")
+        return (
+            "Pesanan kamu sudah dibatalkan ✅\n\n"
+            "Pengembalian dananya diproses tim kami lewat transfer, jadi mohon "
+            f"ditunggu beberapa hari kerja. {tutup}"
+        )
     return (
         "Pesanan kamu sudah dibatalkan dan pengembalian dananya diproses ✅\n\n"
-        "Dananya kembali lewat metode pembayaran yang kamu pakai, dan bisa makan "
-        "beberapa hari kerja tergantung bank atau e-wallet-nya ya 🙏"
+        "Dananya kembali otomatis ke aplikasi yang kamu pakai buat bayar, biasanya "
+        "dalam beberapa menit sampai beberapa jam ya 🙏"
     )
