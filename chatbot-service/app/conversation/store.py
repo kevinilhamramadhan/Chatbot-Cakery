@@ -18,6 +18,10 @@ from app.models.pending_order import PendingOrder
 from app.models.session import ChatSession
 
 ACTIVE_ORDER_STATUSES = ("pending", "paid", "ready")
+# Pesanan sudah dibatalkan, tapi dananya menunggu ditransfer admin (khusus VA,
+# yang tidak bisa di-refund otomatis oleh Midtrans). Sengaja TIDAK termasuk
+# status aktif: pelanggan boleh memesan lagi sambil menunggu uangnya kembali.
+MENUNGGU_TRANSFER = "refund_wait"
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────

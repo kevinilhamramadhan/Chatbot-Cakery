@@ -8,7 +8,8 @@ from app.tools.formatting import rupiah
 
 _ORDER = {"pending": "Menunggu pembayaran", "in_process": "Sedang diproses",
           "ready": "Siap diambil/dikirim", "delivered": "Dikirim",
-          "picked_up": "Sudah diambil", "cancelled": "Dibatalkan"}
+          "picked_up": "Sudah diambil", "cancelled": "Dibatalkan",
+          "refunded": "Dibatalkan, dana sudah dikembalikan"}
 _INV = {"unpaid": "belum dibayar", "partial": "DP terbayar", "paid": "lunas", "refunded": "dikembalikan"}
 
 

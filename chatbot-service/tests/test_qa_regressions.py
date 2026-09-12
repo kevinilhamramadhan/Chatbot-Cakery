@@ -1374,3 +1374,44 @@ async def test_refund_va_dikatakan_manual_qris_otomatis(patch_externals):
         if channel == "bank_transfer":
             assert "transfer" in tanya.lower(), "konfirmasinya pun harus jujur di awal"
             assert "halo@toticakery.id" in hasil
+
+
+async def test_refund_manual_menunggu_transfer_lalu_dikabari_saat_selesai(patch_externals):
+    """VA tidak bisa di-refund otomatis, jadi uangnya baru berpindah setelah admin
+    mentransfer. Pelanggan dapat dua kabar: 'sedang diproses' waktu membatalkan,
+    dan 'sudah kami transfer' waktu admin menandainya selesai di Admin Site."""
+    from app.conversation import background
+    from app.tools.cancel_order import proses_pembatalan
+
+    await store.set_customer(WA, {"channel": "bank_transfer"})
+    await store.create_pending_order(
+        wa_number=WA, order_ref="94", payment_ref="MID", payment_type="full",
+        total_amount=100000, amount_due=100000, items_json="[]",
+        customer_json=json.dumps({"channel": "bank_transfer"}),
+        delivery_method="pickup", status="paid", nomor_invoice="INV-94",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+
+    async def f_cancel(order_ref):
+        raise httpx.HTTPStatusError("409", request=None, response=None)
+
+    async def f_refund(order_ref, reason, wa_number=""):
+        return {"order_id": order_ref, "status": "cancelled", "refund_mode": "manual"}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "cancel_order", f_cancel)
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "refund_order", f_refund)
+
+    pesan1 = await proses_pembatalan(WA)
+    assert "mohon ditunggu" in pesan1.lower()
+    # Pelanggan bebas memesan lagi walau dananya belum masuk.
+    assert await store.get_active_pending(WA) is None
+
+    # Admin selesai transfer -> backend menembak webhook refunded.
+    assert await background.notify_refunded(94) is True
+    kabar = [t for _wa, t in patch_externals["sent"]]
+    assert kabar and "sudah kami transfer" in kabar[-1]
+
+    # Tidak dikabari dua kali.
+    assert await background.notify_refunded(94) is False

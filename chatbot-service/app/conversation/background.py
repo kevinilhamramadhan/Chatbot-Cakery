@@ -58,6 +58,19 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _teks_transfer_selesai(order) -> str:
+    """Kabar saat admin selesai mentransfer dana refund manual (VA)."""
+    baris = [
+        f"Dana pengembalian pesanan *{_label(order)}* sudah kami transfer ✅",
+        "Mohon dicek di rekening atau aplikasi yang kamu pakai ya.",
+    ]
+    email = settings.store_support_email.strip()
+    if email:
+        baris.append(f"Kalau belum masuk juga, kabari kami di {email}.")
+    baris.append("Terima kasih sudah menunggu 😊")
+    return "\n\n".join(baris)
+
+
 def _teks_refund(order) -> str:
     """Kabar untuk pelanggan saat pesanannya di-refund admin."""
     baris = [
@@ -95,10 +108,31 @@ async def tutup_karena_refund(order) -> bool:
 async def notify_refunded(order_id: int) -> bool:
     """Dipanggil backend lewat webhook internal begitu refund selesai.
 
-    Polling 30 detik tetap jalan sebagai jaring pengaman — kalau chatbot
-    kebetulan sedang restart saat webhook dikirim, kabarnya tidak hilang, cuma
-    telat paling lama setengah menit.
+    Dua keadaan berbeda memakai pintu yang sama:
+
+    1. Pesanan masih dipantau (pending/paid/ready) — refund dilakukan admin dari
+       Admin Site tanpa sepengetahuan chatbot. Pelanggan dikabari pesanannya
+       dibatalkan dan dananya dikembalikan.
+    2. Pesanan sudah berstatus menunggu transfer — pelanggan sendiri yang
+       membatalkan lewat chat, sudah diberi tahu dananya diproses manual, dan
+       ini kabar bahwa admin sudah benar-benar mentransfernya.
+
+    Polling 30 detik tetap jalan sebagai jaring pengaman untuk keadaan pertama.
+    Keadaan kedua hanya bisa datang dari webhook: dari luar, pesanan yang sudah
+    di-refund terlihat sama saja sebelum dan sesudah uangnya dikirim.
     """
+    for order in await store.list_orders_by_status(store.MENUNGGU_TRANSFER):
+        if str(order.order_ref) != str(order_id):
+            continue
+        if not await _notify(order.wa_number, _teks_transfer_selesai(order)):
+            logger.warning("Kabar transfer refund %s gagal — dicoba lagi nanti",
+                           order.order_ref)
+            return False
+        await store.update_pending_order(order.id, status="refunded")
+        logger.info("Refund manual %s selesai — pelanggan sudah dikabari",
+                    order.order_ref)
+        return True
+
     for order in await store.list_orders_by_status("pending", "paid", "ready"):
         if str(order.order_ref) != str(order_id):
             continue
