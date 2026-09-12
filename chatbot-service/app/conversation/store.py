@@ -22,6 +22,11 @@ ACTIVE_ORDER_STATUSES = ("pending", "paid", "ready")
 # yang tidak bisa di-refund otomatis oleh Midtrans). Sengaja TIDAK termasuk
 # status aktif: pelanggan boleh memesan lagi sambil menunggu uangnya kembali.
 MENUNGGU_TRANSFER = "refund_wait"
+# Admin sudah mentransfer dananya (webhook /refunded sudah datang), tapi kabarnya
+# belum sampai ke pelanggan karena pengiriman WhatsApp-nya gagal. Dipisah dari
+# refund_wait supaya siklus polling tahu mana yang masih harus dicoba lagi:
+# webhook-nya hanya datang sekali, jadi tanpa baris ini kabarnya hilang selamanya.
+KABAR_TRANSFER_TERTUNDA = "refund_notify"
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────

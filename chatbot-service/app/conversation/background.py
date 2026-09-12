@@ -119,14 +119,19 @@ async def notify_refunded(order_id: int) -> bool:
 
     Polling 30 detik tetap jalan sebagai jaring pengaman untuk keadaan pertama.
     Keadaan kedua hanya bisa datang dari webhook: dari luar, pesanan yang sudah
-    di-refund terlihat sama saja sebelum dan sesudah uangnya dikirim.
+    di-refund terlihat sama saja sebelum dan sesudah uangnya dikirim. Karena itu
+    kalau pengirimannya gagal barisnya dipindah ke KABAR_TRANSFER_TERTUNDA, bukan
+    dibiarkan di refund_wait — webhook-nya tidak akan datang kedua kali.
     """
-    for order in await store.list_orders_by_status(store.MENUNGGU_TRANSFER):
+    for order in await store.list_orders_by_status(store.MENUNGGU_TRANSFER,
+                                                   store.KABAR_TRANSFER_TERTUNDA):
         if str(order.order_ref) != str(order_id):
             continue
         if not await _notify(order.wa_number, _teks_transfer_selesai(order)):
-            logger.warning("Kabar transfer refund %s gagal — dicoba lagi nanti",
-                           order.order_ref)
+            await store.update_pending_order(
+                order.id, status=store.KABAR_TRANSFER_TERTUNDA)
+            logger.warning("Kabar transfer refund %s gagal — dicoba lagi siklus "
+                           "berikutnya", order.order_ref)
             return False
         await store.update_pending_order(order.id, status="refunded")
         logger.info("Refund manual %s selesai — pelanggan sudah dikabari",
@@ -173,8 +178,25 @@ async def _check_refunded() -> None:
         await tutup_karena_refund(order)
 
 
+async def _kabari_transfer_tertunda() -> None:
+    """Ulangi kabar "dana sudah ditransfer" yang tadi gagal terkirim.
+
+    Backend menembak webhook /refunded sekali saja. Kalau saat itu gateway
+    WhatsApp-nya mati, tanpa pengulangan ini pelanggan tidak akan pernah tahu
+    uangnya sudah kembali — dan tidak ada cara memeriksanya dari backend, karena
+    pesanan yang di-refund terlihat sama sebelum dan sesudah uangnya dikirim.
+    """
+    for order in await store.list_orders_by_status(store.KABAR_TRANSFER_TERTUNDA):
+        if not await _notify(order.wa_number, _teks_transfer_selesai(order)):
+            continue
+        await store.update_pending_order(order.id, status="refunded")
+        logger.info("Refund manual %s selesai — pelanggan sudah dikabari (ulangan)",
+                    order.order_ref)
+
+
 async def _check_once() -> None:
     await _check_refunded()
+    await _kabari_transfer_tertunda()
     pending = await store.list_orders_by_status("pending")
     now = datetime.now(timezone.utc)
 

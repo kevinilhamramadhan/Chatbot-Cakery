@@ -1415,3 +1415,46 @@ async def test_refund_manual_menunggu_transfer_lalu_dikabari_saat_selesai(patch_
 
     # Tidak dikabari dua kali.
     assert await background.notify_refunded(94) is False
+
+
+async def test_kabar_transfer_refund_gagal_diulang_polling(patch_externals):
+    """Webhook /refunded hanya datang sekali. Kalau gateway WhatsApp sedang mati
+    saat itu, pelanggan yang uangnya sudah ditransfer tidak akan pernah tahu —
+    dan tidak ada cara memeriksanya ke backend, karena pesanan yang di-refund
+    terlihat sama sebelum dan sesudah uangnya dikirim. Jadi barisnya ditandai
+    'kabarnya tertunda' dan siklus polling yang mengulanginya."""
+    from app.conversation import background
+    from app.whatsapp_client.client import whatsapp_client
+
+    await store.create_pending_order(
+        wa_number=WA, order_ref="95", payment_ref="MID", payment_type="dp",
+        total_amount=90000, amount_due=45000, items_json="[]", customer_json="{}",
+        delivery_method="pickup", status=store.MENUNGGU_TRANSFER,
+        nomor_invoice="INV-95",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2),
+    )
+
+    async def kirim_gagal(wa, text):
+        raise httpx.HTTPStatusError("404 session", request=None, response=None)
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", kirim_gagal)
+    assert await background.notify_refunded(95) is False
+
+    tertunda = await store.list_orders_by_status(store.KABAR_TRANSFER_TERTUNDA)
+    assert [o.order_ref for o in tertunda] == ["95"]
+
+    async def kirim_ok(wa, text):
+        patch_externals["sent"].append((wa, text))
+        return {"ok": True}
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", kirim_ok)
+    await background._kabari_transfer_tertunda()
+
+    kabar = [t for _wa, t in patch_externals["sent"]]
+    assert kabar and "sudah kami transfer" in kabar[-1]
+    assert await store.list_orders_by_status(store.KABAR_TRANSFER_TERTUNDA) == []
+    assert [o.status for o in await store.list_orders_by_status("refunded")] == ["refunded"]
+
+    # Sudah dikabari: siklus berikutnya diam.
+    await background._kabari_transfer_tertunda()
+    assert len([t for _wa, t in patch_externals["sent"]]) == len(kabar)
