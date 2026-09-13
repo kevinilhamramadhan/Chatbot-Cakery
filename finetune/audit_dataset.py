@@ -24,10 +24,11 @@ from pathlib import Path
 sys.path.insert(0, "/home/kevin/clcode/chatbot/chatbot-service")
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER  # noqa: E402
-from app.tools.registry import ALL_TOOLS  # noqa: E402
+from app.tools.registry import ALL_TOOLS, TOOLS_UMUM  # noqa: E402
 
 DIR = Path(sys.argv[1])
 TOOL_RUNTIME = {t["function"]["name"] for t in (convert_to_openai_tool(t) for t in ALL_TOOLS)}
+TOOL_UMUM = {t["function"]["name"] for t in (convert_to_openai_tool(t) for t in TOOLS_UMUM)}
 
 rows = {}
 for split in ("train", "validation", "test"):
@@ -53,11 +54,18 @@ cek("T10 (eskalasi) turun jadi 30", tipe["train"]["T10"] == 30, str(tipe["train"
 cek("test memuat 2 baris keluhan", tipe["test"]["T14"] == 2, str(tipe["test"]["T14"]))
 cek("test memuat 1 baris nego (tanpa tool)", tipe["test"]["N9"] == 1, str(tipe["test"]["N9"]))
 
-# 3. Daftar tool yang ditawarkan = 13 tool runtime, di SEMUA split
+# 3. Daftar tool yang ditawarkan = persis yang dilihat peran itu waktu disajikan.
+# Pelanggan tidak pernah dikirimi definisi tool Owner (registry.tools_untuk),
+# jadi barisnya pun tidak boleh memuatnya.
 for split in rows:
-    salah = [i for i, r in enumerate(rows[split])
-             if {t["function"]["name"] for t in json.loads(r["tools_json"])} != TOOL_RUNTIME]
-    cek(f"tools_json {split} = 13 tool runtime", not salah, f"{len(salah)} baris menyimpang")
+    salah = []
+    for i, r in enumerate(rows[split]):
+        punya = {t["function"]["name"] for t in json.loads(r["tools_json"])}
+        harap = TOOL_RUNTIME if r["meta"]["type"] in ("T11", "T12") else TOOL_UMUM
+        if punya != harap:
+            salah.append(i)
+    cek(f"tools_json {split} sesuai peran (11 umum / 13 Owner)", not salah,
+        f"{len(salah)} baris menyimpang")
 
 # 4. System prompt = prompt runtime + reminder (paritas latih-sajian)
 harap_sys = SYSTEM_PROMPT + "\n\n" + TOOL_REMINDER

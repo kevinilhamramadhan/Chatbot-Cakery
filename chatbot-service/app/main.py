@@ -69,11 +69,15 @@ async def _warmup_models() -> None:
     from app.llm.client import get_llm
     from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER
     from app.rag.embeddings import get_embedding_function
-    from app.tools.registry import ALL_TOOLS
+    from app.tools.registry import TOOLS_UMUM
 
     try:
         await asyncio.to_thread(get_embedding_function().embed_one, "warmup")
-        await get_llm().bind_tools(ALL_TOOLS).ainvoke([
+        # Sengaja TOOLS_UMUM, bukan semuanya: prefix yang dihangatkan harus
+        # persis prefix yang dipakai pelanggan, kalau tidak yang tersimpan di
+        # KV-cache justru bentuk yang jarang dipakai dan pelanggan pertama tetap
+        # menunggu prefill penuh.
+        await get_llm().bind_tools(TOOLS_UMUM).ainvoke([
             SystemMessage(content=SYSTEM_PROMPT),
             SystemMessage(content=TOOL_REMINDER),
             HumanMessage(content="halo"),

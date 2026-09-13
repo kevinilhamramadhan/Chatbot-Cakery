@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.llm.client import get_llm
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER
 from app.rag.store import retrieve
-from app.tools.registry import ALL_TOOLS, TOOLS_BY_NAME
+from app.tools.registry import NAMA_TOOL_OWNER, TOOLS_BY_NAME, tools_untuk
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,12 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         )
     messages.append(HumanMessage(content=question))
 
-    llm = get_llm().bind_tools(ALL_TOOLS)
+    # Tool Owner tidak dimuat untuk pelanggan biasa — bukan cuma ditolak waktu
+    # dipanggil. Prefix KV-cache tetap aman: daftarnya konstan per peran, jadi
+    # yang ada hanya dua bentuk prompt, bukan berubah tiap giliran.
+    tools = await tools_untuk(wa_number)
+    diizinkan = {t.name for t in tools}
+    llm = get_llm().bind_tools(tools)
 
     try:
         ai: AIMessage = await llm.ainvoke(messages)
@@ -167,6 +172,12 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # 3) Execute tools; their outputs are the user-facing reply.
     outputs: list[str] = []
     for tc in ai.tool_calls:
+        if tc["name"] not in diizinkan:
+            # Modelnya tidak diberi definisi tool ini, tapi nama tool bisa saja
+            # muncul dari ingatan hasil fine-tuning. Dihentikan di sini juga.
+            logger.warning("Tool %s diminta oleh nomor yang tidak berhak",
+                           tc["name"] if tc["name"] in NAMA_TOOL_OWNER else "tak dikenal")
+            continue
         tool = TOOLS_BY_NAME.get(tc["name"])
         if tool is None:
             logger.warning("LLM requested unknown tool: %s", tc["name"])

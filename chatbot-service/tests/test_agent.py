@@ -119,3 +119,37 @@ async def test_agent_strips_think_tags(monkeypatch):
     out = await agent_mod.run_agent(WA, "halo", history=[])
     assert "reasoning here" not in out
     assert "Halo!" in out
+
+
+async def test_tool_owner_tidak_dijalankan_untuk_pelanggan(monkeypatch):
+    """Lapis kedua: definisinya memang tidak dimuat, tapi nama tool bisa saja
+    muncul dari ingatan hasil fine-tuning. Panggilannya tetap harus mental."""
+    from app.backend_client import api as backend
+    from app.conversation import rbac
+    from app.tools import registry
+
+    async def direktori():
+        return [{"nomor_wa": "6285702286413", "role": "Owner", "level": 1,
+                 "handles_takeover": True}]
+
+    monkeypatch.setattr(backend, "get_role_directory", direktori)
+    rbac.bersihkan_cache()
+
+    dimuat = []
+
+    class _Perekam(_FakeLLM):
+        def bind_tools(self, tools):
+            dimuat.append({t.name for t in tools})
+            return _FakeBound(self._ai)
+
+    ai = AIMessage(content="", tool_calls=[
+        {"name": "financial_report", "args": {}, "id": "1", "type": "tool_call"}
+    ])
+    monkeypatch.setattr(agent_mod, "get_llm", lambda: _Perekam(ai))
+    _mock_retrieval(monkeypatch, 0.0)
+
+    set_turn_context(TurnContext(wa_number=WA))
+    jawab = await agent_mod.run_agent(WA, "laporan keuangan dong", [])
+
+    assert dimuat and not (dimuat[0] & registry.NAMA_TOOL_OWNER), dimuat
+    assert "Omzet" not in jawab and "Laporan Keuangan" not in jawab, jawab

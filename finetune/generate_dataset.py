@@ -54,7 +54,7 @@ from app.llm.agent import OUT_OF_SCOPE_REPLY, _history_view  # noqa: E402
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER  # noqa: E402
 from app.tools.add_to_cart import cart_summary  # noqa: E402
 from app.tools.formatting import rupiah  # noqa: E402
-from app.tools.registry import ALL_TOOLS  # noqa: E402
+from app.tools.registry import ALL_TOOLS, TOOLS_UMUM  # noqa: E402
 
 # ── Ground-truth constants (train-serve parity) ───────────────────────────────
 FAQ_HEADER = "\n\nKONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\n"
@@ -72,6 +72,15 @@ assert '"\\n\\n---\\n\\n".join' in _store_src
 
 TOOLS = [convert_to_openai_tool(t) for t in ALL_TOOLS]
 TOOL_NAMES = [t["function"]["name"] for t in TOOLS]
+# Train-serve parity: pelanggan biasa tidak pernah dikirimi definisi tool Owner
+# (registry.tools_untuk), jadi barisnya pun tidak boleh memuatnya. Cuma baris
+# laporan Owner (T11/T12) yang melihat daftar lengkap.
+TOOLS_PELANGGAN = [convert_to_openai_tool(t) for t in TOOLS_UMUM]
+TIPE_OWNER = {"T11", "T12"}
+_TOOLS_JSON = {
+    True: json.dumps(TOOLS, ensure_ascii=False),
+    False: json.dumps(TOOLS_PELANGGAN, ensure_ascii=False),
+}
 
 OUT_DIR = ROOT / "finetune" / "data"
 PRICE_RE = re.compile(r"Rp\s?\d|\d\.\d{3}|stok\s+(ada|habis)", re.I)
@@ -1101,7 +1110,9 @@ class Gen:
         messages.append({"role": "user", "content": user_text})
         messages.append(final_turn)
         meta = {"type": rtype, "lang": lang, "multi_turn": bool(history), "noised": noised}
-        return {"messages": messages, "tools_json": json.dumps(TOOLS, ensure_ascii=False), "meta": meta}
+        return {"messages": messages,
+                "tools_json": _TOOLS_JSON[rtype in TIPE_OWNER],
+                "meta": meta}
 
     def tool_turn(self, name, args_obj):
         assert name in TOOL_NAMES

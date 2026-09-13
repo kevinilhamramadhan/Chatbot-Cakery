@@ -135,3 +135,37 @@ async def test_dua_bentuk_balasan_dari_endpoint_yang_sama(monkeypatch):
     assert await rbac.level(OWNER_WA) == rbac.OWNER
     # Staff tidak bertugas takeover, jadi tidak ikut diberi tahu.
     assert await backend.get_takeover_admin_numbers() == [OWNER_WA, ADMIN_WA]
+
+
+@pytest.mark.asyncio
+async def test_tool_owner_tidak_dimuat_untuk_selain_owner(direktori):
+    """Bukan cuma ditolak waktu dipanggil — definisinya tidak pernah sampai ke
+    model. Kalau ikut dimuat, model 1,7 B sesekali menyebut namanya di jawaban
+    dan pelanggan jadi tahu ada laporan keuangan yang bisa diminta."""
+    from app.tools import registry
+
+    for nomor in (ADMIN_WA, STAF_WA, PELANGGAN_WA):
+        nama = {t.name for t in await registry.tools_untuk(nomor)}
+        assert nama == {t.name for t in registry.TOOLS_UMUM}, nomor
+        assert not (nama & registry.NAMA_TOOL_OWNER), nomor
+
+    nama_owner = {t.name for t in await registry.tools_untuk(OWNER_WA)}
+    assert registry.NAMA_TOOL_OWNER <= nama_owner
+    assert len(nama_owner) == len(registry.ALL_TOOLS)
+
+
+@pytest.mark.asyncio
+async def test_direktori_mati_tool_owner_tidak_dimuat(monkeypatch):
+    """Kalau ragu, fail-closed: lebih baik Owner kehilangan dua tool sebentar
+    daripada angka toko ikut ditawarkan ke nomor asing."""
+    from app.tools import registry
+
+    async def meledak():
+        raise RuntimeError("backend mati")
+
+    monkeypatch.setattr(backend, "get_role_directory", meledak)
+    monkeypatch.setattr(backend, "get_takeover_admin_numbers", meledak)
+    rbac.bersihkan_cache()
+
+    nama = {t.name for t in await registry.tools_untuk(OWNER_WA)}
+    assert not (nama & registry.NAMA_TOOL_OWNER)
