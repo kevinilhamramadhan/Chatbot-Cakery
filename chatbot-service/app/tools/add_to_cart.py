@@ -16,6 +16,7 @@ from app.tools.formatting import (
     product_label,
     resolve_product,
     rupiah,
+    tersedia,
 )
 
 
@@ -118,8 +119,11 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
         if p is None:
             not_found.append(name_q)
             continue
-        # Backend marks products out of stock via is_available (recipe vs stock).
-        if not p.get("is_available", True):
+        # Stok dicek di sini, bukan nanti waktu checkout: backend menolak
+        # POST /orders untuk produk yang stoknya nol, dan pelanggan yang baru
+        # diberi tahu setelah mengisi nama, alamat, dan metode bayar sudah
+        # terlanjur mengerjakan semuanya untuk kue yang tidak bisa dibuat.
+        if not tersedia(p):
             unavailable.append(product_label(p))
             continue
         harga = p.get("harga_jual")

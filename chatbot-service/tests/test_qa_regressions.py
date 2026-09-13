@@ -1458,3 +1458,65 @@ async def test_kabar_transfer_refund_gagal_diulang_polling(patch_externals):
     # Sudah dikabari: siklus berikutnya diam.
     await background._kabari_transfer_tertunda()
     assert len([t for _wa, t in patch_externals["sent"]]) == len(kabar)
+
+
+async def test_stok_habis_ditolak_di_keranjang_bukan_di_akhir(patch_externals):
+    """Backend menolak POST /orders untuk produk yang stoknya nol. Kalau chatbot
+    hanya melihat `is_available` — yang tetap True walau stoknya nol — pelanggan
+    baru tahu kuenya habis setelah mengisi nama, alamat, dan metode bayar."""
+    from app.tools.add_to_cart import add_to_cart
+
+    habis = dict(FAKE_PRODUCTS[1], is_available=True, stock_quantity=0,
+                 is_in_stock=False)
+    ada = dict(FAKE_PRODUCTS[0], is_available=True, stock_quantity=12,
+               is_in_stock=True)
+
+    async def f_list(only_active=True, kategori=None):
+        return [ada, habis]
+
+    from app.backend_client import products as products_api
+    patch_externals["monkeypatch"].setattr(products_api, "list_products", f_list)
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau bolu pandan 1"))
+    hasil = await add_to_cart.ainvoke(
+        {"items": [{"product": "Bolu Pandan", "qty": 1}]})
+    assert "tidak tersedia" in hasil.lower(), hasil
+    assert await store.get_cart(WA) == []
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="brownies coklat 1 deh"))
+    hasil = await add_to_cart.ainvoke(
+        {"items": [{"product": "Brownies Coklat", "qty": 1}]})
+    assert "tidak tersedia" not in hasil.lower(), hasil
+    assert len(await store.get_cart(WA)) == 1
+
+
+async def test_penolakan_400_backend_dijelaskan_bukan_disuruh_ulangi(patch_externals):
+    """"Coba ulangi sebentar lagi" untuk penolakan stok mengirim pelanggan ke
+    pengulangan yang tidak akan pernah berhasil. Alasannya sudah ada di badan
+    balasan backend dan layak diteruskan apa adanya."""
+    from app.conversation import checkout
+
+    await store.set_customer(WA, {"nama": "Rudi", "alamat": "Jl. Uji",
+                                  "metode_pengiriman": "pickup",
+                                  "payment_type": "full", "channel": "bank_transfer"})
+    await store.set_cart(WA, [{"product_id": 8, "nama": "Bolu Pandan",
+                               "harga": 75000, "qty": 1}])
+
+    async def f_upsert(wa, nama, alamat, nomor_hp=""):
+        return {"customer_id": 1}
+
+    async def f_create(**kwargs):
+        res = httpx.Response(
+            400, json={"detail": "Stok produk 'Bolu Pandan' sedang habis."},
+            request=httpx.Request("POST", "http://backend/api/orders"))
+        raise httpx.HTTPStatusError("400", request=res.request, response=res)
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "upsert_customer", f_upsert)
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "create_order", f_create)
+
+    hasil = await checkout.finalize_order(WA)
+    assert "sedang habis" in hasil.lower(), hasil
+    assert "coba ulangi" not in hasil.lower(), hasil
+    assert await store.get_cart(WA) == [], "keranjangnya jangan ditinggal menggantung"

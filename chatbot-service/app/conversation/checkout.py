@@ -25,6 +25,27 @@ def cart_total(cart: list[dict]) -> float:
     return sum(float(i["harga"]) * int(i["qty"]) for i in cart)
 
 
+def _alasan_backend(exc: httpx.HTTPStatusError) -> str:
+    """Kalimat penolakan dari backend yang layak diteruskan apa adanya.
+
+    Hanya untuk 400 dengan `detail` berupa satu kalimat — itu pesan bisnis yang
+    memang ditulis untuk dibaca orang ("Stok produk 'X' sedang habis."). Bentuk
+    lain (daftar galat validasi, HTML, jejak galat) tidak diteruskan supaya
+    pelanggan tidak menerima isi perut sistem.
+    """
+    res = exc.response
+    if res is None or res.status_code != 400:
+        return ""
+    try:
+        detail = res.json().get("detail")
+    except Exception:  # noqa: BLE001
+        return ""
+    if not isinstance(detail, str):
+        return ""
+    detail = detail.strip()
+    return detail if 0 < len(detail) <= 200 else ""
+
+
 async def reprice_cart(cart: list[dict]) -> tuple[list[dict], list[str]]:
     """Refresh every line against the live backend price just before charging.
 
@@ -118,6 +139,20 @@ async def finalize_order(wa_number: str) -> str:
                 "Kamu masih punya tagihan yang belum dibayar. Selesaikan dulu "
                 "pembayaran itu, atau ketik *batal* untuk membatalkannya, baru "
                 "kita buat pesanan baru ya 🙏"
+            )
+        # 400 juga jawaban bisnis, bukan gangguan sesaat: backend menolak
+        # pesanan yang stok bahannya tidak cukup. Menyuruh "coba ulangi sebentar
+        # lagi" mengirim pelanggan ke pengulangan yang tidak akan pernah
+        # berhasil, dan alasannya sudah ada di badan balasannya.
+        alasan = _alasan_backend(exc)
+        if alasan:
+            logger.info("backend refused the order: %s", alasan)
+            await store.set_state(wa_number, State.IDLE)
+            await store.set_cart(wa_number, [])
+            return (
+                f"Maaf, {alasan[0].lower()}{alasan[1:]}\n\n"
+                "Pesanannya belum jadi dibuat ya. Mau pilih kue yang lain? "
+                "Ketik *menu* untuk lihat daftarnya 🙏"
             )
         logger.exception("create order failed: %s", exc)
         return "Maaf, pembuatan pesanan gagal. Coba ulangi sebentar lagi ya 🙏"

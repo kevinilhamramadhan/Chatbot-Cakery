@@ -16,6 +16,20 @@ def product_label(p: dict) -> str:
     return p.get("nama_produk") or p.get("nama") or f"Produk #{p.get('id')}"
 
 
+def tersedia(p: dict) -> bool:
+    """Apakah produk ini benar-benar bisa dipesan sekarang.
+
+    Backend menghitung `is_in_stock = is_available and stock_quantity > 0`, dan
+    POST /orders menolak 400 "Stok produk ... sedang habis" untuk produk yang
+    stoknya nol. `is_available` saja tidak cukup: backend membiarkannya True
+    sementara stoknya nol, jadi pelanggan baru tahu kuenya habis setelah seluruh
+    data checkout diisi. Kalau backend belum mengirim field-nya, dianggap ada.
+    """
+    if "is_in_stock" in p:
+        return bool(p["is_in_stock"])
+    return bool(p.get("is_available", True))
+
+
 # Indonesian/English spelling variants that must fold to one token, otherwise
 # "brownies cokelat" scores zero against "Brownies Coklat" on the flavour word
 # and the match falls back to whatever else shares a token (observed live: the

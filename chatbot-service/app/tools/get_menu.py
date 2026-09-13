@@ -3,7 +3,7 @@
 from langchain_core.tools import tool
 
 from app.backend_client import products as products_api
-from app.tools.formatting import product_label, rupiah
+from app.tools.formatting import product_label, rupiah, tersedia
 
 # Kategori tanpa nama di data ditaruh paling bawah, bukan di bawah judul kosong.
 _TANPA_KATEGORI = "Lainnya"
@@ -53,8 +53,7 @@ async def get_menu() -> str:
         # perlu ikut melihat ketidakrapian data itu.
         lines.append(f"\n*{nama_kategori.title()}*")
         for p in sorted(grup[nama_kategori], key=lambda x: product_label(x).casefold()):
-            # is_available dihitung backend (resep vs stok). Absen -> tersedia.
-            status = "" if p.get("is_available", True) else "  (sedang tidak tersedia)"
+            status = "" if tersedia(p) else "  (sedang tidak tersedia)"
             lines.append(f"• {product_label(p)} — {rupiah(p.get('harga_jual'))}{status}")
     lines.append("\nMau lihat detail salah satu kue? Sebutkan namanya ya 😊")
     return "\n".join(lines)
