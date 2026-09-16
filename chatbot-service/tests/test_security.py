@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from app.core.config import settings
-from app.core.security import mask_phone, sanitize_relay, valid_wa_number
+from app.core.security import mask_phone, sanitize_relay, valid_wa_chat_id, valid_wa_number
 from app.main import app
 
 WA = "628123456789@c.us"
@@ -71,6 +71,26 @@ def test_valid_wa_number_accepts_only_plain_numbers():
     assert not valid_wa_number("../orders/latest@c.us")
     assert not valid_wa_number("62812 or 1=1")
     assert not valid_wa_number("")
+
+
+def test_webhook_accepts_lid_as_a_direct_chat_id(client, monkeypatch):
+    """LID is a replyable WhatsApp chat address, not a backend phone number."""
+    lid = "10278007771379@lid"
+    seen = []
+
+    async def fake_handle(sender, text):
+        seen.append((sender, text))
+
+    monkeypatch.setattr("app.webhook.routes._process", fake_handle)
+    payload = {
+        "dataType": "message",
+        "data": {"message": {"from": lid, "type": "chat", "body": "menu"}},
+    }
+    r = client.post(f"/webhook/whatsapp/{settings.webhook_token}", json=payload)
+    assert r.status_code == 200 and r.json()["status"] == "accepted"
+    assert seen == [(lid, "menu")]
+    assert valid_wa_chat_id(lid)
+    assert not valid_wa_number(lid)
 
 
 def test_backend_call_refuses_malformed_number():

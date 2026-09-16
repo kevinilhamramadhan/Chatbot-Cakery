@@ -22,7 +22,7 @@ from app.conversation import background, store
 from app.conversation.orchestrator import handle_message
 from app.conversation.store import deactivate_takeover
 from app.core.config import settings
-from app.core.security import mask_phone, token_matches, valid_wa_number
+from app.core.security import mask_phone, token_matches, valid_wa_chat_id, valid_wa_number
 from app.whatsapp_client.client import whatsapp_client
 
 logger = logging.getLogger(__name__)
@@ -59,8 +59,8 @@ def _direct_sender(payload: dict) -> str | None:
     sender = msg.get("from") or ""
     if not sender or sender.endswith("@g.us"):  # ignore groups
         return None
-    if not valid_wa_number(sender):
-        logger.warning("Dropped message with malformed sender id: %r", sender[:64])
+    if not valid_wa_chat_id(sender):
+        logger.warning("Dropped message with malformed sender chat id: %r", sender[:64])
         return None
     return sender
 

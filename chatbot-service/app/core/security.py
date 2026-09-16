@@ -7,9 +7,15 @@ config-time code) without pulling in FastAPI or httpx.
 import re
 import secrets
 
-# A wweb.js chatId for an individual chat is `<digits>@c.us`; we also accept a
-# bare number so internal callers (admin numbers from env/backend) work.
+# A phone-backed wweb.js chatId is `<digits>@c.us`; we also accept a bare
+# number so internal callers (admin numbers from env/backend) work.
 _WA_RE = re.compile(r"^\d{6,20}(@c\.us)?$")
+
+# WhatsApp now delivers some direct chats with a privacy-preserving Linked ID
+# (`<digits>@lid`). It is a valid *chat address* for wweb.js, but its digits
+# are not a telephone number and must never be used in backend customer/order
+# URLs or as a customer's phone number.
+_WA_CHAT_ID_RE = re.compile(r"^\d{6,20}(@(?:c\.us|lid))?$")
 
 _URL_RE = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
 
@@ -22,6 +28,16 @@ def valid_wa_number(wa_number: str) -> bool:
     paths — so anything that is not a plain number is rejected at the edge.
     """
     return bool(_WA_RE.match(wa_number or ""))
+
+
+def valid_wa_chat_id(chat_id: str) -> bool:
+    """True for a direct WhatsApp chat address accepted by wweb.js.
+
+    This deliberately has a different contract from :func:`valid_wa_number`:
+    an ``@lid`` address is safe to retain as a conversation/reply destination,
+    but is not safe to treat as a phone number for backend business actions.
+    """
+    return bool(_WA_CHAT_ID_RE.match(chat_id or ""))
 
 
 def wa_digits(wa_number: str) -> str:
