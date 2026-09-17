@@ -15,7 +15,7 @@ Tiga keputusan diambil sesudah QA, dan ketiganya membuat sebagian data v5 justru
 mengajarkan hal yang sudah tidak berlaku:
 
 **(A) Keluhan punya balasannya sendiri.** Sampai v5, keluhan pelanggan masuk
-`escalate_to_admin`. Sekarang ada tool ke-13, `sampaikan_maaf`, yang
+`escalate_to_admin`. Sekarang ada tool ke-13, `send_apology`, yang
 mengembalikan permintaan maaf dengan kalimat tetap. Alasannya terukur: dengan
 balasan diserahkan ke model, *"kuenya kemarin basi, aku kecewa banget"* dijawab
 **"Wah, makasih banyak kak! Senang banget kalau suka 😊"** — model 1,7 B salah
@@ -46,7 +46,7 @@ harga salahnya tidak pernah dikoreksi.
 
 | Tipe | v5 | v6 | Isi |
 |---|---|---|---|
-| **T14** (baru) | — | 45 / 5 / 0 | Keluhan → `sampaikan_maaf(keluhan=…)`: kue basi, telat, salah kirim, tidak sesuai foto, kotak penyok, jumlah kurang |
+| **T14** (baru) | — | 45 / 5 / 0 | Keluhan → `send_apology(keluhan=…)`: kue basi, telat, salah kirim, tidak sesuai foto, kotak penyok, jumlah kurang |
 | **N9** (baru) | — | 35 / 4 / 0 | Dulu dieskalasi, sekarang dijawab sendiri tanpa tool: minta bicara dengan orang, minta nomor telepon, nego harga, diskon borongan |
 | **T7** | 25 / 3 / 4 | 55 / 6 / 4 | Templat jawaban jumlah polos di DEPAN pool: `"{qty}{unit} aja"`, `"{qty} dong"`, `"mau {qty}"`, `"just {qty}"` |
 | **T3** | 100 / 10 / 9 | 110 / 11 / 9 | Templat klaim harga salah: `"{prod} itu 50 ribu kan ya?"`, `"bukannya {prod} harganya 100 ribu?"` |
@@ -71,7 +71,7 @@ mengandung aturan yang sengaja kita ubah: dua keluhan "salah kirim" dan satu
 v6 akan dihitung SALAH justru pada perilaku yang diperbaiki.
 
 `patch_test_v6.py` menyelaraskan ketiganya (idempoten, aman dijalankan ulang):
-dua jadi `sampaikan_maaf`, satu jadi jawaban teks tanpa tool. Percakapan pada 97
+dua jadi `send_apology`, satu jadi jawaban teks tanpa tool. Percakapan pada 97
 baris lain **tidak disentuh**, jadi perbandingan v3→v4→v5→v6 tetap berlaku
 dengan catatan kaki ini.
 
@@ -85,9 +85,9 @@ Skrip yang sama juga **menyegarkan `tools_json`** di seluruh 100 baris menjadi
 13 tool runtime. Ini bukan kosmetik: notebook memakai `tools_json` milik tiap
 baris sebagai daftar tool yang ditawarkan ke model, sementara baris test masih
 membawa daftar 9 tool dari v1 — tertinggal dua versi di belakang produksi. Tanpa
-disegarkan, dua baris keluhan itu mustahil dijawab benar karena `sampaikan_maaf`
-tidak pernah ditawarkan, dan sejak v5 `lihat_keranjang`, `check_payment_status`,
-serta `kirim_ulang_pembayaran` juga tidak pernah ikut diuji. Harness lokal tidak
+disegarkan, dua baris keluhan itu mustahil dijawab benar karena `send_apology`
+tidak pernah ditawarkan, dan sejak v5 `check_cart`, `check_payment_status`,
+serta `resend_payment_method` juga tidak pernah ikut diuji. Harness lokal tidak
 pernah punya masalah ini — ia memang mem-`bind_tools(ALL_TOOLS)` dari kode
 runtime.
 
@@ -136,7 +136,7 @@ chatbot-service/.venv/bin/python finetune/scenario_suite.py     --model toti-qwe
 ## 5. Gerbang rilis v6
 
 1. Metrik pada split `test` tidak turun dibanding v5.
-2. Enam perilaku baru lolos: keluhan → `sampaikan_maaf`; permintaan bicara
+2. Enam perilaku baru lolos: keluhan → `send_apology`; permintaan bicara
    dengan orang → tanpa tool; nego harga → tanpa tool; jumlah polos sesudah
    detail → `add_to_cart`; klaim harga salah → `get_product_detail`; kue custom
    → tetap `escalate_to_admin`.

@@ -8,12 +8,12 @@ from app.tools.compare_products import compare_products
 from app.tools.escalate import escalate_to_admin
 from app.tools.get_menu import get_menu
 from app.tools.get_product_detail import get_product_detail
-from app.tools.keluhan import sampaikan_maaf
+from app.tools.keluhan import send_apology
 from app.tools.order_status import get_order_status
-from app.tools.payment_info import kirim_ulang_pembayaran
+from app.tools.payment_info import resend_payment_method
 from app.tools.payment_status import check_payment_status
 from app.tools.reports import business_analytics, financial_report
-from app.tools.view_cart import lihat_keranjang
+from app.tools.view_cart import check_cart
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +23,13 @@ TOOLS_UMUM = [
     get_product_detail,
     compare_products,
     add_to_cart,
-    lihat_keranjang,
+    check_cart,
     get_order_status,
     check_payment_status,
-    kirim_ulang_pembayaran,
+    resend_payment_method,
     cancel_order,
     escalate_to_admin,
-    sampaikan_maaf,
+    send_apology,
 ]
 
 # Angka bisnis. Hanya Owner yang boleh melihat bahwa ini ada.

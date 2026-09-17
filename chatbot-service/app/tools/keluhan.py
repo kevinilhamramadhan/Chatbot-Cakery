@@ -1,4 +1,4 @@
-"""Tool: sampaikan_maaf — balasan tetap untuk pelanggan yang menyampaikan keluhan.
+"""Tool: send_apology — balasan tetap untuk pelanggan yang menyampaikan keluhan.
 
 Kalimatnya sengaja tidak dikarang model. Terukur di uji: "kuenya kemarin basi,
 aku kecewa banget" dijawab "Wah, makasih banyak kak! Senang banget kalau suka 😊"
@@ -44,7 +44,7 @@ def _teks() -> str:
 
 
 @tool
-async def sampaikan_maaf(keluhan: str) -> str:
+async def send_apology(keluhan: str) -> str:
     """Balas pelanggan yang menyampaikan KELUHAN atau kekecewaan.
 
     Gunakan saat pelanggan mengeluh soal kue, pesanan, atau layanan — misalnya

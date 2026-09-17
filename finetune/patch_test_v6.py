@@ -5,7 +5,7 @@ Split `test` dibekukan sejak v1 supaya angka antar-versi sebanding, dan
 `generate_dataset.py` memang tidak pernah menulis ulang file ini. Tapi v6
 mengubah dua aturan yang kebetulan ada di dalamnya:
 
-  - keluhan pelanggan BUKAN lagi escalate_to_admin, melainkan sampaikan_maaf;
+  - keluhan pelanggan BUKAN lagi escalate_to_admin, melainkan send_apology;
   - nego harga / pesanan kantor jumlah besar BUKAN lagi alasan eskalasi
     (keputusan 11 Sep 2026: eskalasi khusus pesanan kue custom).
 
@@ -24,18 +24,21 @@ sys.path.insert(0, str(ROOT / "chatbot-service"))
 
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
 
-from app.tools.registry import ALL_TOOLS  # noqa: E402
+from app.tools.registry import ALL_TOOLS, TOOLS_UMUM  # noqa: E402
 
 PATH = ROOT / "finetune" / "data" / "test.jsonl"
 
 # Daftar tool yang ditawarkan ke model saat evaluasi. Notebook memakai
 # `tools_json` milik tiap baris, dan baris test masih membawa daftar 9 tool dari
 # v1 — dua versi tertinggal di belakang runtime. Akibatnya tool yang lebih baru
-# (termasuk sampaikan_maaf) tidak pernah bisa dipanggil saat eval, sehingga dua
+# (termasuk send_apology) tidak pernah bisa dipanggil saat eval, sehingga dua
 # baris keluhan di bawah mustahil dijawab benar. Daftar ini disegarkan dari kode
-# runtime, sama seperti yang dilakukan harness lokal (bind_tools(ALL_TOOLS)).
-TOOLS_JSON = json.dumps([convert_to_openai_tool(t) for t in ALL_TOOLS],
-                        ensure_ascii=False)
+# runtime, sama seperti yang dilakukan harness lokal. Tool Owner hanya tersedia
+# di baris evaluasi Owner (T11/T12); pelanggan biasa menerima TOOLS_UMUM.
+TOOLS_JSON = {
+    False: json.dumps([convert_to_openai_tool(t) for t in TOOLS_UMUM], ensure_ascii=False),
+    True: json.dumps([convert_to_openai_tool(t) for t in ALL_TOOLS], ensure_ascii=False),
+}
 
 KELUHAN = "Pelanggan komplain pesanan diduga salah kirim"
 
@@ -64,19 +67,22 @@ def tool_turn(nama: str, args: dict) -> dict:
 def main() -> None:
     rows = [json.loads(l) for l in PATH.open(encoding="utf-8")]
     diubah = []
-    disegarkan = sum(1 for row in rows if row["tools_json"] != TOOLS_JSON)
+    disegarkan = sum(
+        1 for row in rows
+        if row["tools_json"] != TOOLS_JSON[row["meta"]["type"] in ("T11", "T12")]
+    )
     for row in rows:
-        row["tools_json"] = TOOLS_JSON
+        row["tools_json"] = TOOLS_JSON[row["meta"]["type"] in ("T11", "T12")]
     for row in rows:
         teks = [m for m in row["messages"] if m["role"] == "user"][-1]["content"].lower()
         if row["meta"]["type"] not in ("T10", "T14", "N9"):
             continue
         akhir = row["messages"][-1]
         nama_tool = (akhir.get("tool_calls") or [{}])[0].get("function", {}).get("name")
-        if "salah kirim" in teks and nama_tool != "sampaikan_maaf":
-            row["messages"][-1] = tool_turn("sampaikan_maaf", {"keluhan": KELUHAN})
+        if "salah kirim" in teks and nama_tool != "send_apology":
+            row["messages"][-1] = tool_turn("send_apology", {"keluhan": KELUHAN})
             row["meta"]["type"] = "T14"
-            diubah.append(("keluhan -> sampaikan_maaf", teks[:60]))
+            diubah.append(("keluhan -> send_apology", teks[:60]))
         elif "nego harga" in teks and akhir.get("tool_calls"):
             row["messages"][-1] = {"role": "assistant", "content": JAWAB_NEGO}
             row["meta"]["type"] = "N9"
@@ -97,8 +103,10 @@ def main() -> None:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    n_tool = len(json.loads(TOOLS_JSON))
-    print(f"{len(rows)} baris test | tools_json disegarkan ke {n_tool} tool "
+    n_tool_umum = len(json.loads(TOOLS_JSON[False]))
+    n_tool_owner = len(json.loads(TOOLS_JSON[True]))
+    print(f"{len(rows)} baris test | tools_json disegarkan ke {n_tool_umum} tool pelanggan "
+          f"/ {n_tool_owner} tool Owner "
           f"pada {disegarkan} baris")
     print(f"{ditawar} balasan yang menawarkan admin diganti")
     print(f"{len(diubah)} baris diselaraskan ke aturan v6:")

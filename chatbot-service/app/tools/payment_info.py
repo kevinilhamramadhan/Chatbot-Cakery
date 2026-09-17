@@ -1,4 +1,4 @@
-"""Tool: kirim_ulang_pembayaran — repeats the payment instructions.
+"""Tool: resend_payment_method — repeats the payment instructions.
 
 The QRIS link and VA number were sent exactly once, at checkout. On WhatsApp
 that message is buried within minutes, and the customer only has 30 minutes to
@@ -16,7 +16,7 @@ from app.tools.formatting import rupiah
 
 
 @tool
-async def kirim_ulang_pembayaran() -> str:
+async def resend_payment_method() -> str:
     """Kirim ulang info pembayaran (QRIS/Virtual Account) pesanan yang belum dibayar.
 
     Gunakan saat pelanggan minta dikirimkan ulang kode QR, nomor VA, tautan

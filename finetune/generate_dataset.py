@@ -1436,7 +1436,7 @@ class Gen:
                 return text, reason
             text, reason = uniq(build)
             return self.make_row(split, rtype, lang, history, text,
-                                 self.tool_turn("sampaikan_maaf", {"keluhan": reason}),
+                                 self.tool_turn("send_apology", {"keluhan": reason}),
                                  noised=noise)
 
         if rtype == "N9":
@@ -1617,7 +1617,7 @@ def _validate_args(name: str, obj: dict) -> None:
             assert set(it) == {"product", "qty"} and isinstance(it["qty"], int) and it["qty"] >= 1, it
     elif name == "escalate_to_admin":
         assert set(obj) == {"reason"} and 5 <= len(obj["reason"].split()) <= 15, obj
-    elif name == "sampaikan_maaf":
+    elif name == "send_apology":
         assert set(obj) == {"keluhan"} and 5 <= len(obj["keluhan"].split()) <= 15, obj
     else:
         raise AssertionError(name)

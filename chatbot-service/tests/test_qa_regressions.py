@@ -646,7 +646,7 @@ async def test_backend_409_tells_the_customer_what_to_do(patch_externals):
 async def test_payment_instructions_can_be_sent_again(patch_externals):
     """Live: "kode qr nya kirim ulang dong" dijawab status pesanan tanpa tautan
     pembayaran, dan tidak ada tool lain yang bisa mengirimkannya."""
-    from app.tools.payment_info import kirim_ulang_pembayaran
+    from app.tools.payment_info import resend_payment_method
 
     await store.create_pending_order(
         wa_number=WA, order_ref="30001", payment_ref="MID", payment_type="dp",
@@ -657,7 +657,7 @@ async def test_payment_instructions_can_be_sent_again(patch_externals):
     )
     set_turn_context(TurnContext(wa_number=WA))
 
-    out = await kirim_ulang_pembayaran.ainvoke({})
+    out = await resend_payment_method.ainvoke({})
 
     assert "https://api.qr/mid-test" in out
     assert "INV-TEST" in out
@@ -948,10 +948,10 @@ async def test_keluhan_dijawab_permintaan_maaf_yang_tetap(patch_externals):
     banyak kak! Senang banget kalau suka 😊". Nada keluhan terlalu mahal untuk
     diserahkan ke karangan model 1,7 B, jadi kalimatnya tetap — yang tetap jadi
     keputusan model hanyalah kapan tool ini dipakai."""
-    from app.tools.keluhan import sampaikan_maaf
+    from app.tools.keluhan import send_apology
 
     set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
-    out = await sampaikan_maaf.ainvoke({"keluhan": "kue diterima sudah basi"})
+    out = await send_apology.ainvoke({"keluhan": "kue diterima sudah basi"})
 
     assert out.startswith("Mohon maaf sekali atas ketidaknyamanan yang dialami.")
     assert "bahan perbaikan" in out
@@ -960,11 +960,14 @@ async def test_keluhan_dijawab_permintaan_maaf_yang_tetap(patch_externals):
     assert await store.is_takeover_active(WA) is False, "keluhan tidak membungkam bot"
 
 
-async def test_tool_keluhan_terdaftar_untuk_model(patch_externals):
-    """Tool yang tidak terdaftar tidak akan pernah dipanggil model."""
+async def test_renamed_tools_terdaftar_untuk_model(patch_externals):
+    """Model menerima nama tool baru, tanpa alias nama lama yang kedaluwarsa."""
     from app.tools.registry import TOOLS_BY_NAME
 
-    assert "sampaikan_maaf" in TOOLS_BY_NAME
+    assert {"check_cart", "resend_payment_method", "send_apology"} <= TOOLS_BY_NAME.keys()
+    assert not {
+        "lihat_keranjang", "kirim_ulang_pembayaran", "sampaikan_maaf"
+    } & TOOLS_BY_NAME.keys()
 
 
 async def test_balasan_keluhan_menyebut_email_kalau_disetel(patch_externals):
@@ -975,12 +978,12 @@ async def test_balasan_keluhan_menyebut_email_kalau_disetel(patch_externals):
     set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
     patch_externals["monkeypatch"].setattr(
         settings_module, "store_support_email", "halo@toticakery.id", raising=False)
-    out = await keluhan.sampaikan_maaf.ainvoke({"keluhan": "kue basi"})
+    out = await keluhan.send_apology.ainvoke({"keluhan": "kue basi"})
     assert "halo@toticakery.id" in out
 
     patch_externals["monkeypatch"].setattr(
         settings, "store_support_email", "", raising=False)
-    out = await keluhan.sampaikan_maaf.ainvoke({"keluhan": "kue basi"})
+    out = await keluhan.send_apology.ainvoke({"keluhan": "kue basi"})
     assert "@" not in out, "tanpa setelan, jangan menyebut alamat apa pun"
 
 

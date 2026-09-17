@@ -91,11 +91,11 @@ for s in rows:
         for n, a in args_of(r):
             if n == "add_to_cart" and not (set(a) == {"items"} and a["items"]):
                 rusak.append((s, n, a))
-            if n == "sampaikan_maaf" and not (set(a) == {"keluhan"} and a["keluhan"]):
+            if n == "send_apology" and not (set(a) == {"keluhan"} and a["keluhan"]):
                 rusak.append((s, n, a))
             if n == "escalate_to_admin" and not (set(a) == {"reason"} and a["reason"]):
                 rusak.append((s, n, a))
-cek("argumen add_to_cart/sampaikan_maaf/escalate valid", not rusak, str(rusak[:2]))
+cek("argumen add_to_cart/send_apology/escalate valid", not rusak, str(rusak[:2]))
 
 # 6. ATURAN v6: keluhan tidak boleh escalate; eskalasi hanya kue custom
 KATA_KELUHAN = ("basi", "kecewa", "salah kirim", "telat", "komplain", "penyok",
@@ -154,11 +154,11 @@ for r in rows["train"] + rows["validation"]:
         polos.append((u, penanda[-1][:60] if penanda else "(tanpa penanda)", calls[:1]))
 cek("jawaban jumlah polos merujuk produk di penanda riwayat", not polos, str(polos[:2]))
 
-# 9. Keluhan selalu memakai sampaikan_maaf
+# 9. Keluhan selalu memakai send_apology
 keluhan_salah = [(s, args_of(r)) for s in rows for r in rows[s]
                  if r["meta"]["type"] == "T14"
-                 and (not args_of(r) or args_of(r)[0][0] != "sampaikan_maaf")]
-cek("semua baris T14 memanggil sampaikan_maaf", not keluhan_salah, str(keluhan_salah[:2]))
+                 and (not args_of(r) or args_of(r)[0][0] != "send_apology")]
+cek("semua baris T14 memanggil send_apology", not keluhan_salah, str(keluhan_salah[:2]))
 
 # 10. Tidak ada kebocoran: teks user test tidak muncul di train/val
 teks_test = {tuple(m["content"] for m in r["messages"] if m["role"] == "user")[-1]

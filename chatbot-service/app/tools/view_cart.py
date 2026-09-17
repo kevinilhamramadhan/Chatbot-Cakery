@@ -1,4 +1,4 @@
-"""Tool: lihat_keranjang — reads back the draft order.
+"""Tool: check_cart — reads back the draft order.
 
 "berapa totalnya sekarang?" used to be answered with the whole menu, because no
 tool could see the cart. It is the most natural question a customer asks right
@@ -13,7 +13,7 @@ from app.tools.add_to_cart import cart_summary
 
 
 @tool
-async def lihat_keranjang() -> str:
+async def check_cart() -> str:
     """Tampilkan isi keranjang/draft pesanan pelanggan beserta totalnya.
 
     Gunakan saat pelanggan menanyakan pesanannya sejauh ini, totalnya, atau
