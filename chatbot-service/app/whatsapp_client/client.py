@@ -62,7 +62,8 @@ class WhatsAppClient:
                 resp = await client.get(url, headers=self._headers)
             data = resp.json()
         except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Gateway WhatsApp tidak terjawab: %s", exc)
+            logger.warning("Gateway WhatsApp tidak terjawab: %s: %s",
+                           type(exc).__name__, exc)
             return None
         if data.get("success") and data.get("state"):
             return str(data["state"])
@@ -79,8 +80,19 @@ class WhatsAppClient:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.get(url, headers=self._headers)
             ok = bool(resp.json().get("success"))
+        except httpx.TimeoutException:
+            # Gateway membuka Chromium dan memulihkan kredensialnya sebelum
+            # menjawab, dan itu bisa lebih lama dari batas di atas. Timeout di
+            # sini berarti "masih berjalan", bukan gagal: siklus berikutnya
+            # melihat hasilnya, dan jeda antar percobaan sudah mencegah tumpukan.
+            logger.info("Sesi WhatsApp masih diinisialisasi — menunggu siklus berikutnya")
+            return False
         except (httpx.HTTPError, ValueError) as exc:
-            logger.error("Gagal menyalakan sesi WhatsApp: %s", exc)
+            # Tipe exception ikut dicatat: httpx.ReadTimeout dan beberapa
+            # saudaranya memiliki str() kosong, sehingga log yang hanya memuat
+            # pesannya berbunyi "Gagal menyalakan sesi WhatsApp: " tanpa isi.
+            logger.error("Gagal menyalakan sesi WhatsApp: %s: %s",
+                         type(exc).__name__, exc)
             return False
         logger.info("Permintaan menyalakan sesi WhatsApp terkirim (sukses=%s)", ok)
         return ok
