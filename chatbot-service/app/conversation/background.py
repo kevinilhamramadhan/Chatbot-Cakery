@@ -197,7 +197,11 @@ async def _kabari_transfer_tertunda() -> None:
 # Sesi WhatsApp: dicek berkala, bukan sekali saat start.
 _SESI_SEHAT = "CONNECTED"
 _JEDA_NYALAKAN_SESI = 120.0
-_sesi_terakhir_dinyalakan = 0.0
+# None, BUKAN 0.0: time.monotonic() adalah uptime mesin, jadi di server yang baru
+# boot nilainya masih kecil dan `sekarang - 0.0 < jeda` — percobaan pertama
+# terblokir justru pada menit-menit ketika sesinya paling mungkin mati.
+# Kekeliruan yang sama pernah terjadi di webhook/routes.py.
+_sesi_terakhir_dinyalakan: float | None = None
 
 
 async def _pastikan_sesi_wa() -> None:
@@ -219,7 +223,8 @@ async def _pastikan_sesi_wa() -> None:
         return
 
     sekarang = time.monotonic()
-    if sekarang - _sesi_terakhir_dinyalakan < _JEDA_NYALAKAN_SESI:
+    if (_sesi_terakhir_dinyalakan is not None
+            and sekarang - _sesi_terakhir_dinyalakan < _JEDA_NYALAKAN_SESI):
         return  # sedang dalam proses; menyalakan berulang kali tidak membantu
     _sesi_terakhir_dinyalakan = sekarang
 

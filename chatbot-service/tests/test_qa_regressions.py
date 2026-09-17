@@ -1625,7 +1625,7 @@ async def test_sesi_wa_mati_dinyalakan_lagi(patch_externals):
     from app.conversation import background
     from app.whatsapp_client.client import whatsapp_client
 
-    background._sesi_terakhir_dinyalakan = 0.0
+    background._sesi_terakhir_dinyalakan = None
     dinyalakan = []
 
     async def mati():
@@ -1651,7 +1651,7 @@ async def test_sesi_wa_sehat_tidak_diganggu(patch_externals):
     from app.conversation import background
     from app.whatsapp_client.client import whatsapp_client
 
-    background._sesi_terakhir_dinyalakan = 0.0
+    background._sesi_terakhir_dinyalakan = None
     dinyalakan = []
 
     async def sehat():
@@ -1674,7 +1674,7 @@ async def test_gateway_tak_terjawab_bukan_alasan_menyalakan_sesi(patch_externals
     from app.conversation import background
     from app.whatsapp_client.client import whatsapp_client
 
-    background._sesi_terakhir_dinyalakan = 0.0
+    background._sesi_terakhir_dinyalakan = None
     dinyalakan = []
 
     async def tak_terjawab():
@@ -1689,3 +1689,33 @@ async def test_gateway_tak_terjawab_bukan_alasan_menyalakan_sesi(patch_externals
 
     await background._pastikan_sesi_wa()
     assert dinyalakan == []
+
+
+async def test_sesi_wa_dinyalakan_walau_mesin_baru_boot(patch_externals):
+    """time.monotonic() adalah uptime mesin. Dengan penanda 0.0, server yang baru
+    boot membuat `sekarang - 0.0` lebih kecil dari jeda, sehingga percobaan
+    pertama terblokir justru pada menit-menit ketika sesinya paling mungkin mati
+    — dan itulah keadaan yang fitur ini seluruhnya dibuat untuk menangani."""
+    import time as waktu
+
+    from app.conversation import background
+    from app.whatsapp_client.client import whatsapp_client
+
+    background._sesi_terakhir_dinyalakan = None
+    dinyalakan = []
+
+    async def mati():
+        return "session_not_found"
+
+    async def nyalakan():
+        dinyalakan.append(1)
+        return True
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "session_state", mati)
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "start_session", nyalakan)
+    # Uptime 9 detik: lebih kecil dari jeda 120 detik.
+    patch_externals["monkeypatch"].setattr(waktu, "monotonic", lambda: 9.0)
+    patch_externals["monkeypatch"].setattr(background.time, "monotonic", lambda: 9.0)
+
+    await background._pastikan_sesi_wa()
+    assert dinyalakan == [1], "sesi harus tetap dinyalakan di mesin yang baru boot"
