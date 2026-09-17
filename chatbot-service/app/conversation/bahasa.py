@@ -332,6 +332,14 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "locations aren't something I can process. Could you type it instead? "
              "Type *menu* to see our cake list 😊"),
     },
+    "nomor_tak_dikenali": {
+        ID: ("Maaf, aku belum bisa mengenali nomormu dari sini \U0001F64F Coba kirim "
+             "pesan lagi sebentar lagi ya \u2014 kalau masih begini juga, hubungi kami "
+             "lewat nomor toko dari kontak yang tersimpan."),
+        EN: ("Sorry, I can't recognise your number from here \U0001F64F Please send "
+             "another message in a moment \u2014 if it keeps happening, reach us "
+             "through our store number from your saved contacts."),
+    },
     "di_luar_cakupan": {
         ID: ("Maaf, aku hanya bisa membantu seputar {toko} ya — menu, pemesanan, "
              "pembayaran, pengiriman, dan info toko. Ada yang bisa kubantu soal itu? 😊"),

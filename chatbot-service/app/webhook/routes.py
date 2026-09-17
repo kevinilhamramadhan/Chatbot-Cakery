@@ -40,6 +40,8 @@ def _require_internal_key(key: str | None) -> None:
 # sesungguhnya memakai bahasa pelanggan lewat _send_text_only_notice().
 TEXT_ONLY_REPLY = bahasa.teks("hanya_teks", bahasa.ID)
 
+GAGAL_KENALI_NOMOR = bahasa.teks("nomor_tak_dikenali", bahasa.ID)
+
 # One notice per customer per hour. Somebody sending five stickers in a row
 # should not get five identical replies.
 _TEXT_ONLY_COOLDOWN_SECONDS = 3600
@@ -93,6 +95,42 @@ def _should_send_text_only_notice(sender: str) -> bool:
     return True
 
 
+# ── Alamat @lid -> nomor telepon ─────────────────────────────────────────────
+# Hasil terjemahannya di-cache: alamat LID milik satu orang tidak berubah, dan
+# tanpa cache setiap pesan masuk memicu satu panggilan tambahan ke gateway.
+_lid_ke_nomor: dict[str, str] = {}
+
+
+async def _identitas_pengirim(sender: str) -> str | None:
+    """Alamat yang dipakai sebagai identitas pelanggan, atau None kalau gagal.
+
+    Pengirim `@lid` DIWAJIBKAN diterjemahkan lebih dulu. Angka LID tidak boleh
+    sampai ke backend: di sana nomor WhatsApp adalah kunci yang menyambungkan
+    pesanan lewat chat dengan akun Buyer Site, dan dipakai untuk OTP serta reset
+    kata sandi. Pesanan yang tersimpan dengan angka LID tidak akan pernah bisa
+    dicocokkan dengan akunnya, dan adminnya tidak punya nomor untuk menghubungi
+    pelanggan itu — dua-duanya baru ketahuan setelah pesanannya jadi.
+
+    Karena itu kegagalan menerjemahkan menghentikan giliran ini, bukan
+    dilanjutkan memakai LID-nya.
+    """
+    if not sender.endswith("@lid"):
+        return sender
+
+    tersimpan = _lid_ke_nomor.get(sender)
+    if tersimpan:
+        return tersimpan
+
+    nomor = await whatsapp_client.resolve_phone(sender)
+    if not nomor:
+        return None
+    alamat = f"{nomor}@c.us"
+    _lid_ke_nomor[sender] = alamat
+    logger.info("Pengirim %s diterjemahkan menjadi %s",
+                mask_phone(sender), mask_phone(alamat))
+    return alamat
+
+
 # One lock per customer. Every inbound message runs as its own background task,
 # so two messages sent a second apart were handled concurrently: both read the
 # same cart, both wrote it back, and "aku mau 2 brownies" sent twice ended up as
@@ -108,6 +146,19 @@ def _lock_for(sender: str) -> asyncio.Lock:
 
 
 async def _process(sender: str, text: str) -> None:
+    identitas = await _identitas_pengirim(sender)
+    if identitas is None:
+        # Dibalas ke alamat aslinya — itu satu-satunya alamat yang kita punya —
+        # tapi tidak ada apa pun yang ditulis atas nama LID ini.
+        logger.error("Tidak bisa menerjemahkan %s jadi nomor telepon; "
+                     "giliran dihentikan", mask_phone(sender))
+        try:
+            await whatsapp_client.send_text(sender, GAGAL_KENALI_NOMOR)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Gagal mengabari %s: %s", mask_phone(sender), exc)
+        return
+
+    sender = identitas
     async with _lock_for(sender):
         try:
             reply = await handle_message(sender, text)

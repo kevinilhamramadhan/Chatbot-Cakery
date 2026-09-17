@@ -49,6 +49,39 @@ class WhatsAppClient:
             logger.info("WA out -> %s (%d chars)", mask_phone(wa_number), len(text))
         return await self._post(payload)
 
+    async def resolve_phone(self, chat_id: str) -> str | None:
+        """Nomor telepon asli di balik sebuah alamat `@lid`, atau None.
+
+        WhatsApp kini mengirim sebagian pengirim sebagai `@lid` — identitas
+        privasi yang BUKAN nomor telepon. Terekam di produksi:
+        `10278007771379@lid` untuk nomor yang sebenarnya `6281283838610`.
+
+        Angka LID tidak boleh sampai ke backend. Di sana nomor WhatsApp adalah
+        kunci yang menyambungkan pesanan lewat chat dengan akun Buyer Site, dan
+        dipakai untuk OTP serta reset kata sandi. Menyimpan LID sebagai nomor
+        berarti pesanannya tidak pernah bisa dicocokkan dengan akunnya, dan
+        adminnya tidak bisa menghubungi pelanggan itu sama sekali.
+        """
+        url = f"{self._base}/client/getContactById/{self._session}"
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(url, headers=self._headers,
+                                         json={"contactId": chat_id})
+            kontak = (resp.json() or {}).get("contact") or {}
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Gagal menerjemahkan %s: %s: %s",
+                           mask_phone(chat_id), type(exc).__name__, exc)
+            return None
+
+        # Balasannya memuat dua hal: `id` yang sudah berbentuk `62…@c.us`, dan
+        # `number` yang justru berisi angka LID-nya. Yang dipakai `id`.
+        nomor = str((kontak.get("id") or {}).get("user") or "")
+        if nomor.isdigit() and len(nomor) >= 10:
+            return nomor
+        logger.warning("Kontak %s tidak memuat nomor telepon yang sah",
+                       mask_phone(chat_id))
+        return None
+
     # ── Kesehatan sesi ───────────────────────────────────────────────────────
     async def session_state(self) -> str | None:
         """State sesi WhatsApp di gateway, atau None kalau gateway tak terjawab.

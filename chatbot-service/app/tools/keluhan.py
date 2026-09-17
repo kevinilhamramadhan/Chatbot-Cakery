@@ -14,7 +14,7 @@ import logging
 
 from langchain_core.tools import tool
 
-from app.conversation import bahasa, store
+from app.conversation import bahasa, escalation, store
 from app.conversation.context import get_turn_context
 from app.core.config import settings
 from app.core.security import mask_phone, sanitize_relay
@@ -50,7 +50,15 @@ async def send_apology(keluhan: str) -> str:
     kalimatmu sendiri — pakai tool ini supaya permintaan maafnya tepat.
     """
     ctx = get_turn_context()
-    logger.warning(
-        "KELUHAN dari %s: %s", mask_phone(ctx.wa_number), sanitize_relay(keluhan or "")[:200]
-    )
-    return _teks(await store.get_lang(ctx.wa_number))
+    ringkas = sanitize_relay(keluhan or "")[:200]
+    logger.warning("KELUHAN dari %s: %s", mask_phone(ctx.wa_number), ringkas)
+
+    lang = await store.get_lang(ctx.wa_number)
+
+    # Permintaan maafnya tetap yang utama, lalu pelanggan DITAWARI disambungkan
+    # ke admin — bukan langsung disambungkan. Takeover membungkam bot selama
+    # berhari-hari, jadi ia hanya berjalan setelah pelanggan mengiyakan, sama
+    # seperti alur kue custom. Tawarannya disimpan di sesi; jawaban "ya" pada
+    # giliran berikutnya yang benar-benar memulai takeover (orchestrator).
+    await store.set_pending_escalation(ctx.wa_number, f"Keluhan pelanggan: {ringkas}")
+    return _teks(lang) + "\n\n" + escalation.teks_tawaran(lang)

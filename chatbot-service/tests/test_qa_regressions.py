@@ -1719,3 +1719,81 @@ async def test_sesi_wa_dinyalakan_walau_mesin_baru_boot(patch_externals):
 
     await background._pastikan_sesi_wa()
     assert dinyalakan == [1], "sesi harus tetap dinyalakan di mesin yang baru boot"
+
+
+# ── Alamat @lid harus jadi nomor telepon ─────────────────────────────────────
+async def test_lid_diterjemahkan_jadi_nomor_telepon(patch_externals):
+    """WhatsApp mengirim sebagian pengirim sebagai @lid, yang BUKAN nomor
+    telepon. Terekam di produksi: 10278007771379@lid untuk nomor 6281283838610.
+    Angka LID tidak boleh sampai ke backend — di sana nomor WhatsApp adalah
+    kunci yang menyambungkan pesanan chat dengan akun Buyer Site, dan dipakai
+    untuk OTP serta reset kata sandi."""
+    from app.webhook import routes
+    from app.whatsapp_client.client import whatsapp_client
+
+    routes._lid_ke_nomor.clear()
+    dipanggil = []
+
+    async def f_resolve(chat_id):
+        dipanggil.append(chat_id)
+        return "6281283838610"
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "resolve_phone", f_resolve)
+
+    assert await routes._identitas_pengirim("10278007771379@lid") == "6281283838610@c.us"
+    # Hasilnya di-cache: alamat LID satu orang tidak berubah, dan tanpa cache
+    # tiap pesan memicu satu panggilan tambahan ke gateway.
+    assert await routes._identitas_pengirim("10278007771379@lid") == "6281283838610@c.us"
+    assert len(dipanggil) == 1
+
+    # Alamat biasa lewat apa adanya, tanpa memanggil gateway.
+    assert await routes._identitas_pengirim("628111222333@c.us") == "628111222333@c.us"
+    assert len(dipanggil) == 1
+
+
+async def test_lid_gagal_diterjemahkan_tidak_ditulis_ke_backend(patch_externals):
+    """Kalau penerjemahannya gagal, giliran dihentikan. Melanjutkan dengan LID
+    berarti pesanan tersimpan dengan nomor yang tidak bisa dihubungi, dan itu
+    baru ketahuan setelah pesanannya jadi."""
+    from app.webhook import routes
+    from app.whatsapp_client.client import whatsapp_client
+
+    routes._lid_ke_nomor.clear()
+
+    async def f_resolve(chat_id):
+        return None
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "resolve_phone", f_resolve)
+    assert await routes._identitas_pengirim("10278007771379@lid") is None
+
+    terkirim = []
+
+    async def f_send(wa, text):
+        terkirim.append((wa, text))
+        return {"ok": True}
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", f_send)
+    await routes._process("10278007771379@lid", "halo")
+
+    # Pelanggan tetap dikabari, dan tidak ada sesi atas nama LID-nya.
+    assert terkirim and terkirim[0][0] == "10278007771379@lid"
+    assert await store.list_orders_by_status("pending") == []
+
+
+# ── Keluhan menawarkan admin ─────────────────────────────────────────────────
+async def test_keluhan_minta_maaf_lalu_menawarkan_admin(patch_externals):
+    """Keputusan Kevin: keluhan dijawab template maaf DAN ditawari disambungkan
+    ke admin. Ditawarkan, bukan langsung disambungkan — takeover membungkam bot
+    berhari-hari, jadi ia hanya berjalan setelah pelanggan mengiyakan."""
+    from app.conversation import bahasa
+    from app.tools.keluhan import send_apology
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
+    hasil = await send_apology.ainvoke({"keluhan": "kue diterima dalam keadaan basi"})
+
+    assert "mohon maaf" in hasil.lower(), hasil
+    assert bahasa.teks("tawaran_admin", bahasa.ID)[:30] in hasil, hasil
+
+    # Tawarannya tersimpan, jadi "ya" berikutnya benar-benar memulai takeover.
+    sesi = await store.get_or_create_session(WA)
+    assert sesi.pending_escalation and "Keluhan" in sesi.pending_escalation
