@@ -11,7 +11,7 @@ import logging
 from langchain_core.tools import tool
 
 from app.backend_client import api as backend
-from app.conversation import store
+from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State
 
@@ -29,16 +29,15 @@ async def check_payment_status() -> str:
     """
     ctx = get_turn_context()
     wa = ctx.wa_number
+    lang = await store.get_lang(wa)
     order = await store.get_active_pending(wa)
     if order is None:
-        return ("Aku tidak menemukan pesanan yang menunggu pembayaran. "
-                "Mau lihat menu dulu? 😊")
+        return bahasa.teks("tak_ada_tagihan", lang)
     try:
         res = await backend.get_payment_status(order.order_ref)
     except Exception as exc:  # noqa: BLE001
         logger.warning("payment status check failed for %s: %s", order.order_ref, exc)
-        return ("Maaf, status pembayaran belum bisa kucek sekarang. "
-                "Coba tanya lagi sebentar lagi ya 🙏")
+        return bahasa.teks("cek_bayar_gagal", lang)
     inv = str((res or {}).get("invoice_status") or "").lower()
     if inv == "refunded":
         # Admin sudah me-refund lewat backend: pesanannya batal dan uangnya
@@ -46,9 +45,7 @@ async def check_payment_status() -> str:
         # terdeteksi" — benar secara harfiah, menyesatkan pada kenyataannya.
         await store.update_pending_order(order.id, status="refunded")
         ctx.next_state = State.IDLE
-        return ("Pesanan ini sudah dibatalkan dan pembayarannya dikembalikan ✅\n"
-                "Dananya kembali lewat metode pembayaran yang kamu pakai, dan bisa "
-                "makan beberapa hari kerja tergantung bank atau e-wallet-nya ya 🙏")
+        return bahasa.teks("sudah_direfund", lang)
     if inv in ("paid", "partial"):
         await store.update_pending_order(order.id, status="paid", notified_paid=True)
         ctx.next_state = State.ORDER_ACTIVE

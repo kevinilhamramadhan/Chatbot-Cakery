@@ -250,6 +250,79 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "\nSilakan diambil di {nama_toko}, {alamat_toko}.",
         EN: "\nPlease collect it at {nama_toko}, {alamat_toko}.",
     },
+    # ── Keluaran tool ────────────────────────────────────────────────────────
+    "ringkasan_keranjang_judul": {
+        ID: "Ringkasan pesananmu sejauh ini:",
+        EN: "Your order so far:",
+    },
+    "ringkasan_keranjang_total": {
+        ID: "\nTotal: {total}",
+        EN: "\nTotal: {total}",
+    },
+    "keranjang_kosong_tool": {
+        ID: ("Keranjangmu masih kosong. Ketik *menu* untuk lihat daftar kue, "
+             "atau sebutkan kue dan jumlahnya ya \U0001F60A"),
+        EN: ("Your cart is still empty. Type *menu* to see our cake list, or just "
+             "tell me the cake and how many you'd like \U0001F60A"),
+    },
+    "keranjang_ajak_konfirmasi": {
+        ID: "\n\nKetik *sudah sesuai* kalau sudah pas ya \U0001F60A",
+        EN: "\n\nType *confirm* when it looks right \U0001F60A",
+    },
+    "keranjang_tanya_tambah": {
+        ID: ("\n\nSudah sesuai semua, atau mau nambah lagi? "
+             "Ketik *sudah sesuai* untuk lanjut ya \U0001F60A"),
+        EN: ("\n\nIs that everything, or would you like to add more? "
+             "Type *confirm* to continue \U0001F60A"),
+    },
+    "status_pesanan_gagal": {
+        ID: "Maaf, status pesanan lagi tidak bisa diambil. Coba lagi sebentar ya \U0001F64F",
+        EN: "Sorry, I can't fetch your order status right now. Please try again shortly \U0001F64F",
+    },
+    "belum_ada_pesanan": {
+        ID: "Saat ini kamu belum punya pesanan yang sedang berjalan.",
+        EN: "You don't have any order in progress right now.",
+    },
+    "status_pesanan": {
+        ID: ("Status pesanan *{nomor}*: {status} (pembayaran: {bayar})\n"
+             "Jumlah item: {jumlah}\nTotal: {total}"),
+        EN: ("Order *{nomor}* status: {status} (payment: {bayar})\n"
+             "Items: {jumlah}\nTotal: {total}"),
+    },
+    "tak_ada_tagihan": {
+        ID: "Aku tidak menemukan pesanan yang menunggu pembayaran. Mau lihat menu dulu? \U0001F60A",
+        EN: "I can't find an order waiting for payment. Would you like to see the menu? \U0001F60A",
+    },
+    "cek_bayar_gagal": {
+        ID: ("Maaf, status pembayaran belum bisa kucek sekarang. "
+             "Coba tanya lagi sebentar lagi ya \U0001F64F"),
+        EN: ("Sorry, I can't check your payment status right now. "
+             "Please ask again in a moment \U0001F64F"),
+    },
+    "sudah_direfund": {
+        ID: ("Pesanan ini sudah dibatalkan dan pembayarannya dikembalikan \u2705\n"
+             "Dananya kembali lewat metode pembayaran yang kamu pakai, dan bisa "
+             "makan beberapa hari kerja tergantung bank atau e-wallet-nya ya \U0001F64F"),
+        EN: ("This order has been cancelled and the payment refunded \u2705\n"
+             "The money goes back via the payment method you used, which can take a "
+             "few working days depending on your bank or e-wallet \U0001F64F"),
+    },
+    "menu_gagal": {
+        ID: "Maaf, daftar menu sedang tidak bisa diambil. Coba lagi sebentar lagi ya.",
+        EN: "Sorry, I can't fetch the menu right now. Please try again shortly.",
+    },
+    "menu_judul": {
+        ID: "Berikut menu {toko}:",
+        EN: "Here is the {toko} menu:",
+    },
+    "menu_habis": {
+        ID: "  (sedang tidak tersedia)",
+        EN: "  (currently unavailable)",
+    },
+    "menu_penutup": {
+        ID: "\nMau lihat detail salah satu kue? Sebutkan namanya ya \U0001F60A",
+        EN: "\nWant details on one of them? Just say its name \U0001F60A",
+    },
     # ── Lain-lain ────────────────────────────────────────────────────────────
     "hanya_teks": {
         ID: ("Maaf ya, aku cuma bisa membaca pesan teks 🙏 Voice note, stiker, foto, dan "

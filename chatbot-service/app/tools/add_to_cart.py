@@ -6,7 +6,7 @@ backend order + Midtrans charge (PROMPT §9, §10.4).
 
 from langchain_core.tools import tool
 
-from app.conversation import store
+from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State, mentions_quantity
 from app.core.config import settings
@@ -38,16 +38,16 @@ def _parse_qty(raw) -> int | None:
     return qty if qty > 0 else None
 
 
-def cart_summary(cart: list[dict]) -> str:
+def cart_summary(cart: list[dict], lang: str | None = None) -> str:
     if not cart:
-        return "Keranjang masih kosong."
-    lines = ["Ringkasan pesananmu sejauh ini:"]
+        return bahasa.teks("keranjang_kosong", lang)
+    lines = [bahasa.teks("ringkasan_keranjang_judul", lang)]
     total = 0.0
     for it in cart:
         sub = float(it["harga"]) * int(it["qty"])
         total += sub
         lines.append(f"• {it['nama']} x{it['qty']} = {rupiah(sub)}")
-    lines.append(f"\nTotal: {rupiah(total)}")
+    lines.append(bahasa.teks("ringkasan_keranjang_total", lang, total=rupiah(total)))
     return "\n".join(lines)
 
 
@@ -206,7 +206,8 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
     # Hand control to the confirmation step.
     ctx.next_state = State.AWAITING_CART_CONFIRMATION
 
-    msg = cart_summary(cart)
+    lang = await store.get_lang(wa)
+    msg = cart_summary(cart, lang)
     if ambiguous:
         msg += "\n\n(Belum kumasukkan karena ada beberapa pilihan — " + "; ".join(ambiguous) + ")"
     if not_found:
@@ -220,5 +221,5 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
                 "pesanan sebanyak itu lewat admin ya)")
     if unclear_qty:
         msg += f"\n\n(Jumlahnya belum jelas: {', '.join(unclear_qty)})"
-    msg += "\n\nSudah sesuai semua, atau mau nambah lagi? Ketik *sudah sesuai* untuk lanjut ya 😊"
+    msg += bahasa.teks("keranjang_tanya_tambah", lang)
     return msg

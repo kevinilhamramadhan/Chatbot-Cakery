@@ -50,6 +50,17 @@ def _clean(text: str | None) -> str:
     return _THINK_RE.sub("", text).strip()
 
 
+# Awalan penanda keluaran tool, dihitung sekali dari templat supaya tidak
+# pernah menyimpang dari teks yang benar-benar dikirim.
+_AWALAN_MENU = tuple(
+    bahasa.teks("menu_judul", l, toko=settings.store_name).split("{")[0][:12]
+    for l in (bahasa.ID, bahasa.EN)
+)
+_AWALAN_TAKEOVER = tuple(
+    bahasa.teks("diteruskan_ke_admin", l)[:24] for l in (bahasa.ID, bahasa.EN)
+)
+
+
 def _history_view(content: str) -> str:
     """Compact view of a past bot reply for the LLM's context window.
 
@@ -58,9 +69,12 @@ def _history_view(content: str) -> str:
     the tool — no photo gets queued and prices go stale. A short marker keeps
     the conversational thread while forcing a fresh tool call to show data again.
     """
-    if content.startswith("Berikut menu"):
+    # Kedua bahasa dicocokkan: kalau hanya awalan Indonesia yang dicari, menu
+    # berbahasa Inggris tidak pernah terkompres dan masuk utuh ke konteks —
+    # persis keadaan yang fungsi ini dibuat untuk mencegah.
+    if content.startswith(_AWALAN_MENU):
         return "[Aku sudah menampilkan daftar menu via tool get_menu]"
-    if content.startswith("Permintaanmu sudah aku teruskan ke admin"):
+    if content.startswith(_AWALAN_TAKEOVER):
         # Left verbatim, this reply is the single strongest example in the
         # window and the model copies it: measured, an ordinary "aku mau bento
         # cookies 2" flipped from add_to_cart 3/3 to escalate_to_admin 3/3 once

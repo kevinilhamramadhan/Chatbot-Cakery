@@ -7,7 +7,7 @@ before agreeing to a total, and the cart can change several times before that.
 
 from langchain_core.tools import tool
 
-from app.conversation import store
+from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.tools.add_to_cart import cart_summary
 
@@ -19,8 +19,9 @@ async def check_cart() -> str:
     Gunakan saat pelanggan menanyakan pesanannya sejauh ini, totalnya, atau
     ingin memastikan isi keranjang sebelum konfirmasi.
     """
-    cart = await store.get_cart(get_turn_context().wa_number)
+    wa = get_turn_context().wa_number
+    lang = await store.get_lang(wa)
+    cart = await store.get_cart(wa)
     if not cart:
-        return ("Keranjangmu masih kosong. Ketik *menu* untuk lihat daftar kue, "
-                "atau sebutkan kue dan jumlahnya ya 😊")
-    return cart_summary(cart) + "\n\nKetik *sudah sesuai* kalau sudah pas ya 😊"
+        return bahasa.teks("keranjang_kosong_tool", lang)
+    return cart_summary(cart, lang) + bahasa.teks("keranjang_ajak_konfirmasi", lang)

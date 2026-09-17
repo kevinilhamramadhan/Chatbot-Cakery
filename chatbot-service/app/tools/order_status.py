@@ -3,6 +3,7 @@
 from langchain_core.tools import tool
 
 from app.backend_client import api as backend
+from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.tools.formatting import rupiah
 
@@ -19,20 +20,19 @@ async def get_order_status() -> str:
     progress atau status pesanannya.
     """
     wa = get_turn_context().wa_number
+    lang = await store.get_lang(wa)
     try:
         o = await backend.get_latest_order(wa)
     except Exception:  # noqa: BLE001
-        return "Maaf, status pesanan lagi tidak bisa diambil. Coba lagi sebentar ya 🙏"
+        return bahasa.teks("status_pesanan_gagal", lang)
     if not o:
-        return "Saat ini kamu belum punya pesanan yang sedang berjalan."
+        return bahasa.teks("belum_ada_pesanan", lang)
 
     inv = o.get("invoice") or {}
     nomor = inv.get("nomor_invoice") or f"#{o.get('id')}"
     order_lbl = _ORDER.get(o.get("status"), o.get("status"))
     inv_lbl = _INV.get(inv.get("status"), inv.get("status"))
     items = o.get("items") or []
-    return (
-        f"Status pesanan *{nomor}*: {order_lbl} (pembayaran: {inv_lbl})\n"
-        f"Jumlah item: {len(items)}\n"
-        f"Total: {rupiah(o.get('total_harga_pesanan'))}"
-    )
+    return bahasa.teks("status_pesanan", lang, nomor=nomor, status=order_lbl,
+                       bayar=inv_lbl, jumlah=len(items),
+                       total=rupiah(o.get("total_harga_pesanan")))

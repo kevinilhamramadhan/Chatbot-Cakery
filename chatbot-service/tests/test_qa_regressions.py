@@ -417,12 +417,18 @@ async def test_current_message_is_not_repeated_in_history(patch_externals):
 async def test_history_view_compresses_the_escalate_reply(patch_externals):
     """Live: after one escalate reply landed in the history, "aku mau bento
     cookies 2" routed to escalate_to_admin 3 times out of 3."""
+    from app.conversation import bahasa
     from app.llm.agent import _history_view
-    reply = ("Permintaanmu sudah aku teruskan ke admin kami ya. Mohon tunggu, admin "
-             "akan menghubungimu langsung lewat chat ini. 🙏")
-    view = _history_view(reply)
-    assert "teruskan ke admin kami" not in view
-    assert "escalate" in view.lower()
+
+    # Teksnya diambil dari templat yang benar-benar dikirim, bukan ditulis ulang
+    # di uji: versi lama uji ini memakai kalimat tanpa awalan "Oke, " sehingga
+    # lolos padahal penanda di _history_view tidak pernah cocok dengan balasan
+    # sungguhan — kompresinya tidak pernah aktif di produksi.
+    for lang in (bahasa.ID, bahasa.EN):
+        reply = bahasa.teks("diteruskan_ke_admin", lang)
+        view = _history_view(reply)
+        assert view != reply, lang
+        assert "escalate" in view.lower(), lang
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1592,7 +1598,12 @@ async def test_setiap_templat_punya_dua_bahasa(patch_externals):
     persis bug yang modul ini dibuat untuk menghilangkan."""
     from app.conversation import bahasa
 
+    # Kunci yang memang sama persis di kedua bahasa harus didaftarkan di sini,
+    # supaya "kebetulan sama" tidak bisa lolos sebagai "sudah diterjemahkan".
+    SENGAJA_SAMA = {"ringkasan_keranjang_total"}  # "Total:" sama di dua bahasa
+
     kurang = [k for k in bahasa.semua_kunci()
-              if not bahasa.teks(k, bahasa.EN) or
-              bahasa.teks(k, bahasa.EN) == bahasa.teks(k, bahasa.ID)]
+              if k not in SENGAJA_SAMA and (
+                  not bahasa.teks(k, bahasa.EN)
+                  or bahasa.teks(k, bahasa.EN) == bahasa.teks(k, bahasa.ID))]
     assert kurang == [], kurang
