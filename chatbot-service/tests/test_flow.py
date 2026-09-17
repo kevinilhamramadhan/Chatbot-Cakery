@@ -48,6 +48,13 @@ def patch_externals(monkeypatch):
 
     monkeypatch.setattr(whatsapp_client, "send_text", fake_send_text)
 
+    # Gateway WhatsApp tidak ada di uji: tanpa ini tiap siklus background
+    # menunggu timeout HTTP sungguhan sebelum menyerah.
+    async def fake_session_state():
+        return "CONNECTED"
+
+    monkeypatch.setattr(whatsapp_client, "session_state", fake_session_state)
+
     # Backend API stubs (sane defaults; individual tests override).
     async def f_upsert(wa, nama, alamat, phone):
         return {"id": 1, "customer_id": 1, "nomor_wa": wa, "nama": nama, "alamat": alamat}

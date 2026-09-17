@@ -49,6 +49,42 @@ class WhatsAppClient:
             logger.info("WA out -> %s (%d chars)", mask_phone(wa_number), len(text))
         return await self._post(payload)
 
+    # ── Kesehatan sesi ───────────────────────────────────────────────────────
+    async def session_state(self) -> str | None:
+        """State sesi WhatsApp di gateway, atau None kalau gateway tak terjawab.
+
+        Nilai yang mungkin dari wwebjs-api: CONNECTED saat siap dipakai, dan
+        pesan `session_not_found` saat sesinya belum/gagal diinisialisasi.
+        """
+        url = f"{self._base}/session/status/{self._session}"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, headers=self._headers)
+            data = resp.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Gateway WhatsApp tidak terjawab: %s", exc)
+            return None
+        if data.get("success") and data.get("state"):
+            return str(data["state"])
+        return str(data.get("message") or "unknown")
+
+    async def start_session(self) -> bool:
+        """Minta gateway menginisialisasi ulang sesinya.
+
+        Dipanggil saat sesinya mati. Kredensial yang tersimpan di volume dipakai
+        lagi kalau masih sah, jadi biasanya tidak perlu scan QR ulang.
+        """
+        url = f"{self._base}/session/start/{self._session}"
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.get(url, headers=self._headers)
+            ok = bool(resp.json().get("success"))
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.error("Gagal menyalakan sesi WhatsApp: %s", exc)
+            return False
+        logger.info("Permintaan menyalakan sesi WhatsApp terkirim (sukses=%s)", ok)
+        return ok
+
     async def send_image(
         self, wa_number: str, image_url: str, caption: str | None = None
     ) -> dict:

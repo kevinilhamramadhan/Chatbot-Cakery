@@ -194,7 +194,41 @@ async def _kabari_transfer_tertunda() -> None:
                     order.order_ref)
 
 
+# Sesi WhatsApp: dicek berkala, bukan sekali saat start.
+_SESI_SEHAT = "CONNECTED"
+_JEDA_NYALAKAN_SESI = 120.0
+_sesi_terakhir_dinyalakan = 0.0
+
+
+async def _pastikan_sesi_wa() -> None:
+    """Nyalakan lagi sesi WhatsApp kalau mati.
+
+    Gateway menginisialisasi sesinya SEKALI saat container start. Kalau saat itu
+    jaringan belum siap — persis yang terjadi tiap VM baru boot — Puppeteer gagal
+    membuka web.whatsapp.com ("ERR_NAME_NOT_RESOLVED"), sesinya batal, dan tidak
+    pernah dicoba lagi. Gateway tetap menjawab /ping dengan 200, jadi dari luar
+    semuanya terlihat sehat sementara tidak ada satu pun pesan yang masuk.
+
+    Pemeriksaan ini yang membuat urutan start dan kesiapan jaringan tidak lagi
+    jadi soal: begitu jaringannya hidup, siklus berikutnya menyambungkan sesinya.
+    """
+    global _sesi_terakhir_dinyalakan
+
+    state = await whatsapp_client.session_state()
+    if state is None or state == _SESI_SEHAT:
+        return
+
+    sekarang = time.monotonic()
+    if sekarang - _sesi_terakhir_dinyalakan < _JEDA_NYALAKAN_SESI:
+        return  # sedang dalam proses; menyalakan berulang kali tidak membantu
+    _sesi_terakhir_dinyalakan = sekarang
+
+    logger.warning("Sesi WhatsApp tidak tersambung (state=%s) — menyalakan ulang", state)
+    await whatsapp_client.start_session()
+
+
 async def _check_once() -> None:
+    await _pastikan_sesi_wa()
     await _check_refunded()
     await _kabari_transfer_tertunda()
     pending = await store.list_orders_by_status("pending")

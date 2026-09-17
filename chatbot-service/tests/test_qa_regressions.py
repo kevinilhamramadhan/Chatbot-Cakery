@@ -50,6 +50,13 @@ def patch_externals(monkeypatch):
 
     monkeypatch.setattr(whatsapp_client, "send_text", fake_send_text)
 
+    # Gateway WhatsApp tidak ada di uji: tanpa ini tiap siklus background
+    # menunggu timeout HTTP sungguhan sebelum menyerah.
+    async def fake_session_state():
+        return "CONNECTED"
+
+    monkeypatch.setattr(whatsapp_client, "session_state", fake_session_state)
+
     # Kept before the stubs replace them: the two HTTP-level tests below need
     # the real implementations back.
     originals = {name: getattr(backend, name)
@@ -1607,3 +1614,78 @@ async def test_setiap_templat_punya_dua_bahasa(patch_externals):
                   not bahasa.teks(k, bahasa.EN)
                   or bahasa.teks(k, bahasa.EN) == bahasa.teks(k, bahasa.ID))]
     assert kurang == [], kurang
+
+
+# ── Sesi WhatsApp menyembuhkan diri ──────────────────────────────────────────
+async def test_sesi_wa_mati_dinyalakan_lagi(patch_externals):
+    """Gateway hanya menginisialisasi sesi SEKALI saat container start. Kalau
+    jaringan belum siap saat itu — persis yang terjadi tiap VM baru boot —
+    sesinya batal dan tidak pernah dicoba lagi, sementara /ping tetap 200
+    sehingga dari luar semuanya terlihat sehat padahal nol pesan masuk."""
+    from app.conversation import background
+    from app.whatsapp_client.client import whatsapp_client
+
+    background._sesi_terakhir_dinyalakan = 0.0
+    dinyalakan = []
+
+    async def mati():
+        return "session_not_found"
+
+    async def nyalakan():
+        dinyalakan.append(1)
+        return True
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "session_state", mati)
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "start_session", nyalakan)
+
+    await background._pastikan_sesi_wa()
+    assert dinyalakan == [1]
+
+    # Siklus berikutnya tidak menembak lagi: inisialisasi butuh waktu, dan
+    # menyalakan berulang kali justru membatalkan yang sedang berjalan.
+    await background._pastikan_sesi_wa()
+    assert dinyalakan == [1]
+
+
+async def test_sesi_wa_sehat_tidak_diganggu(patch_externals):
+    from app.conversation import background
+    from app.whatsapp_client.client import whatsapp_client
+
+    background._sesi_terakhir_dinyalakan = 0.0
+    dinyalakan = []
+
+    async def sehat():
+        return "CONNECTED"
+
+    async def nyalakan():
+        dinyalakan.append(1)
+        return True
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "session_state", sehat)
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "start_session", nyalakan)
+
+    await background._pastikan_sesi_wa()
+    assert dinyalakan == []
+
+
+async def test_gateway_tak_terjawab_bukan_alasan_menyalakan_sesi(patch_externals):
+    """Gateway yang sedang restart menjawab None, bukan "sesi mati". Menembak
+    start ke gateway yang belum siap tidak memperbaiki apa pun."""
+    from app.conversation import background
+    from app.whatsapp_client.client import whatsapp_client
+
+    background._sesi_terakhir_dinyalakan = 0.0
+    dinyalakan = []
+
+    async def tak_terjawab():
+        return None
+
+    async def nyalakan():
+        dinyalakan.append(1)
+        return True
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "session_state", tak_terjawab)
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "start_session", nyalakan)
+
+    await background._pastikan_sesi_wa()
+    assert dinyalakan == []
