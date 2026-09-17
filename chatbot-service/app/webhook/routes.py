@@ -18,7 +18,7 @@ import time
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 
 from app.backend_client import api as backend
-from app.conversation import background, store
+from app.conversation import background, bahasa, store
 from app.conversation.orchestrator import handle_message
 from app.conversation.store import deactivate_takeover
 from app.core.config import settings
@@ -36,11 +36,9 @@ def _require_internal_key(key: str | None) -> None:
         raise HTTPException(status_code=404, detail="Not Found")
 
 
-TEXT_ONLY_REPLY = (
-    "Maaf ya, aku cuma bisa membaca pesan teks 🙏 Voice note, stiker, foto, dan "
-    "lokasi belum bisa kuproses. Boleh diketik saja maksudnya? Ketik *menu* "
-    "kalau mau lihat daftar kue 😊"
-)
+# Dipertahankan sebagai konstanta untuk uji yang mencocokkannya; pengiriman
+# sesungguhnya memakai bahasa pelanggan lewat _send_text_only_notice().
+TEXT_ONLY_REPLY = bahasa.teks("hanya_teks", bahasa.ID)
 
 # One notice per customer per hour. Somebody sending five stickers in a row
 # should not get five identical replies.
@@ -125,8 +123,9 @@ async def _process(sender: str, text: str) -> None:
 
 async def _send_text_only_notice(sender: str) -> None:
     try:
-        await whatsapp_client.send_text(sender, TEXT_ONLY_REPLY)
-        await store.log_message(sender, "out", TEXT_ONLY_REPLY, intent="text_only")
+        teks = bahasa.teks("hanya_teks", await store.get_lang(sender))
+        await whatsapp_client.send_text(sender, teks)
+        await store.log_message(sender, "out", teks, intent="text_only")
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to send text-only notice to %s: %s", mask_phone(sender), exc)
 

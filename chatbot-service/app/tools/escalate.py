@@ -37,4 +37,4 @@ async def escalate_to_admin(reason: str) -> str:
     wa = get_turn_context().wa_number
     await store.set_pending_escalation(wa, reason)
     logger.info("Escalation offered to %s", mask_phone(wa))
-    return escalation.OFFER_TEXT
+    return escalation.teks_tawaran(await store.get_lang(wa))

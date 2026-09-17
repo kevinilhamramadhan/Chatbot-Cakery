@@ -11,6 +11,7 @@ import re
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from app.conversation import bahasa
 from app.conversation.context import get_turn_context_or_none
 from app.core.config import settings
 from app.llm.client import get_llm
@@ -34,10 +35,13 @@ _TOOLNAME_RE = re.compile(
     re.IGNORECASE,
 )
 
-OUT_OF_SCOPE_REPLY = (
-    f"Maaf, aku hanya bisa membantu seputar {settings.store_name} ya — menu, pemesanan, "
-    "pembayaran, pengiriman, dan info toko. Ada yang bisa kubantu soal itu? 😊"
-)
+# Konstanta versi Indonesianya dipertahankan untuk uji; jalur sungguhan memakai
+# _di_luar_cakupan() supaya ikut bahasa pelanggan.
+OUT_OF_SCOPE_REPLY = bahasa.teks("di_luar_cakupan", bahasa.ID, toko=settings.store_name)
+
+
+def _di_luar_cakupan(lang: str) -> str:
+    return bahasa.teks("di_luar_cakupan", lang, toko=settings.store_name)
 
 
 def _clean(text: str | None) -> str:
@@ -117,6 +121,9 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # Tool Owner tidak dimuat untuk pelanggan biasa — bukan cuma ditolak waktu
     # dipanggil. Prefix KV-cache tetap aman: daftarnya konstan per peran, jadi
     # yang ada hanya dua bentuk prompt, bukan berubah tiap giliran.
+    from app.conversation import store
+
+    lang = await store.get_lang(wa_number)
     tools = await tools_untuk(wa_number)
     diizinkan = {t.name for t in tools}
     llm = get_llm().bind_tools(tools)
@@ -166,8 +173,8 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         # Hard scope guard: out-of-scope and the model didn't use any on-topic
         # tool -> refuse rather than answer from general knowledge.
         if not rag_context and not answer:
-            return OUT_OF_SCOPE_REPLY
-        return answer or OUT_OF_SCOPE_REPLY
+            return _di_luar_cakupan(lang)
+        return answer or _di_luar_cakupan(lang)
 
     # 3) Execute tools; their outputs are the user-facing reply.
     outputs: list[str] = []
@@ -192,5 +199,5 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
             outputs.append("Maaf, ada kendala saat memproses permintaanmu. Coba lagi ya 🙏")
 
     if not outputs:
-        return _clean(ai.content) or OUT_OF_SCOPE_REPLY
+        return _clean(ai.content) or _di_luar_cakupan(lang)
     return "\n\n".join(outputs)

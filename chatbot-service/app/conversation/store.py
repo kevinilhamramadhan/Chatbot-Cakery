@@ -94,6 +94,26 @@ async def set_pending_escalation(wa_number: str, reason: str | None) -> None:
     await update_session(wa_number, pending_escalation=reason)
 
 
+# ── Bahasa balasan tetap ──────────────────────────────────────────────────────
+async def get_lang(wa_number: str) -> str:
+    """Bahasa yang dipakai untuk balasan tetap ke nomor ini."""
+    from app.conversation import bahasa
+
+    row = await get_or_create_session(wa_number)
+    return bahasa.normalkan(row.lang)
+
+
+async def set_lang(wa_number: str, lang: str) -> None:
+    """Simpan bahasa pelanggan. Hanya dipanggil saat deteksinya meyakinkan.
+
+    Disimpan supaya kabar proaktif — yang dikirim tanpa ada pesan masuk untuk
+    dideteksi — tetap memakai bahasa yang sama dengan percakapannya.
+    """
+    from app.conversation import bahasa
+
+    await update_session(wa_number, lang=bahasa.normalkan(lang))
+
+
 # ── Human takeover ────────────────────────────────────────────────────────────
 async def activate_takeover(wa_number: str) -> datetime:
     expires = datetime.now(timezone.utc) + timedelta(days=settings.takeover_expiry_days)

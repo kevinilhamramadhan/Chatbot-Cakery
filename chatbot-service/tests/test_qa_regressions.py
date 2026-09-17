@@ -1523,3 +1523,76 @@ async def test_penolakan_400_backend_dijelaskan_bukan_disuruh_ulangi(patch_exter
     assert "sedang habis" in hasil.lower(), hasil
     assert "coba ulangi" not in hasil.lower(), hasil
     assert await store.get_cart(WA) == [], "keranjangnya jangan ditinggal menggantung"
+
+
+# ── Bahasa balasan tetap ─────────────────────────────────────────────────────
+async def test_bahasa_tidak_pindah_karena_satu_kata_domain(patch_externals):
+    """"delivery", "pickup", "order" dipakai apa adanya oleh pelanggan Indonesia.
+    Satu kata itu tidak boleh membalik seluruh sisa percakapan jadi Inggris."""
+    from app.conversation import bahasa
+
+    for kata in ("delivery", "pickup", "order", "cancel", "ok", "yes", "no"):
+        assert bahasa.deteksi(kata) is None, kata
+
+    assert bahasa.deteksi("berapa harga brownies ini?") == bahasa.ID
+    assert bahasa.deteksi("how much is the brownies?") == bahasa.EN
+    assert bahasa.deteksi("") is None
+
+
+async def test_langkah_checkout_ikut_bahasa_pelanggan(patch_externals):
+    """Pelanggan yang menulis Inggris tidak boleh dijawab setengah Indonesia di
+    langkah-langkah yang ditulis tangan (bukan dari model)."""
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat",
+                               "harga": 50000, "qty": 1}])
+    await store.set_state(WA, State.AWAITING_CART_CONFIRMATION)
+    await store.set_lang(WA, "en")
+
+    r = await handle_message(WA, "yes")
+    assert "name" in (r.text or "").lower(), r.text
+    assert "nama" not in (r.text or "").lower(), r.text
+
+    r = await handle_message(WA, "Rudi Hartono")
+    assert "address" in (r.text or "").lower(), r.text
+
+
+async def test_pengiriman_dijelaskan_kurir_dipesan_sendiri(patch_externals):
+    """Toko tidak punya layanan antar. Pelanggan harus tahu itu SEBELUM memilih,
+    bukan baru waktu pesanannya sudah siap — kalau baru tahu di akhir, dia sudah
+    terlanjur mengira ongkirnya diurus toko."""
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat",
+                               "harga": 50000, "qty": 1}])
+    await store.set_state(WA, State.AWAITING_CART_CONFIRMATION)
+
+    await handle_message(WA, "sudah sesuai")
+    await handle_message(WA, "Rudi Hartono")
+    tanya = (await handle_message(WA, "Jl. Merpati No. 5, Batam Kota")).text or ""
+
+    rendah = tanya.lower()
+    assert "belum punya layanan antar" in rendah, tanya
+    assert "gosend" in rendah and "grabexpress" in rendah, tanya
+    assert "kamu pesan" in rendah or "pesan" in rendah, tanya
+
+    # Memilih "kirim" dikonfirmasi dengan konsekuensinya, bukan lewat begitu saja.
+    lanjut = (await handle_message(WA, "dikirim aja")).text or ""
+    assert "salin" in lanjut.lower(), lanjut
+    assert "gosend" in lanjut.lower(), lanjut
+
+
+async def test_pengiriman_versi_inggris_juga_jujur(patch_externals):
+    from app.conversation import bahasa
+
+    teks = bahasa.teks("tanya_pengiriman", bahasa.EN).lower()
+    assert "don't have our own delivery service" in teks, teks
+    assert "book yourself" in teks, teks
+    assert "pay the courier directly" in teks, teks
+
+
+async def test_setiap_templat_punya_dua_bahasa(patch_externals):
+    """Kunci yang cuma punya satu bahasa akan diam-diam jatuh ke Indonesia —
+    persis bug yang modul ini dibuat untuk menghilangkan."""
+    from app.conversation import bahasa
+
+    kurang = [k for k in bahasa.semua_kunci()
+              if not bahasa.teks(k, bahasa.EN) or
+              bahasa.teks(k, bahasa.EN) == bahasa.teks(k, bahasa.ID)]
+    assert kurang == [], kurang

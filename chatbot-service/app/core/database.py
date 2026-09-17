@@ -23,7 +23,7 @@ async_session_factory = async_sessionmaker(engine, expire_on_commit=False)
 # shape and every query touching a new column would fail with "no such column".
 # SQLite has no "ADD COLUMN IF NOT EXISTS", so the existing columns are read first.
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
-    "sessions": {"pending_escalation": "TEXT"},
+    "sessions": {"pending_escalation": "TEXT", "lang": "VARCHAR(2) DEFAULT 'id'"},
     "pending_orders": {"nomor_invoice": "VARCHAR(64)", "pay_instruction": "TEXT"},
 }
 

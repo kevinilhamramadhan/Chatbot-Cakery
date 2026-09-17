@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timezone
 
 from app.backend_client import api as backend
-from app.conversation import store
+from app.conversation import bahasa, store
 from app.conversation.states import State
 from app.core.config import settings
 from app.core.security import mask_phone
@@ -298,16 +298,12 @@ async def notify_ready(order_id: int) -> bool:
         return True
     await store.update_pending_order(order.id, status="ready", notified_ready=True)
 
-    msg = f"Kabar baik! Pesananmu *{_label(order)}* sudah *siap* 🎉\n"
-    if order.delivery_method == "delivery":
-        msg += (
-            "\nUntuk pengiriman, silakan pesan kurir (GoSend/GrabExpress) sendiri ke "
-            "alamat toko berikut:\n"
-            f"*{settings.store_name}*\n{settings.store_address}\n"
-            "(salin alamat di atas ke aplikasi ojol ya)"
-        )
-    else:
-        msg += f"\nSilakan diambil di {settings.store_name}, {settings.store_address}."
+    lang = await store.get_lang(order.wa_number)
+    msg = bahasa.teks("pesanan_siap", lang, label=_label(order))
+    kunci = ("pesanan_siap_kirim" if order.delivery_method == "delivery"
+             else "pesanan_siap_ambil")
+    msg += bahasa.teks(kunci, lang, nama_toko=settings.store_name,
+                       alamat_toko=settings.store_address)
     await _notify(order.wa_number, msg)
     return True
 

@@ -14,13 +14,14 @@ import logging
 
 from langchain_core.tools import tool
 
+from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.core.config import settings
 from app.core.security import mask_phone, sanitize_relay
 
 logger = logging.getLogger(__name__)
 
-def _teks() -> str:
+def _teks(lang: str) -> str:
     """Permintaan maaf yang tetap; alamat emailnya diambil dari setelan.
 
     Pelanggan sengaja TIDAK diminta menceritakan ulang kejadiannya di chat:
@@ -29,17 +30,11 @@ def _teks() -> str:
     kalimat emailnya dilewati — lebih baik tidak menyebut alamat sama sekali
     daripada mengirim pelanggan ke alamat yang tidak ada.
     """
-    baris = [
-        "Mohon maaf sekali atas ketidaknyamanan yang dialami. Masukanmu akan "
-        "menjadi bahan perbaikan kami ke depannya.",
-    ]
+    baris = [bahasa.teks("maaf_keluhan", lang)]
     email = settings.store_support_email.strip()
     if email:
-        baris.append(
-            f"Jika ada keluhan lebih lanjut, anda dapat mengirimkannya ke alamat "
-            f"email kami di {email} agar tim kami dapat merespon dengan lebih akurat."
-        )
-    baris.append("Terima kasih")
+        baris.append(bahasa.teks("maaf_keluhan_email", lang, email=email))
+    baris.append(bahasa.teks("maaf_keluhan_penutup", lang))
     return "\n\n".join(baris)
 
 
@@ -58,4 +53,4 @@ async def send_apology(keluhan: str) -> str:
     logger.warning(
         "KELUHAN dari %s: %s", mask_phone(ctx.wa_number), sanitize_relay(keluhan or "")[:200]
     )
-    return _teks()
+    return _teks(await store.get_lang(ctx.wa_number))

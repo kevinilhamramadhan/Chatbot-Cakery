@@ -11,26 +11,19 @@ inside something the model can fire on its own.
 import logging
 
 from app.backend_client import api as backend
-from app.conversation import rbac, store
+from app.conversation import bahasa, rbac, store
 from app.core.security import mask_phone, sanitize_relay, wa_digits
 
 logger = logging.getLogger(__name__)
 
-OFFER_TEXT = (
-    "Sepertinya ini lebih enak ditangani admin kami langsung. "
-    "Mau aku sambungkan ke admin? Ketik *ya* untuk kusambungkan, atau lanjut "
-    "tanya ke aku kalau masih ada yang bisa kubantu 😊"
-)
+# Teks tawaran dipakai juga oleh orchestrator untuk mengukur umur tawarannya
+# (dicocokkan dengan awalan pesan di riwayat), jadi versi Indonesianya tetap
+# dipegang sebagai konstanta — bukan cuma dipanggil lewat templat.
+OFFER_TEXT = bahasa.teks("tawaran_admin", bahasa.ID)
 
-_HANDOVER_TEXT = (
-    "Oke, permintaanmu sudah aku teruskan ke admin kami ya. Mohon tunggu, admin "
-    "akan menghubungimu langsung lewat chat ini. 🙏"
-)
 
-_NO_ADMIN_TEXT = (
-    "Maaf, aku belum bisa menyambungkanmu ke admin sekarang — nomor adminnya "
-    "sedang tidak bisa dihubungi. Coba beberapa saat lagi ya 🙏"
-)
+def teks_tawaran(lang: str) -> str:
+    return bahasa.teks("tawaran_admin", lang)
 
 
 async def admin_numbers() -> list[str]:
@@ -49,7 +42,7 @@ async def admin_numbers() -> list[str]:
     return await rbac.nomor_penerima_takeover()
 
 
-async def start_takeover(wa_number: str, reason: str) -> str:
+async def start_takeover(wa_number: str, reason: str, lang: str | None = None) -> str:
     """Notify an admin, and only then silence the bot for this customer.
 
     Order matters: if nobody can be reached, we must NOT promise a human and
@@ -58,6 +51,8 @@ async def start_takeover(wa_number: str, reason: str) -> str:
     """
     from app.whatsapp_client.client import whatsapp_client
 
+    if lang is None:
+        lang = await store.get_lang(wa_number)
     numbers = await admin_numbers()
     note = sanitize_relay(reason or "")
     delivered = 0
@@ -80,7 +75,7 @@ async def start_takeover(wa_number: str, reason: str) -> str:
             "Takeover NOT started for %s — no admin could be notified (%d numbers tried)",
             mask_phone(wa_number), len(numbers),
         )
-        return _NO_ADMIN_TEXT
+        return bahasa.teks("admin_tidak_tersedia", lang)
 
     expires = await store.activate_takeover(wa_number)
     try:
@@ -96,4 +91,4 @@ async def start_takeover(wa_number: str, reason: str) -> str:
         logger.warning("backend set_takeover failed: %s", exc)
 
     logger.info("Takeover active for %s until %s", mask_phone(wa_number), expires.isoformat())
-    return _HANDOVER_TEXT
+    return bahasa.teks("diteruskan_ke_admin", lang)

@@ -17,6 +17,11 @@ class ChatSession(Base):
     # Current conversation state (see app/conversation/states.py).
     state: Mapped[str] = mapped_column(String(40), default="idle")
 
+    # Bahasa balasan tetap untuk pelanggan ini ("id"/"en"). Disimpan, bukan
+    # ditebak ulang tiap giliran: kabar proaktif (pembayaran masuk, pesanan
+    # siap) dikirim saat tidak ada pesan masuk yang bisa dideteksi bahasanya.
+    lang: Mapped[str] = mapped_column(String(2), default="id")
+
     # Draft cart + collected identity, stored as JSON strings.
     cart_json: Mapped[str] = mapped_column(Text, default="[]")
     customer_json: Mapped[str] = mapped_column(Text, default="{}")

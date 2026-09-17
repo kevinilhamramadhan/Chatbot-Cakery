@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 
 from app.backend_client import api as backend
-from app.conversation import checkout, escalation, store, verification
+from app.conversation import bahasa, checkout, escalation, store, verification
 from app.conversation.context import (
     OutboundMedia,
     TurnContext,
@@ -71,8 +71,9 @@ _VA_RE = re.compile(
     r"internet banking|rekening)\b",
     re.IGNORECASE,
 )
-_FULL_RE = re.compile(r"\b(penuh|full|lunas|sekaligus)\b", re.IGNORECASE)
-_DP_RE = re.compile(r"\b(dp|50|separuh|setengah|sebagian|down ?payment)\b", re.IGNORECASE)
+_FULL_RE = re.compile(r"\b(penuh|full|lunas|sekaligus|pay in full)\b", re.IGNORECASE)
+_DP_RE = re.compile(
+    r"\b(dp|50|separuh|setengah|sebagian|down ?payment|deposit|half)\b", re.IGNORECASE)
 
 
 def _looks_like_question(text: str) -> bool:
@@ -90,10 +91,17 @@ def _looks_like_question(text: str) -> bool:
 # karena ejaan sehari-harinya begitu: "dianter aja ke rumah" dulu tidak cocok
 # dengan "antar" dan pelanggan disuruh mengetik *delivery* padahal jawabannya
 # sudah jelas (terukur di suite QA W2).
-_KATA_PICKUP = ("pickup", "pick up", "ambil", "mampir", "jemput")
+# Kata Inggrisnya ikut didaftar karena langkah ini deterministik: model tidak
+# dilibatkan, jadi pelanggan yang menulis "pick it up myself" harus cocok di
+# sini atau dia akan disuruh mengetik ulang terus.
+_KATA_PICKUP = (
+    "pickup", "pick up", "ambil", "mampir", "jemput",
+    "collect", "myself", "self",
+)
 _KATA_DELIVERY = (
     "delivery", "kirim", "antar", "anter", "kurir", "ojol", "gosend", "gojek",
     "grab", "grabexpress", "ke rumah", "ke alamat",
+    "send", "sent", "deliver", "courier", "ship",
 )
 
 
@@ -104,6 +112,10 @@ _STEP_WORDS = {
     "pickup", "delivery", "dikirim", "kirim", "diantar", "dianter", "antar",
     "ambil", "qris", "va", "transfer", "gopay", "ovo", "dana", "dp", "penuh",
     "lunas", "ya", "iya", "oke", "ok", "sudah", "udah", "belum", "halo", "hai",
+    # Padanan Inggrisnya, sebab langkah nama juga dipakai pelanggan berbahasa
+    # Inggris: "send" sebagai nama orang jelas salah tangkap.
+    "send", "sent", "deliver", "collect", "full", "deposit", "yes", "no",
+    "hello", "hi", "confirm", "cancel",
 }
 
 
@@ -181,6 +193,14 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     await store.log_message(wa_number, "in", text)
     state = session.state
 
+    # Bahasa hanya diperbarui kalau pesannya cukup menentukan; "ok" atau "2"
+    # tidak mengubah apa pun, jadi percakapan tidak berganti bahasa di tengah.
+    terdeteksi = bahasa.deteksi(text)
+    if terdeteksi and terdeteksi != bahasa.normalkan(session.lang):
+        await store.set_lang(wa_number, terdeteksi)
+        session.lang = terdeteksi
+    lang = bahasa.normalkan(session.lang)
+
     # 2) An escalation the model OFFERED earlier. Takeover is a big hammer — it
     # silences the bot for a day — so it only swings on an explicit yes.
     #
@@ -210,7 +230,7 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         ):
             await store.set_pending_escalation(wa_number, None)
             reply = Reply(text=await escalation.start_takeover(
-                wa_number, session.pending_escalation))
+                wa_number, session.pending_escalation, lang))
             await store.log_message(wa_number, "out", reply.text)
             return reply
         elif text_is_cancel(text):
@@ -223,11 +243,11 @@ async def handle_message(wa_number: str, text: str) -> Reply:
 
     started = time.monotonic()
     if state == State.AWAITING_CANCEL_CONFIRMATION:
-        reply = await _handle_cancel_confirmation(wa_number, text)
+        reply = await _handle_cancel_confirmation(wa_number, text, lang)
     elif state == State.AWAITING_CART_CONFIRMATION:
-        reply = await _handle_confirmation(wa_number, text)
+        reply = await _handle_confirmation(wa_number, text, lang)
     elif state == State.COLLECTING_IDENTITY:
-        reply = await _handle_identity(wa_number, text)
+        reply = await _handle_identity(wa_number, text, lang)
     else:
         # IDLE / AWAITING_PAYMENT / ORDER_ACTIVE -> LLM agent (with tools).
         reply = await _run_agent_turn(wa_number, text)
@@ -249,7 +269,11 @@ async def _escalation_offer_expired(wa_number: str) -> bool:
     berapa pesan pelanggan yang datang sesudahnya (termasuk yang sekarang).
     """
     riwayat = await store.recent_history(wa_number, limit=12)
-    penanda = escalation.OFFER_TEXT[:40]
+    # Tawarannya bisa terkirim dalam bahasa mana pun, jadi kedua awalannya
+    # dicocokkan — kalau hanya versi Indonesia yang dicari, tawaran berbahasa
+    # Inggris tidak pernah ditemukan dan dianggap kedaluwarsa sejak giliran
+    # pertama, sehingga "yes" pelanggan tidak pernah diterima.
+    penanda = tuple(bahasa.teks("tawaran_admin", l)[:40] for l in (bahasa.ID, bahasa.EN))
     terakhir = -1
     for i, pesan in enumerate(riwayat):
         if pesan["role"] == "assistant" and pesan["content"].startswith(penanda):
@@ -325,7 +349,7 @@ async def _run_agent_turn(wa_number: str, text: str) -> Reply:
 
 
 # ── Konfirmasi pembatalan pesanan yang sudah dibayar ─────────────────────────
-async def _handle_cancel_confirmation(wa_number: str, text: str) -> Reply:
+async def _handle_cancel_confirmation(wa_number: str, text: str, lang: str) -> Reply:
     """Jawaban atas pertanyaan tertutup milik bot sendiri: "yakin batal?".
 
     Deterministik karena taruhannya uang pelanggan: pembatalan berbayar berarti
@@ -340,12 +364,12 @@ async def _handle_cancel_confirmation(wa_number: str, text: str) -> Reply:
     # "tidak", "gajadi", atau apa pun yang bukan persetujuan: pesanan diteruskan.
     if text_is_cancel(text) or _menolak(text):
         await store.set_state(wa_number, State.ORDER_ACTIVE)
-        return Reply(text="Oke, pesanannya tetap kami proses ya 😊")
+        return Reply(text=bahasa.teks("batal_dibatalkan", lang))
 
     # Pertanyaan lain dijawab model dulu, lalu pertanyaannya diulang.
     return await _answer_then_reask(
         wa_number, text,
-        "Balik ke tadi ya — pesanannya jadi dibatalkan? Ketik *ya* atau *tidak* 🙏",
+        bahasa.teks("ulangi_konfirmasi_batal", lang),
         back_to=State.AWAITING_CANCEL_CONFIRMATION)
 
 
@@ -359,11 +383,11 @@ def _menolak(text: str) -> bool:
 
 
 # ── Cart confirmation step (PROMPT §10.4-5) ───────────────────────────────────
-async def _handle_confirmation(wa_number: str, text: str) -> Reply:
+async def _handle_confirmation(wa_number: str, text: str, lang: str) -> Reply:
     if text_is_cancel(text):
         await store.set_cart(wa_number, [])
         await store.set_state(wa_number, State.IDLE)
-        return Reply(text="Oke, pesanan dibatalkan ya. Ada lagi yang bisa kubantu? 😊")
+        return Reply(text=bahasa.teks("pesanan_dibatalkan", lang))
 
     if text_is_confirm(text) and not mentions_quantity(text):
         cust = await store.get_customer(wa_number)
@@ -373,10 +397,7 @@ async def _handle_confirmation(wa_number: str, text: str) -> Reply:
             return Reply(text=await checkout.finalize_order(wa_number))
         await store.set_customer(wa_number, {})  # reset identity collection
         await store.set_state(wa_number, State.COLLECTING_IDENTITY)
-        return Reply(
-            text="Siap! Untuk memproses pesanan, boleh aku minta *nama* kamu dulu?\n"
-                 "(ketik *batal* kalau berubah pikiran)"
-        )
+        return Reply(text=bahasa.teks("minta_nama", lang))
 
     # Everything else goes to the model: a question to answer, a change to the
     # order, a new product — all of it is intent, and reading intent is its job.
@@ -387,19 +408,18 @@ async def _handle_confirmation(wa_number: str, text: str) -> Reply:
     reply = await _run_agent_turn(wa_number, text)
     if (await store.get_or_create_session(wa_number)).state == State.AWAITING_CART_CONFIRMATION:
         body = (reply.text or "").strip()
-        reask = ("Kalau pesanannya sudah pas, ketik *sudah sesuai* ya — "
-                 "atau *batal* kalau berubah pikiran.")
+        reask = bahasa.teks("ulangi_konfirmasi_keranjang", lang)
         return Reply(text=f"{body}\n\n{reask}" if body else reask, media=reply.media)
     return reply
 
 
 # ── Identity + payment-type collection (PROMPT §10.6-8) ───────────────────────
-async def _handle_identity(wa_number: str, text: str) -> Reply:
+async def _handle_identity(wa_number: str, text: str, lang: str) -> Reply:
     if text_is_cancel(text):
         await store.set_cart(wa_number, [])
         await store.set_customer(wa_number, {})
         await store.set_state(wa_number, State.IDLE)
-        return Reply(text="Oke, pesanan dibatalkan ya. 😊")
+        return Reply(text=bahasa.teks("pesanan_dibatalkan_singkat", lang))
 
     cust = await store.get_customer(wa_number)
 
@@ -407,7 +427,7 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
     if "nama" not in cust:
         if _looks_like_question(text):
             return await _answer_then_reask(
-                wa_number, text, "Balik ke pesanan ya — boleh aku minta *nama* kamu?")
+                wa_number, text, bahasa.teks("kembali_minta_nama", lang))
         nama = _extract_name(text)
         if nama is None:
             # A sentence that holds no name is usually a request, not a bad
@@ -415,30 +435,25 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
             # conversation in a loop with no way forward.
             if len(text.split()) > 3:
                 return await _answer_then_reask(
-                    wa_number, text, "Balik ke pesanan ya — boleh aku minta *nama* kamu?")
-            return Reply(text="Namanya sepertinya kurang tepat. Boleh ketik nama lengkapmu?")
+                    wa_number, text, bahasa.teks("kembali_minta_nama", lang))
+            return Reply(text=bahasa.teks("nama_tidak_valid", lang))
         cust["nama"] = nama
         await store.set_customer(wa_number, cust)
-        return Reply(text=f"Halo {cust['nama']}! Sekarang, boleh minta *alamat*-mu?")
+        return Reply(text=bahasa.teks("minta_alamat", lang, nama=cust["nama"]))
 
     # Step 2: address
     if "alamat" not in cust:
         if _looks_like_question(text):
             return await _answer_then_reask(
-                wa_number, text, "Lanjut ya — boleh minta *alamat* lengkapmu?")
+                wa_number, text, bahasa.teks("kembali_minta_alamat", lang))
         if not _valid_address(text):
             if len(text.split()) > 3:
                 return await _answer_then_reask(
-                    wa_number, text, "Lanjut ya — boleh minta *alamat* lengkapmu?")
-            return Reply(text=(
-                "Alamatnya belum cukup jelas buat kurir. Boleh ketik alamat lengkapnya "
-                "— nama jalan, nomor rumah, dan patokan kalau ada?"
-            ))
+                    wa_number, text, bahasa.teks("kembali_minta_alamat", lang))
+            return Reply(text=bahasa.teks("alamat_tidak_valid", lang))
         cust["alamat"] = text.strip()
         await store.set_customer(wa_number, cust)
-        return Reply(
-            text="Pesananmu mau *diambil sendiri (pickup)* atau *dikirim (delivery)*?"
-        )
+        return Reply(text=bahasa.teks("tanya_pengiriman", lang))
 
     # Step 3: delivery method
     if "metode_pengiriman" not in cust:
@@ -448,14 +463,20 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
         elif any(k in low for k in _KATA_DELIVERY):
             cust["metode_pengiriman"] = "delivery"
         else:
-            return Reply(text="Ketik *pickup* (ambil sendiri) atau *delivery* (dikirim) ya.")
+            return Reply(text=bahasa.teks("pengiriman_tidak_jelas", lang))
         # The contact number is the WhatsApp number the message arrived from —
         # it is already proven to work, and the backend has nowhere to store a
         # second one (customers has only nomor_wa), so asking for another one
         # meant collecting a number and then throwing it away.
         cust["nomor_hp"] = _wa_digits(wa_number)
         await store.set_customer(wa_number, cust)
-        return Reply(text=_payment_type_prompt())
+        # Pilihan "kirim" diakui dulu dengan konsekuensinya, baru lanjut: toko
+        # tidak punya kurir sendiri, dan pelanggan yang baru tahu itu di akhir
+        # sudah terlanjur mengira ongkirnya diurus toko.
+        if cust["metode_pengiriman"] == "delivery":
+            return Reply(text=bahasa.teks("konfirmasi_kirim_sendiri", lang)
+                         + "\n\n" + _payment_type_prompt(lang))
+        return Reply(text=_payment_type_prompt(lang))
 
     # Step 4: payment type (full vs DP 50%)
     if "payment_type" not in cust:
@@ -464,9 +485,9 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
         elif _DP_RE.search(text):
             cust["payment_type"] = "dp"
         else:
-            return Reply(text=_payment_type_prompt())
+            return Reply(text=_payment_type_prompt(lang))
         await store.set_customer(wa_number, cust)
-        return Reply(text=_channel_prompt())
+        return Reply(text=_channel_prompt(lang))
 
     # Step 5: payment channel (VA vs QRIS) -> finalize.
     if "channel" not in cust:
@@ -477,28 +498,21 @@ async def _handle_identity(wa_number: str, text: str) -> Reply:
         elif _VA_RE.search(text):
             cust["channel"] = "bank_transfer"
         else:
-            return Reply(text=_channel_prompt())
+            return Reply(text=_channel_prompt(lang))
         await store.set_customer(wa_number, cust)
         reply_text = await checkout.finalize_order(wa_number)
         return Reply(text=reply_text)
 
     # Shouldn't reach here; reset to be safe.
     await store.set_state(wa_number, State.IDLE)
-    return Reply(text="Ada lagi yang bisa kubantu? 😊")
+    return Reply(text=bahasa.teks("ada_lagi", lang))
 
 
-def _channel_prompt() -> str:
-    return (
-        "Metode pembayarannya mau lewat apa?\n"
-        "• Ketik *VA* — transfer bank via Virtual Account\n"
-        "• Ketik *QRIS* — scan kode QR (GoPay/OVO/Dana/mobile banking)"
-    )
+def _channel_prompt(lang: str) -> str:
+    return bahasa.teks("tanya_metode_bayar", lang)
 
 
-def _payment_type_prompt() -> str:
+def _payment_type_prompt(lang: str) -> str:
     if settings.allow_down_payment:
-        return (
-            "Mau bayar *penuh* atau *DP 50%*? Ketik salah satu ya.\n"
-            "(DP 50% = bayar separuh dulu sekarang)"
-        )
-    return "Lanjut ke pembayaran ya..."
+        return bahasa.teks("tanya_jenis_bayar", lang)
+    return bahasa.teks("lanjut_bayar", lang)
