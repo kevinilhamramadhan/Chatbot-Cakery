@@ -32,6 +32,20 @@ v5 (QA sweep 3 Sep 2026 — measured on toti-qwen-1.7b-v4 in the live stack):
   and inventing products ("cupcakes klasik"). Both are now blocked by
   self_check, so no such example can enter training.
 
+v7 (QA E2E 18-19 Sep 2026 — PROMPT_FINETUNE_V7.md):
+- FAQ context lives in the FINAL USER MESSAGE ("KONTEKS FAQ … Pertanyaan
+  pelanggan: …", built by the runtime's own agent.pertanyaan_dengan_konteks),
+  never in the system block, and it rides along on most rows — tool rows
+  included — because at runtime ~65% of turns carry it. v6 had it on 7% of
+  rows, in the system block: a shape the model never met in production.
+- FAQ documents are rendered from fact SLOTS (faq_topik.py): the same question
+  gets different answers on different rows, so the only way to be right is to
+  read the context. Test-only topics prove the model reads, not recalls.
+- check_cart and resend_payment_method finally have training rows (T15/T16),
+  plus near-negatives that were misrouted live (N10-N13).
+- Real products in the menu; "lapis legit" is no longer "off-catalog".
+- The test split is regenerated (no longer frozen since v1).
+
 Run from repo root:  python finetune/generate_dataset.py
 Outputs: finetune/data/{train,validation,test}.jsonl + stats.json
 """
@@ -50,18 +64,25 @@ sys.path.insert(0, str(ROOT / "chatbot-service"))
 
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
 
-from app.llm.agent import OUT_OF_SCOPE_REPLY, _history_view  # noqa: E402
+from app.llm.agent import OUT_OF_SCOPE_REPLY, _history_view, pertanyaan_dengan_konteks  # noqa: E402
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER  # noqa: E402
+from app.conversation import bahasa  # noqa: E402
 from app.tools.add_to_cart import cart_summary  # noqa: E402
 from app.tools.formatting import rupiah  # noqa: E402
 from app.tools.registry import ALL_TOOLS, TOOLS_UMUM  # noqa: E402
 
+sys.path.insert(0, str(ROOT / "finetune"))
+import faq_topik  # noqa: E402
+
 # ── Ground-truth constants (train-serve parity) ───────────────────────────────
-FAQ_HEADER = "\n\nKONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\n"
+FAQ_USER_PREFIX = "KONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\n"
 DOC_SEP = "\n\n---\n\n"
-# Guard against drift: these literals must still exist in the runtime code.
+SYSTEM_BLOCK = SYSTEM_PROMPT + "\n\n" + TOOL_REMINDER
+# Guard against drift: the runtime must still build the question with the same
+# helper the dataset calls, and still send the reminder as a SystemMessage.
 _agent_src = (ROOT / "chatbot-service/app/llm/agent.py").read_text()
-assert "KONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\\n" in _agent_src
+assert "HumanMessage(content=pertanyaan_dengan_konteks(user_text, rag_context))" in _agent_src
+assert pertanyaan_dengan_konteks("x", "D").startswith(FAQ_USER_PREFIX)
 # v4: runtime must still send the reminder as a SystemMessage (Ollama collates
 # every system message into the TOP system block joined by "\n\n" — verified in
 # ollama v0.23.2 template/template.go collate(). The dataset reproduces that
@@ -102,6 +123,14 @@ MENU = {
     "Mini Cookies 7cm": ("cookies", COOKIE_FLAV),
     "Bento Cookies 10cm": ("cookies", COOKIE_FLAV),
     "Giant Cookies 15cm": ("cookies", COOKIE_FLAV),
+    # v7: produk yang benar-benar dipesan pelanggan di QA 18-19 Sep. Tanpa varian
+    # rasa — nama produknya sendiri sudah lengkap.
+    "Brownies Fudgy Almond": ("brownies", []),
+    "Brownies Coklat": ("brownies", []),
+    "Lapis Legit Premium": ("cake", []),
+    "Chiffon Cake Pandan": ("cake", []),
+    "Bolu Pandan": ("cake", []),
+    "Cupcake Bunga": ("cupcake", []),
 }
 HOLDOUT_PRODUCTS = {"Cake 22cm", "Giant Cookies 15cm"}  # test-only
 HOLDOUT_FLAVOUR = "Matcha"                               # test-only
@@ -119,6 +148,13 @@ BASE_SURFACES = {
     "Mini Cookies 7cm": ["mini cookies", "mini cookies 7cm", "cookies mini"],
     "Bento Cookies 10cm": ["bento cookies", "cookies bento", "bento cookies 10cm"],
     "Giant Cookies 15cm": ["giant cookies", "cookies giant", "giant cookies 15cm"],
+    "Brownies Fudgy Almond": ["brownies fudgy almond", "brownies almond", "fudgy almond",
+                              "brownies fudgy"],
+    "Brownies Coklat": ["brownies coklat", "brownies cokelat", "brownis coklat"],
+    "Lapis Legit Premium": ["lapis legit premium", "lapis legit", "lapis legitnya"],
+    "Chiffon Cake Pandan": ["chiffon cake pandan", "chiffon pandan", "chiffon cake"],
+    "Bolu Pandan": ["bolu pandan", "bolu pandannya"],
+    "Cupcake Bunga": ["cupcake bunga", "cupcakes bunga"],
 }
 FLAV_SURFACE_ID = {"Cokelat": ["coklat", "cokelat", "rasa coklat"],
                    "Vanilla": ["vanilla", "vanila", "rasa vanilla"],
@@ -196,107 +232,11 @@ def render(tpl: str, **slots) -> str:
     return s
 
 
-# ── FAQ documents (5 real + 7 synthetic, same Q/A style) ─────────────────────
-def _read_faq(n: int) -> str:
-    return (ROOT / f"chatbot-service/knowledge_base/faq/faq{n}.txt").read_text().strip()
+# ── FAQ (v7): dokumen dirender dari slot — lihat faq_topik.py ─────────────────
+TOPIK_MAIN = faq_topik.TOPIK
+TOPIK_TEST = faq_topik.TOPIK_TEST
+FAQ_ASLI = faq_topik.faq_asli()
 
-
-FAQ_DOCS = [
-    {"id": "faq1", "doc": _read_faq(1),
-     "q_id": ["jam berapa toti cakery buka{part}?", "buka sampai jam berapa{part}?",
-              "hari minggu buka ga{part}?", "jam operasionalnya gimana{part}?"],
-     "q_en": ["what are your opening hours?", "are you open on Sundays?"],
-     "a_id": ["Toti Cakery buka Senin sampai Sabtu pukul 09.00 - 19.00 WIB ya kak, hari Minggu kami libur 😊",
-              "Kami buka setiap Senin-Sabtu jam 09.00 sampai 19.00 WIB. Hari Minggu libur ya kak 🙏"],
-     "a_en": ["We're open Monday to Saturday, 09.00 - 19.00 WIB. We're closed on Sundays 😊"]},
-    {"id": "faq2", "doc": _read_faq(2),
-     "q_id": ["terima pesanan kue custom ga{part}?", "bisa pesan kue ulang tahun desain khusus{part}?",
-              "kalau mau kue custom gimana{part}?", "bisa request tema kue ga{part}?"],
-     "q_en": ["do you take custom cake orders?", "can I order a custom birthday cake?"],
-     "a_id": ["Bisa kak! Kami menerima kue custom seperti kue ulang tahun dengan desain, tulisan, dan tema tertentu. Karena butuh diskusi detail, pesanan custom akan diteruskan ke admin kami ya 😊",
-              "Ya, kue custom bisa banget. Nanti kebutuhanmu kami teruskan ke admin karena perlu diskusi detail desain dan temanya ya kak 🙏"],
-     "a_en": ["Yes! We take custom cakes (special designs, writing, themes). Custom orders are forwarded to our admin for the detailed discussion 😊"]},
-    {"id": "faq3", "doc": _read_faq(3),
-     "q_id": ["pengirimannya gimana{part}?", "bisa dikirim ke rumah ga{part}?",
-              "ambil sendiri bisa{part}?", "delivery pakai apa{part}?"],
-     "q_en": ["how does delivery work?", "can I pick up my order at the store?"],
-     "a_id": ["Ada dua cara kak: ambil sendiri (pickup) di toko, atau delivery. Untuk delivery, kurirnya dipesan sendiri lewat ojek online seperti GoSend/GrabExpress — saat pesanan siap kami kirimkan nama dan alamat toko biar gampang pesan kurirnya 😊",
-              "Bisa pickup di toko atau delivery ya. Kalau delivery, pelanggan memesan sendiri kurir ojek online (GoSend/GrabExpress) dari alamat toko kami 🙏"],
-     "a_en": ["Two options: pickup at the store, or delivery — you book your own courier (GoSend/GrabExpress) from our store address. We'll send the store name and full address once your order is ready 😊"]},
-    {"id": "faq4", "doc": _read_faq(4),
-     "q_id": ["bayarnya bisa pakai apa aja{part}?", "bisa bayar pakai QRIS{part}?",
-              "pembayarannya gimana{part}?", "bisa DP dulu ga{part}?"],
-     "q_en": ["what payment methods do you accept?", "can I pay a down payment first?"],
-     "a_id": ["Pembayaran non-tunai ya kak, lewat QRIS atau transfer Virtual Account (VA) bank. Setelah konfirmasi pesanan kami kirim QR/nomor VA-nya. Bisa bayar penuh atau DP 50% 😊",
-              "Bisa QRIS atau Virtual Account bank kak. Tersedia opsi bayar penuh atau DP 50%, dan pesanan diproses setelah pembayaran kami terima ya 🙏"],
-     "a_en": ["We accept cashless payment via QRIS or bank Virtual Account (VA). You can pay in full or a 50% down payment; the order is processed once payment is received 😊"]},
-    {"id": "faq5", "doc": _read_faq(5),
-     "q_id": ["kuenya halal ga{part}?", "kue tahan berapa lama{part}?",
-              "cara simpan kuenya gimana{part}?", "aman ga disimpan sampai besok{part}?"],
-     "q_en": ["are your cakes halal?", "how long do the cakes last?"],
-     "a_id": ["Semua produk kami dibuat dari bahan halal kak. Paling enak dinikmati di hari yang sama; kalau disimpan di chiller tahan sekitar 2-3 hari. Hindari suhu ruang terlalu lama ya, apalagi yang berkrim segar 😊",
-              "Halal ya kak 😊 Untuk daya tahan, kue terbaik dimakan di hari yang sama, atau simpan di lemari pendingin supaya tahan sekitar 2-3 hari."],
-     "a_en": ["All our products are made with halal ingredients. Best enjoyed the same day; they keep about 2-3 days in the chiller. Avoid leaving them at room temperature too long 😊"]},
-    {"id": "faq_s1",
-     "doc": ("Q: Apakah bisa pesan untuk diambil di hari yang sama?\n"
-             "A: Pesanan reguler bisa diproses di hari yang sama selama slot produksi masih tersedia. "
-             "Untuk kue custom dan pesanan dalam jumlah besar, pemesanan minimal H-2 agar hasilnya maksimal."),
-     "q_id": ["bisa pesan buat hari ini juga ga{part}?", "kalau pesan sekarang bisa jadi hari ini{part}?",
-              "pesan dadakan bisa{part}?"],
-     "q_en": ["can I order for same-day pickup?", "is same-day order possible?"],
-     "a_id": ["Pesanan reguler bisa diproses di hari yang sama selama slot produksi masih ada kak. Kalau kue custom atau jumlah besar, minimal H-2 ya 😊"],
-     "a_en": ["Regular orders can be same-day while production slots last; custom cakes and big orders need at least 2 days ahead (H-2) 😊"]},
-    {"id": "faq_s2",
-     "doc": ("Q: Toti Cakery lokasinya di mana dan melayani area mana saja?\n"
-             "A: Toko kami berlokasi di Batam. Untuk pengiriman, jangkauannya mengikuti layanan ojek online "
-             "(GoSend/GrabExpress) dari alamat toko, jadi selama area kamu terjangkau layanan tersebut pesanan bisa dikirim."),
-     "q_id": ["tokonya di mana{part}?", "melayani area mana aja{part}?", "aku di batam centre kejangkau ga{part}?"],
-     "q_en": ["where is your store located?", "which areas do you deliver to?"],
-     "a_id": ["Toko kami di Batam kak. Jangkauan kirim mengikuti layanan ojek online (GoSend/GrabExpress) dari alamat toko — selama areamu terjangkau layanan itu, aman 😊"],
-     "a_en": ["We're located in Batam. Delivery coverage follows the online courier services (GoSend/GrabExpress) from our store address 😊"]},
-    {"id": "faq_s3",
-     "doc": ("Q: Apakah produk mengandung alergen?\n"
-             "A: Produk kami umumnya mengandung gluten (terigu), telur, dan susu. Beberapa varian dapat mengandung "
-             "atau terpapar kacang-kacangan. Jika kamu punya alergi, mohon informasikan saat memesan."),
-     "q_id": ["kuenya mengandung kacang ga{part}?", "aku alergi susu, aman ga{part}?", "ada info alergen ga{part}?"],
-     "q_en": ["do your products contain nuts?", "I have a milk allergy, is that okay?"],
-     "a_id": ["Produk kami umumnya mengandung gluten, telur, dan susu kak, dan beberapa varian bisa terpapar kacang. Kalau ada alergi, kabari saat memesan ya 🙏"],
-     "a_en": ["Our products generally contain gluten, eggs, and milk, and some variants may contain or contact nuts. Please tell us about any allergy when ordering 🙏"]},
-    {"id": "faq_s4",
-     "doc": ("Q: Apakah kue dikemas dengan box dan bisa menambahkan kartu ucapan?\n"
-             "A: Setiap kue dikemas dengan box yang aman untuk dibawa. Kartu ucapan gratis — tuliskan pesanmu saat "
-             "memesan. Lilin dan topper sederhana juga tersedia atas permintaan."),
-     "q_id": ["dapat box ga kuenya{part}?", "bisa tambah kartu ucapan{part}?", "ada lilinnya ga{part}?"],
-     "q_en": ["can I add a greeting card to the cake?", "does the cake come in a box?"],
-     "a_id": ["Setiap kue dikemas box yang aman kak. Kartu ucapan gratis — tulis saja pesanmu saat memesan; lilin dan topper sederhana juga bisa diminta 😊"],
-     "a_en": ["Every cake comes in a safe box. Greeting cards are free — just write your message when ordering; candles and simple toppers are available on request 😊"]},
-    {"id": "faq_s5",
-     "doc": ("Q: Bagaimana kebijakan pembatalan dan refund DP?\n"
-             "A: Pesanan yang belum dibayar bisa dibatalkan kapan saja lewat chat. Pesanan yang sudah dibayar "
-             "(penuh maupun DP) tidak dapat dibatalkan otomatis dan diproses oleh tim kami."),
-     "q_id": ["kalau batal DP nya balik ga{part}?", "kebijakan pembatalannya gimana{part}?",
-              "pesanan yang udah dibayar bisa dibatalkan{part}?"],
-     "q_en": ["what's your cancellation policy?", "is the down payment refundable?"],
-     "a_id": ["Pesanan yang belum dibayar bisa dibatalkan kapan saja lewat chat kak. Kalau sudah dibayar (penuh/DP), pembatalannya tidak otomatis dan diproses tim kami ya 🙏"],
-     "a_en": ["Unpaid orders can be cancelled anytime via chat. Paid orders (full or DP) can't be cancelled automatically; our team processes those 🙏"]},
-    {"id": "faq_s6",  # TEST-ONLY
-     "doc": ("Q: Apakah bisa memesan lewat website Toti Cakery?\n"
-             "A: Bisa. Selain lewat chat ini, kamu dapat memesan melalui website Toti Cakery. Perlu diingat, setiap "
-             "pelanggan hanya dapat memiliki satu pesanan aktif pada satu waktu."),
-     "q_id": ["bisa pesan lewat website ga{part}?", "selain chat, order bisa dari mana{part}?"],
-     "q_en": ["can I order from your website instead?", "is there another way to order besides chat?"],
-     "a_id": ["Bisa kak — selain lewat chat ini, kamu dapat memesan melalui website Toti Cakery. Perlu diingat, setiap pelanggan hanya dapat memiliki satu pesanan aktif pada satu waktu ya 😊"],
-     "a_en": ["Yes — besides this chat you can order via the Toti Cakery website. Note: each customer can only have one active order at a time 😊"]},
-    {"id": "faq_s7",  # TEST-ONLY
-     "doc": ("Q: Apakah ada promo atau diskon?\n"
-             "A: Saat ini tidak ada program diskon tetap. Promo sesekali diumumkan melalui Instagram Toti Cakery, "
-             "dan harga yang tercantum pada menu adalah harga final."),
-     "q_id": ["ada promo ga sekarang{part}?", "diskon dong kak{part}", "ada potongan harga ga{part}?"],
-     "q_en": ["do you have any discounts right now?", "any ongoing promo?"],
-     "a_id": ["Saat ini belum ada program diskon tetap kak 🙏 Promo sesekali diumumkan lewat Instagram Toti Cakery, dan harga pada menu adalah harga final ya."],
-     "a_en": ["We don't have a standing discount program right now — occasional promos are announced on our Instagram, and menu prices are final 🙏"]},
-]
-TEST_ONLY_DOCS = {"faq_s6", "faq_s7"}
 
 ID_STOPWORDS = set("yang di ke dari dan atau untuk pada dengan kami kamu kak ya adalah bisa dapat juga saat lewat "
                    "itu ini nya akan sudah belum tidak ga hanya per satu dua tiga saja silakan mohon setiap agar "
@@ -380,7 +320,11 @@ T3_ID_V6 = ["{greet}{prod} itu 50 ribu kan ya{part}?", "{greet}{prod} masih 25rb
             "{greet}denger-denger {prod} naik jadi 90rb, bener{part}?",
             "{greet}{prod} 30 ribuan kan{part}?"]
 T3_EN_V6 = ["{greet}the {prod} is 50k right?", "{greet}isn't the {prod} 100 thousand?"]
-T3_ID = T3_ID_V6 + T3_ID + T3_ID_V5
+# v7: minta foto dengan kata umum ("brownies nya") — argumennya tetap kata
+# pelanggan; resolver kode yang menanyakan varian kalau lebih dari satu.
+T3_ID_V7 = ["{greet}fotonya ada ga? mau lihat {prod} nya{part}", "{greet}mau lihat {prod} nya dong{part}",
+            "{greet}kirim foto {prod}{part}"]
+T3_ID = T3_ID_V7 + T3_ID_V6 + T3_ID + T3_ID_V5
 T3_EN = T3_EN_V6 + T3_EN + T3_EN_V5
 
 T4_ID = ["{greet}bagusan mana {prodA} sama {prodB}{part}?", "{greet}bedanya {prodA} dan {prodB} apa{part}?",
@@ -400,13 +344,13 @@ T4_EN = ["{greet}which is better, the {prodA} or the {prodB}?",
 # resolver kode (app/tools/formatting.py) yang menanyakan pilihan. Semua entri
 # di sini token-match >=1 produk nyata sehingga resolver menjawab opsi, bukan
 # "tidak ditemukan".
-GENERIC_SURFACES = ["cupcake", "cupcakes", "cake", "cookies"]
+GENERIC_SURFACES = ["cupcake", "cupcakes", "cake", "cookies", "brownies"]
 # v5: barang yang TIDAK dijual. Model tidak pernah tahu isi katalog — tugasnya
 # meneruskan kata pelanggan, dan resolver kode yang menjawab "tidak ketemu".
 # Tanpa contoh ini model bingung: live, "mau donat gula 6" tidak memanggil tool
 # apa pun dan malah membocorkan nama tool ke pelanggan.
 OFF_CATALOG_ID = ["donat", "donat gula", "roti tawar", "es krim", "martabak",
-                  "puding coklat", "risoles", "bakpia", "lapis legit", "klepon",
+                  "puding coklat", "risoles", "bakpia", "klepon",
                   "pizza", "kue lapis", "onde-onde", "pastel", "nasi kotak",
                   "roti sobek", "churros", "boba", "kopi susu", "sus vla"]
 OFF_CATALOG_EN = ["donuts", "ice cream", "white bread", "pudding", "croissants",
@@ -416,7 +360,12 @@ OFF_CATALOG_EN = ["donuts", "ice cream", "white bread", "pudding", "croissants",
 # kerasnya ada di T10 ("mau nego harga buat order kantor jumlah besar").
 BULK_QTY = [25, 30, 40, 50, 60, 75, 100]
 
-T5_ID = ["{greet}mau pesan {prod} {qty}{unit}{part}", "{greet}aku mau {prod} {qty}{unit} ya{part}",
+# v7: pesanan super ringkas "nama kue + angka" — QA W7: "lapis legit premium 1"
+# dijawab detail produk, bukan masuk keranjang. Ditaruh di DEPAN pool; indeks
+# NOQTY di bawah ikut digeser.
+T5_ID_V7 = ["{prod} {qty}{part}", "{prod} {qty}{unit} ya{part}", "{qty}{unit} {prod}{part}",
+            "{prod} {qty}{unit} aja{part}"]
+T5_ID = T5_ID_V7 + ["{greet}mau pesan {prod} {qty}{unit}{part}", "{greet}aku mau {prod} {qty}{unit} ya{part}",
          "{greet}pesan {prod} {qty}{unit}{part}", "{greet}order {prod} {qty}{unit}{part}",
          "{greet}beli {prod} {qty}{unit} ya{part}", "{greet}mau ambil {prod} {qty}{unit}{part}",
          "{greet}bisa pesan {prod} {qty}{unit}{part}?", "{greet}aku pengen {prod}, {qty}{unit} ya{part}",
@@ -430,7 +379,7 @@ T5_ID = ["{greet}mau pesan {prod} {qty}{unit}{part}", "{greet}aku mau {prod} {qt
          "{greet}pesen {prod} dong{part}", "{greet}mau {prod} dong{part}",
          "{greet}aku mau order {prod}{part}", "{greet}boleh pesan {prod}{part}?",
          "{greet}mau beli {prod} dong{part}", "{greet}pesan {prod} ya kak{part}"]
-T5_ID_NOQTY = {14, 15, 16, 17, 18, 19, 20, 21, 22, 23}  # qty defaults to 1
+T5_ID_NOQTY = {i + len(T5_ID_V7) for i in (14, 15, 16, 17, 18, 19, 20, 21, 22, 23)}  # qty 1
 T5_EN = ["{greet}I'd like to order {qty} {prod}", "{greet}can I get {qty} {prod}?",
          "{greet}I want to buy {qty} {prod}", "{greet}please prepare {qty} {prod}",
          "{greet}I'll take {qty} {prod}", "{greet}I want the {prod}, {qty} please",
@@ -693,17 +642,20 @@ N8_REPLY = {
 N2_ID = [("{greet}ada cabang di {city} ga{part}?", "branch"),
          ("{greet}lagi ada diskon atau promo ga{part}?", "promo"),
          ("{greet}ada voucher buat pelanggan baru{part}?", "promo"),
-         ("{greet}bisa COD ga{part}?", "cod"),
-         ("{greet}bisa kirim ke luar kota{part}?", "outcity"),
          ("{greet}ada program franchise ga{part}?", "franchise"),
          ("{greet}lagi buka lowongan kerja ga{part}?", "job"),
          ("{greet}bisa sewa tempat buat acara di toko{part}?", "venue"),
-         ("{greet}kue nya bisa dikirim pakai kurir kargo ke {city}{part}?", "outcity"),
-         ("{greet}bisa jadi reseller kue kalian ga{part}?", "reseller")]
+         ("{greet}bisa jadi reseller kue kalian ga{part}?", "reseller"),
+         # v7: ditanya hal yang TIDAK ada di konteks FAQ -> jangan mengiyakan.
+         # QA W5: "kalau ambil besok jam 10 pagi bisa?" dijawab "bisa banget"
+         # tanpa dasar apa pun.
+         ("{greet}bisa ambil besok jam 10 pagi{part}?", "unknown"),
+         ("{greet}kuenya bisa dibungkus kado ga{part}?", "unknown"),
+         ("{greet}bisa titip lilin ulang tahun sekalian{part}?", "unknown"),
+         ("{greet}ada parkiran di toko ga{part}?", "unknown")]
 N2_EN = [("{greet}do you have a branch in {city}?", "branch"),
-         ("{greet}can I pay cash on delivery?", "cod"),
-         ("{greet}do you ship to other cities?", "outcity"),
-         ("{greet}are you hiring right now?", "job")]
+         ("{greet}are you hiring right now?", "job"),
+         ("{greet}can I pick it up tomorrow at 10am?", "unknown")]
 CITIES = ["Jakarta", "Bandung", "Surabaya", "Medan", "Pekanbaru"]
 # v6: tawaran "mau kusambungkan ke admin?" DIHAPUS dari semua balasan ini.
 # Eskalasi kini khusus pesanan kue custom, dan tawaran yang berhamburan di
@@ -849,6 +801,97 @@ N6_REPLY = {
     ("negated", "en"): ["No worries! I'm here whenever you feel like ordering 😊"],
 }
 
+# ── v7: tipe baru (QA E2E 18-19 Sep 2026) ────────────────────────────────────
+# T15 — isi keranjang. check_cart tidak punya SATU pun baris latihan sampai v6;
+# QA W4: "pesananku yang kemarin gimana?" malah memanggil check_cart. Pasangan
+# kerasnya ada di T8 (pesanan yang SUDAH dibuat -> get_order_status).
+T15_ID = ["{greet}keranjangku isinya apa aja{part}?", "{greet}tadi aku udah masukin apa aja{part}?",
+          "{greet}totalnya jadi berapa sekarang{part}?", "{greet}cek keranjang{part}",
+          "{greet}di keranjang ada apa aja{part}?", "{greet}berapa totalnya semua{part}?",
+          "{greet}coba lihat lagi pesanan yang belum aku bayar{part}", "{greet}rincian keranjangku{part}"]
+T15_EN = ["{greet}what's in my cart?", "{greet}what's my total so far?",
+          "{greet}can you show my cart?", "{greet}what did I add so far?"]
+
+# T16 — kirim ulang cara bayar. resend_payment_method juga nol baris sampai v6.
+# Selalu sesudah tagihan terbit (history "payment").
+T16_ID = ["{greet}kode qr nya kirim ulang dong{part}", "{greet}nomor VA nya mana ya{part}?",
+          "{greet}belum sempat bayar, masih bisa ga{part}?", "{greet}qris nya ilang, kirim lagi{part}",
+          "{greet}tagihannya kirim ulang{part}", "{greet}aku mau bayar sekarang, kodenya mana{part}?",
+          "{greet}link pembayarannya ga kebuka, kirim lagi{part}", "{greet}minta nomor rekening VA nya lagi{part}",
+          "{greet}masih bisa dibayar kan tagihannya{part}?", "{greet}lupa nomor VA nya{part}"]
+T16_EN = ["{greet}can you resend the payment code?", "{greet}I lost the QR code, send it again",
+          "{greet}I haven't paid yet, can I still pay?", "{greet}what was the VA number again?"]
+
+# N10 — pelanggan BUKAN Owner minta laporan. Tool laporan tidak dimuat untuk
+# mereka, jadi jawabannya teks. QA R2: dijawab kalimat umum "di luar cakupan".
+N10_ID = ["{greet}laporan keuangan bulan ini{part}", "{greet}omzet toko bulan ini berapa{part}?",
+          "{greet}produk terlaris bulan ini apa{part}?", "{greet}minta rekap penjualan{part}",
+          "{greet}aku admin, kirim laporan keuangan{part}", "{greet}laba toko berapa sebulan{part}?",
+          "{greet}analitik penjualan dong{part}"]
+N10_EN = ["{greet}send me the financial report", "{greet}what's the revenue this month?",
+          "{greet}show me the sales analytics"]
+N10_REPLY = {
+    "id": ["Maaf, laporan keuangan dan analitik penjualan hanya untuk Owner Toti Cakery 🙏 Kalau soal menu, pesanan, atau pembayaran, aku siap bantu.",
+           "Laporan toko hanya bisa dibuka Owner ya 🙏 Yang bisa kubantu: menu, pemesanan, pembayaran, dan status pesanan."],
+    "en": ["Sorry, financial reports and sales analytics are only available to the Toti Cakery owner 🙏 I can help with the menu, orders, and payments."],
+}
+
+# N11 — ganti metode bayar SESUDAH tagihan terbit. Kode tidak mendukungnya;
+# QA W4 dijawab "nggak bisa, satu pelanggan satu pesanan" (salah alasan).
+N11_ID = ["{greet}ganti ke transfer bank aja deh{part}", "{greet}bisa ganti ke qris ga{part}?",
+          "{greet}aku mau ganti cara bayar{part}", "{greet}VA nya ganti bank lain bisa{part}?",
+          "{greet}ga jadi qris, pakai VA aja{part}", "{greet}bisa ubah jadi bayar lunas{part}?"]
+N11_EN = ["{greet}can I switch to bank transfer instead?", "{greet}can I change the payment method?"]
+N11_REPLY = {
+    "id": ["Cara bayar tidak bisa diganti setelah tagihan terbit kak 🙏 Kalau mau ganti, ketik *batal* untuk membatalkan tagihan ini, lalu pesan ulang dan pilih cara bayar yang baru.",
+           "Tagihannya sudah terbit dengan cara bayar yang tadi dipilih, jadi tidak bisa diubah ya kak 🙏 Ketik *batal* lalu pesan lagi kalau mau pakai cara bayar lain."],
+    "en": ["The payment method can't be changed once the invoice is issued 🙏 If you'd like another method, type *cancel* to cancel this invoice, then order again and pick the new one."],
+}
+
+# N12 — pesan pendek/ambigu saat TIDAK ada keranjang atau pesanan. QA: "order"
+# dan "oke gas" memicu cancel_order, "1" memicu add_to_cart tanpa produk.
+N12_ID = [("order{part}", "ask"), ("oke gas{part}", "ask"), ("gas{part}", "ask"), ("1", "ask"),
+          (".....", "ask"), ("sip{part}", "ack"), ("ok{part}", "ack"), ("p", "ask"),
+          ("oke deh{part}", "ack"), ("ya{part}", "ask"), ("lanjut{part}", "ask"), ("2", "ask"),
+          ("siap{part}", "ack"), ("pesan{part}", "ask")]
+N12_EN = [("order", "ask"), ("ok", "ack"), ("yes", "ask"), ("go", "ask"), ("sure", "ack")]
+N12_REPLY = {
+    ("ask", "id"): ["Siap kak! Mau pesan kue apa, dan berapa banyak? Ketik *menu* kalau mau lihat pilihannya dulu 😊",
+                    "Boleh kak 😊 Sebutkan nama kue dan jumlahnya ya, atau ketik *menu* untuk lihat daftarnya."],
+    ("ack", "id"): ["Oke kak 😊 Kalau mau pesan atau tanya sesuatu, tinggal bilang ya.",
+                    "Siap! Aku di sini kalau butuh apa-apa 😊"],
+    ("ask", "en"): ["Sure! Which cake would you like, and how many? Type *menu* to see the list 😊"],
+    ("ack", "en"): ["Alright 😊 Just let me know if you'd like to order or ask anything."],
+}
+
+# N13 — bahasa percakapan. QA S06: "do you speak english?" dijawab "We speak
+# Bahasa Indonesia, sorry" padahal bot dua bahasa.
+N13_ID = ["{greet}bisa pakai bahasa inggris ga{part}?", "{greet}kamu ngerti bahasa inggris{part}?",
+          "{greet}boleh chat pakai english{part}?"]
+N13_EN = ["{greet}do you speak English?", "{greet}can we talk in English?",
+          "{greet}is English okay here?", "{greet}sorry, I don't speak Indonesian"]
+N13_REPLY = {
+    "id": ["Bisa kak 😊 Aku bisa membalas dalam Bahasa Indonesia maupun Inggris — tulis saja pakai bahasa yang nyaman buatmu."],
+    "en": ["Yes, of course! 😊 I can chat in English or Indonesian. How can I help — menu, orders, or anything about the shop?",
+           "Sure, English is fine 😊 What can I help you with today?"],
+}
+
+# N1 tanpa jawaban di konteks: pertanyaan toko yang dokumennya tidak ikut
+# terambil. Jawabannya jujur belum tahu — bukan mengarang, bukan "bisa banget".
+N1_TIDAK_ADA_ID = ["Maaf kak, info soal itu belum ada di catatanku 🙏 Kalau soal menu, pesanan, atau pembayaran, aku siap bantu.",
+                   "Untuk yang itu aku belum punya infonya kak 🙏 Ada hal lain soal kue atau pesanan yang bisa kubantu?"]
+N1_TIDAK_ADA_EN = ["Sorry, I don't have that information yet 🙏 I can help with the menu, orders, or payments."]
+# Topik yang saling menjawab sebagian — dikeluarkan dari konteks N1x.
+TOPIK_BERDEKATAN = {"samedy": {"besar", "custom", "jam"}, "besar": {"custom", "samedy"},
+                    "custom": {"besar", "samedy"}, "jam": {"samedy"},
+                    "kirim": {"ongkir", "lokasi"}, "ongkir": {"kirim"}, "lokasi": {"kirim"},
+                    "bayar": {"dp", "batas"}, "dp": {"bayar"}, "batas": {"bayar"},
+                    "halal": {"alergen"}, "alergen": {"halal"}, "retur": set(),
+                    "kemasan": set()}
+# N2 menanyakan hal di luar semua FAQ; topik yang bisa menjawab sebagian dibuang.
+N2_TOPIK_TERLARANG = {"jam", "kemasan", "lokasi", "samedy"}
+
+
 # ── Composition tables ───────────────────────────────────────────────────────
 # v2 (2026-07-05): N5/N6/T10 diperbanyak — verdict harness v1 (toti-qwen-1.7b
 # 4/5 target) menunjukkan regresi terlokalisir di N5 ambigu (2/7), N6 jebakan
@@ -868,37 +911,40 @@ N6_REPLY = {
 # OFTEN, not too rarely: it swallowed ordinary orders; the two genuine custom
 # cases still routed 2/2 in the sweep, so its share can come down). Test split
 # STAYS frozen.
-TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 110, "T4": 40, "T5": 170, "T6": 35, "T7": 55,
-                "T8": 50, "T9": 30, "T10": 30, "T11": 30, "T12": 30, "T13": 40,
-                "T14": 45,
-                "N1": 90, "N2": 25, "N3": 50, "N4": 60, "N5": 70, "N6": 80,
-                "N7": 45, "N8": 35, "N9": 35}
-VAL_COUNTS = {"T1": 7, "T2": 3, "T3": 11, "T4": 4, "T5": 17, "T6": 4, "T7": 6,
-              "T8": 5, "T9": 3, "T10": 3, "T11": 3, "T12": 3, "T13": 4,
-              "T14": 5,
-              "N1": 9, "N2": 3, "N3": 5, "N4": 6, "N5": 7, "N6": 8,
-              "N7": 5, "N8": 4, "N9": 4}
-# T13 = 0: split test dibekukan sejak v1, jadi tipe baru tidak bisa masuk ke
-# sana tanpa merusak perbandingan lintas versi. Gerbangnya di regression_v5.py.
-TEST_COUNTS = {"T1": 9, "T2": 4, "T3": 9, "T4": 5, "T5": 7, "T6": 4, "T7": 4,
-               "T8": 6, "T9": 4, "T10": 4, "T11": 2, "T12": 2, "T13": 0,
-               "T14": 0,
-               "N1": 11, "N2": 3, "N3": 6, "N4": 8, "N5": 7, "N6": 5,
-               "N7": 0, "N8": 0, "N9": 0}
+# v7 (PROMPT_FINETUNE_V7): T15/T16 baru (tool tanpa contoh sampai v6), N1 naik
+# 90->150 (keterampilan membaca konteks FAQ, sekarang dengan fakta tandingan),
+# N1x baru (konteks ada tapi tidak memuat jawaban), N10-N13 dari QA E2E.
+# Split test DIGENERATE ULANG (tidak lagi dibekukan sejak v1) — kira-kira 10%
+# dari train per tipe, dari potongan template/produk/topik FAQ khusus test.
+TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 115, "T4": 40, "T5": 180, "T6": 35, "T7": 55,
+                "T8": 55, "T9": 30, "T10": 30, "T11": 30, "T12": 30, "T13": 40,
+                "T14": 45, "T15": 35, "T16": 40,
+                "N1": 150, "N1x": 40, "N2": 25, "N3": 50, "N4": 60, "N5": 70, "N6": 80,
+                "N7": 45, "N8": 35, "N9": 35, "N10": 25, "N11": 20, "N12": 30, "N13": 15}
+VAL_COUNTS = {k: max(2, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
+TEST_COUNTS = {k: max(3, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
             "T8": .2, "T9": .2, "T10": .2, "T11": .25, "T12": .25, "T13": .2,
-            "T14": .2,
-            "N1": .25, "N2": .2, "N3": .25, "N4": .25, "N5": .2, "N6": .2,
-            "N7": .2, "N8": .2, "N9": .2}
+            "T14": .2, "T15": .2, "T16": .2,
+            "N1": .25, "N1x": .2, "N2": .2, "N3": .25, "N4": .25, "N5": .2, "N6": .2,
+            "N7": .2, "N8": .2, "N9": .2, "N10": .2, "N11": .2, "N12": .2, "N13": .6}
 # v5: T5/T6/T8 multi-turn up — that is where the "escalate" history kind lives.
+# v7: T16/N11 selalu ber-history (tagihan harus sudah terbit) — diatur di _build.
 MT_SHARE = {"T1": .35, "T2": .2, "T3": .45, "T4": .25, "T5": .45, "T6": .35, "T7": 1.0,
-            "T8": .4, "T9": .4, "T10": .3, "T11": .1, "T12": .1, "T13": .6,
-            "T14": .45,
-            "N1": .3, "N2": .2, "N3": .3, "N4": .25, "N5": .3, "N6": .4,
-            "N7": .2, "N8": .35, "N9": .3}
+            "T8": .5, "T9": .4, "T10": .3, "T11": .1, "T12": .1, "T13": .6,
+            "T14": .45, "T15": .7, "T16": 1.0,
+            "N1": .3, "N1x": .3, "N2": .2, "N3": .3, "N4": .25, "N5": .3, "N6": .4,
+            "N7": .2, "N8": .35, "N9": .3, "N10": .2, "N11": 1.0, "N12": .3, "N13": .2}
+assert set(TRAIN_COUNTS) == set(EN_SHARE) == set(MT_SHARE)
 
-assert sum(TRAIN_COUNTS.values()) == 1255 and sum(VAL_COUNTS.values()) == 129
-assert sum(TEST_COUNTS.values()) == 100
+# Seberapa sering baris membawa KONTEKS FAQ di pesan pelanggan. Runtime (QA 19
+# Sep): 136 dari 208 giliran model (65%) lolos ambang RAG. Pertanyaan di luar
+# toko hampir tidak pernah lolos; sapaan kadang lolos.
+KONTEKS_SHARE = {"N4": .1, "N3": .4, "N8": .4, "N12": .4, "N13": .4}
+KONTEKS_DEFAULT = .65
+# Sebagian kecil dokumen konteks diambil dari FAQ asli VM — contoh format yang
+# benar-benar diterima model di produksi.
+ASLI_SHARE = .15
 
 
 # ── Engine ────────────────────────────────────────────────────────────────────
@@ -942,6 +988,8 @@ class Gen:
 
     def pick_flavour(self, product, split):
         flavs = MENU[product][1]
+        if not flavs:
+            return None
         if split != "test":
             flavs = [f for f in flavs if f != HOLDOUT_FLAVOUR]
         else:
@@ -978,7 +1026,10 @@ class Gen:
                    "Cake 10cm": 100_000, "Cake 15cm": 150_000, "Cake 18cm": 195_000,
                    "Cake 20cm": 235_000, "Cake 22cm": 275_000,
                    "Mini Cookies 7cm": 35_000, "Bento Cookies 10cm": 55_000,
-                   "Giant Cookies 15cm": 95_000}
+                   "Giant Cookies 15cm": 95_000, "Brownies Fudgy Almond": 95_000,
+                  "Brownies Coklat": 50_000, "Lapis Legit Premium": 250_000,
+                  "Chiffon Cake Pandan": 85_000, "Bolu Pandan": 75_000,
+                  "Cupcake Bunga": 45_000}
 
     def fic_price(self, product_full=None):
         if product_full:
@@ -1039,12 +1090,17 @@ class Gen:
 
     def h_payment(self):
         """The checkout reply — the turn a payment claim always follows."""
-        va = f"8808{self.rng.randrange(10**11, 10**12)}"
-        text = (f"Pesanan kamu sudah dibuat ✅\nNo. Invoice: *INV-2026{self.rng.randrange(1000, 9999)}*"
-                f"\n\nPembayaran penuh yang harus dibayar: *{rupiah(self.fic_price())}*"
-                f"\n\n💳 Virtual Account: *{va}*\n\nBatas waktu pembayaran: 30 menit. "
-                "Pembayaran akan terdeteksi otomatis. Ketik *batal* kalau ingin membatalkan.")
-        user = self.rng.choice(["va", "transfer bank aja", "qris"])
+        # v7: bentuk persis templat bahasa.py "pesanan_dibuat", dan cara bayar di
+        # balasan sesuai pilihan pelanggan (v6 selalu menulis VA).
+        user = self.rng.choice(["va", "transfer bank aja", "qris", "VA", "QRIS"])
+        if user.lower() == "qris":
+            cara = f"Scan QRIS: https://api.sandbox.midtrans.com/v2/qris/{self.rng.randrange(10**7, 10**8)}/qr-code"
+        else:
+            cara = f"💳 Virtual Account: *8808{self.rng.randrange(10**11, 10**12)}*"
+        text = bahasa.teks(
+            "pesanan_dibuat", bahasa.ID, invoice=f"INV-2026{self.rng.randrange(1000, 9999)}",
+            label=bahasa.teks("label_bayar_penuh", bahasa.ID), jumlah=rupiah(self.fic_price()),
+            total="", cara_bayar=cara, menit=30)
         return [user, text]
 
     def h_chat(self):
@@ -1060,16 +1116,23 @@ class Gen:
             attempts += 1
             kind = self.rng.choice(kind_pool)
             if kind == "menu":
-                ps = [self.canonical(self.pick_product("train"), self.rng.choice(CUP_FLAV))
-                      for _ in range(2)]
+                ps = []
+                for _ in range(2):
+                    p = self.pick_product("train")
+                    ps.append(self.canonical(p, self.pick_flavour(p, "train")))
                 pair = self.h_menu(ps)
             elif kind == "detail":
                 p = self.pick_product("train")
-                pair = self.h_detail(self.canonical(p, self.rng.choice(MENU[p][1][:2])))
+                fl = self.rng.choice(MENU[p][1][:2]) if MENU[p][1] else None
+                pair = self.h_detail(self.canonical(p, fl))
             elif kind == "payment":
                 pair = self.h_payment()
             elif kind == "escalate":
                 pair = self.h_escalate()
+            elif kind == "cart":
+                p = self.pick_product("train")
+                pair = self.h_cart([(self.canonical(p, self.pick_flavour(p, "train")),
+                                     self.rng.choice([1, 2, 3]))])
             elif kind == "chat":
                 pair = self.h_chat()
             else:
@@ -1095,21 +1158,28 @@ class Gen:
         self.used_user_texts[key] = split
         return True
 
-    def make_row(self, split, rtype, lang, history, user_text, final_turn, system=SYSTEM_PROMPT,
-                 noised=False):
+    def make_row(self, split, rtype, lang, history, user_text, final_turn, noised=False,
+                 konteks=None):
         # v4 §3.4 — history meniru produksi: balasan bot lama masuk konteks
         # lewat _history_view() runtime (menu/detail -> penanda ringkas, teks
         # panjang dipotong). Satu titik jepit utk semua tipe baris.
+        if konteks is None:
+            konteks = self.konteks(rtype, split)
         history = [m if m["role"] == "user"
                    else {"role": "assistant", "content": _history_view(m["content"])}
                    for m in history]
         # v4 §3.5 — reminder menempel di ujung system content, PERSIS seperti
         # yang dilihat model di serving (Ollama meng-collate semua system
         # message ke blok teratas, digabung "\n\n").
-        messages = [{"role": "system", "content": system + "\n\n" + TOOL_REMINDER}] + history
-        messages.append({"role": "user", "content": user_text})
+        messages = [{"role": "system", "content": SYSTEM_BLOCK}] + history
+        # v7: FAQ hasil RAG menumpang di pesan pelanggan — dirakit oleh fungsi
+        # runtime yang sama (agent.pertanyaan_dengan_konteks). History tetap teks
+        # mentah: runtime menyimpan pesan pelanggan apa adanya.
+        messages.append({"role": "user", "content": pertanyaan_dengan_konteks(
+            user_text, DOC_SEP.join(konteks) if konteks else None)})
         messages.append(final_turn)
-        meta = {"type": rtype, "lang": lang, "multi_turn": bool(history), "noised": noised}
+        meta = {"type": rtype, "lang": lang, "multi_turn": bool(history), "noised": noised,
+                "konteks": len(konteks or [])}
         return {"messages": messages,
                 "tools_json": _TOOLS_JSON[rtype in TIPE_OWNER],
                 "meta": meta}
@@ -1124,6 +1194,31 @@ class Gen:
     def text_turn(self, text):
         assert text and not PRICE_RE.search(text), f"price/stock leak in reply: {text!r}"
         return {"role": "assistant", "content": text}
+
+    # ── v7: konteks FAQ ────────────────────────────────────────────────────────
+    def topik_pool(self, split):
+        pool = dict(TOPIK_MAIN)
+        if split == "test":
+            pool.update(TOPIK_TEST)
+        return pool
+
+    def faq_docs(self, split, n, exclude=(), asli=True):
+        """n dokumen konteks acak (tanpa topik di `exclude`)."""
+        pool = self.topik_pool(split)
+        keys = [k for k in pool if k not in exclude]
+        docs = []
+        for k in self.rng.sample(keys, k=min(n, len(keys))):
+            if asli and self.rng.random() < ASLI_SHARE:
+                docs.append(self.rng.choice(FAQ_ASLI))
+            else:
+                docs.append(faq_topik.render_topik(pool[k], self.rng)[0])
+        return docs
+
+    def konteks(self, rtype, split):
+        """Konteks yang lolos ambang RAG untuk baris yang jawabannya BUKAN dari FAQ."""
+        if self.rng.random() >= KONTEKS_SHARE.get(rtype, KONTEKS_DEFAULT):
+            return []
+        return self.faq_docs(split, self.rng.choice([1, 2, 3, 3]))
 
     def plan(self, count, en_share, mt_share):
         n_en = round(count * en_share)
@@ -1188,7 +1283,10 @@ class Gen:
                      "T3": ["menu", "detail", "detail", "chat", "escalate"],
                      "T5": ["menu", "detail", "chat", "escalate", "escalate"],
                      "T6": ["menu", "chat", "escalate"],
-                     "T8": ["status", "chat", "escalate"],
+                     "T8": ["status", "chat", "escalate", "payment"],
+                     "T15": ["cart", "cart", "chat"],
+                     "N10": ["chat", "status"], "N12": ["chat"], "N13": ["chat"],
+                     "N1x": ["chat"],
                      "T13": ["payment", "payment", "chat"],
                      "T14": ["status", "chat", "payment"],
                      "N9": ["chat", "menu"],
@@ -1200,6 +1298,11 @@ class Gen:
         sel = P["sel"]
         rng = self.rng
         history = self._hist_for(rtype, lang) if (mt and rtype != "T7") else []
+        if rtype in ("T16", "N11"):
+            # Tagihan harus sudah terbit: balasan checkout ada di history, kadang
+            # didahului obrolan lain.
+            history = self.history(["chat", "detail"], self.rng.choice([0, 0, 1])) \
+                + self.history(["payment"], 1)
         s = self.slots(lang)
 
         def uniq(fn):
@@ -1231,8 +1334,10 @@ class Gen:
                 text = self.maybe_noise(render(tpl, cat=cat_s, **self.slots(lang)), lang, noise)
                 return text, cat_c
             text, cat_c = uniq(build)
+            # v7: get_menu tidak punya parameter lagi di runtime (skema tool
+            # kosong) — v6 masih melatih argumen "kategori" yang tidak ada.
             return self.make_row(split, rtype, lang, history, text,
-                                 self.tool_turn("get_menu", {"kategori": cat_c}), noised=noise)
+                                 self.tool_turn("get_menu", {}), noised=noise)
 
         if rtype == "T3":
             pool = sel(T3_EN if lang == "en" else T3_ID)
@@ -1464,30 +1569,42 @@ class Gen:
                                  self.tool_turn(tool, {}), noised=noise)
 
         if rtype == "N1":
+            # v7: dokumen dirender dari slot — pertanyaan yang sama punya jawaban
+            # berbeda di baris berbeda. Test: separuh dari topik khusus test.
+            pool = TOPIK_TEST if (split == "test" and rng.random() < 0.5) else TOPIK_MAIN
+
             def build():
-                if split == "test" and rng.random() < 0.4:
-                    docs_ok = [d for d in FAQ_DOCS if d["id"] in TEST_ONLY_DOCS]
-                else:
-                    docs_ok = [d for d in FAQ_DOCS
-                               if split == "test" or d["id"] not in TEST_ONLY_DOCS]
-                doc = rng.choice(docs_ok)
-                qpool = doc["q_en"] if lang == "en" else doc["q_id"]
-                qt = rng.choice(qpool)
-                text = self.maybe_noise(render(qt, **self.slots(lang)), lang, noise)
-                return text, doc
-            text, doc = uniq(build)
-            distract = rng.sample([d for d in FAQ_DOCS if d is not doc
-                                   and (split == "test" or d["id"] not in TEST_ONLY_DOCS)],
-                                  k=rng.choice([0, 1, 2]))
-            block = [doc["doc"]] + [d["doc"] for d in distract]
+                key = rng.choice(sorted(pool))
+                qpool = sel(pool[key]["q_en"] if lang == "en" else pool[key]["q_id"])
+                qt = self.pick_tpl(f"N1u{key}{lang}", qpool, P["regime"], total_count)
+                return self.maybe_noise(render(qt, **self.slots(lang)), lang, noise), key
+            text, key = uniq(build)
+            top = pool[key]
+            doc, slot = faq_topik.render_topik(top, rng)
+            block = [doc] + self.faq_docs(split, rng.choice([0, 1, 2]), exclude={key}, asli=False)
             rng.shuffle(block)
-            system = SYSTEM_PROMPT + FAQ_HEADER + DOC_SEP.join(block)
-            apool = doc["a_en"] if lang == "en" else doc["a_id"]
-            answer = rng.choice(apool)
+            answer = rng.choice(top["r_en"] if lang == "en" else top["r_id"]).format(**slot)
             if lang == "id":
-                assert _grounded(answer, doc["doc"]), f"ungrounded N1 answer for {doc['id']}"
+                assert _grounded(answer, doc), f"ungrounded N1 answer for {key}: {answer!r}"
             return self.make_row(split, rtype, lang, history, text,
-                                 self.text_turn(answer), system=system, noised=noise)
+                                 self.text_turn(answer), noised=noise, konteks=block)
+
+        if rtype == "N1x":
+            # Konteks ADA tapi tidak memuat jawabannya -> jujur belum tahu. Topik
+            # yang berdekatan dikeluarkan supaya konteksnya benar-benar kosong.
+            pool = self.topik_pool(split)
+
+            def build():
+                key = rng.choice(sorted(pool))
+                qpool = sel(pool[key]["q_en"] if lang == "en" else pool[key]["q_id"])
+                qt = self.pick_tpl(f"N1xu{key}{lang}", qpool, P["regime"], total_count)
+                return self.maybe_noise(render(qt, **self.slots(lang)), lang, noise), key
+            text, key = uniq(build)
+            block = self.faq_docs(split, rng.choice([1, 2, 3]),
+                                  exclude={key} | TOPIK_BERDEKATAN.get(key, set()), asli=False)
+            reply = rng.choice(N1_TIDAK_ADA_EN if lang == "en" else N1_TIDAK_ADA_ID)
+            return self.make_row(split, rtype, lang, history, text,
+                                 self.text_turn(reply), noised=noise, konteks=block)
 
         if rtype == "N2":
             pool = sel(N2_EN if lang == "en" else N2_ID)
@@ -1499,8 +1616,47 @@ class Gen:
                     render(tpl, city=rng.choice(CITIES), **self.slots(lang)), lang, noise)
                 return (text,)
             (text,) = uniq(build)
+            # Hal yang tidak ada di FAQ mana pun; konteksnya (kalau ada) dokumen lain.
+            block = (self.faq_docs(split, rng.choice([1, 2]), exclude=N2_TOPIK_TERLARANG, asli=False)
+                     if rng.random() < 0.8 else [])
             return self.make_row(split, rtype, lang, history, text,
-                                 self.text_turn(rng.choice(rpool)), noised=noise)
+                                 self.text_turn(rng.choice(rpool)), noised=noise, konteks=block)
+
+        if rtype in ("T15", "T16"):
+            pools = {"T15": (T15_EN, T15_ID, "check_cart"),
+                     "T16": (T16_EN, T16_ID, "resend_payment_method")}
+            en_pool, id_pool, tool = pools[rtype]
+            pool = sel(en_pool if lang == "en" else id_pool)
+
+            def build():
+                tpl = self.pick_tpl(f"{rtype}u{lang}", pool, P["regime"], total_count)
+                return (self.maybe_noise(render(tpl, **self.slots(lang)), lang, noise),)
+            (text,) = uniq(build)
+            return self.make_row(split, rtype, lang, history, text,
+                                 self.tool_turn(tool, {}), noised=noise)
+
+        if rtype in ("N10", "N11", "N13"):
+            pools = {"N10": (N10_EN, N10_ID, N10_REPLY), "N11": (N11_EN, N11_ID, N11_REPLY),
+                     "N13": (N13_EN, N13_ID, N13_REPLY)}
+            en_pool, id_pool, replies = pools[rtype]
+            pool = sel(en_pool if lang == "en" else id_pool)
+
+            def build():
+                tpl = self.pick_tpl(f"{rtype}u{lang}", pool, P["regime"], total_count)
+                return (self.maybe_noise(render(tpl, **self.slots(lang)), lang, noise),)
+            (text,) = uniq(build)
+            return self.make_row(split, rtype, lang, history, text,
+                                 self.text_turn(rng.choice(replies[lang])), noised=noise)
+
+        if rtype == "N12":
+            pool = sel(N12_EN if lang == "en" else N12_ID)
+
+            def build():
+                tpl, kind = self.pick_tpl(f"N12u{lang}", pool, P["regime"], total_count)
+                return render(tpl, **self.slots(lang)), kind
+            text, kind = uniq(build)
+            return self.make_row(split, rtype, lang, history, text,
+                                 self.text_turn(rng.choice(N12_REPLY[(kind, lang)])), noised=False)
 
         if rtype == "N3":
             pool = sel(N3_EN if lang == "en" else N3_ID)
@@ -1599,13 +1755,11 @@ class Gen:
 
 # ── Validation of generated rows (self-check) ────────────────────────────────
 def _validate_args(name: str, obj: dict) -> None:
-    if name in ("get_order_status", "cancel_order", "check_payment_status",
-                "financial_report", "business_analytics"):
+    # v7: argumen harus cocok dengan SKEMA runtime — get_menu tidak berparameter.
+    if name in ("get_menu", "get_order_status", "cancel_order", "check_payment_status",
+                "financial_report", "business_analytics", "check_cart",
+                "resend_payment_method"):
         assert obj == {}, (name, obj)
-    elif name == "get_menu":
-        assert set(obj) <= {"kategori"}, obj
-        if "kategori" in obj:
-            assert obj["kategori"] in ("cupcake", "cake", "cookies"), obj
     elif name == "get_product_detail":
         assert set(obj) == {"product"} and isinstance(obj["product"], str) and obj["product"], obj
     elif name == "compare_products":
@@ -1625,33 +1779,32 @@ def _validate_args(name: str, obj: dict) -> None:
 
 def self_check(rows_by_split):
     for split, rows in rows_by_split.items():
-        # test dibekukan dari v1 (format lama: tanpa reminder, history literal,
-        # argumen kanonik) — aturan v4 hanya berlaku utk train/validation.
-        v4 = split != "test"
         for row in rows:
             msgs = row["messages"]
-            sysc = msgs[0]["content"]
-            assert msgs[0]["role"] == "system" and sysc
-            if v4:
-                assert sysc.startswith(SYSTEM_PROMPT)
-                suffix = "\n\n" + TOOL_REMINDER
-                assert sysc.endswith(suffix), (split, sysc[-80:])
-                mid = sysc[len(SYSTEM_PROMPT):-len(suffix)]
-                assert mid == "" or mid.startswith(FAQ_HEADER)
-            # test beku menyimpan system prompt era v1 (prompt produksi sudah
-            # dipatch sejak itu) — harness merakit ulang dari SYSTEM_PROMPT
-            # terkini saat replay, jadi di sini cukup cek struktur.
+            # v7: system block SELALU identik (prompt + reminder) — FAQ tidak
+            # pernah masuk sini lagi; itu yang membuat prefix KV-cache stabil.
+            assert msgs[0]["role"] == "system" and msgs[0]["content"] == SYSTEM_BLOCK, split
             body = msgs[1:]
             assert len(body) % 2 == 0 and len(body) <= 8
             for j, m in enumerate(body):
                 assert m["role"] == ("user" if j % 2 == 0 else "assistant"), (split, j)
-            if v4:
-                # §3.1/§3.4: balasan bot lama di history harus sudah jadi penanda/
-                # potongan _history_view — menu literal & blok harga DILARANG.
-                for m in body[:-1]:
-                    if m["role"] == "assistant":
-                        c = m["content"]
-                        assert "Berikut menu" not in c and "Harga:" not in c, (split, c[:60])
+            # Konteks FAQ hanya di pesan TERAKHIR pelanggan, dengan bentuk runtime.
+            for m in body[:-2]:
+                if m["role"] == "user":
+                    assert not m["content"].startswith(FAQ_USER_PREFIX), (split, m["content"][:60])
+            last_user = body[-2]["content"]
+            if row["meta"]["konteks"]:
+                assert last_user.startswith(FAQ_USER_PREFIX), (split, last_user[:60])
+                assert "\n\nPertanyaan pelanggan: " in last_user
+                assert last_user.count(DOC_SEP) == row["meta"]["konteks"] - 1, (split, last_user[:200])
+            else:
+                assert not last_user.startswith(FAQ_USER_PREFIX)
+            # §3.1/§3.4: balasan bot lama di history harus sudah jadi penanda/
+            # potongan _history_view — menu literal & blok harga DILARANG.
+            for m in body[:-1]:
+                if m["role"] == "assistant":
+                    c = m["content"]
+                    assert "Berikut menu" not in c and "Harga:" not in c, (split, c[:60])
             final = body[-1]
             if "tool_calls" in final:
                 assert final["content"] == "" and len(final["tool_calls"]) == 1
@@ -1661,33 +1814,36 @@ def self_check(rows_by_split):
                 # §3.3: argumen produk = kata-kata yang benar-benar ada di
                 # percakapan (teks user atau penanda history) — bukan karangan.
                 # Baris noised dikecualikan (typo mengubah substring).
-                if v4 and not row["meta"]["noised"]:
+                if not row["meta"]["noised"]:
                     hay = " ".join(m["content"] for m in body
                                    if isinstance(m.get("content"), str)).lower()
                     prods = ([it["product"] for it in obj.get("items", [])]
                              + ([obj["product"]] if "product" in obj else [])
                              + list(obj.get("products", [])))
-                    for s in prods:
-                        assert s.lower() in hay, (split, s, hay[:120])
+                    for p in prods:
+                        assert p.lower() in hay, (split, p, hay[:120])
             else:
-                assert final["content"] and not PRICE_RE.search(final["content"]), final
-                if v4:
-                    text = final["content"]
-                    # v5 incident D: the model told a customer "aku bisa panggil
-                    # get_menu" and invented "cupcakes klasik". Neither may ever
-                    # be modelled: a reply the customer reads must name no tool
-                    # and no catalogue product (product facts come from tools,
-                    # verbatim, and never from the model's own sentence).
-                    low = text.lower()
-                    for tname in TOOL_NAMES:
-                        assert tname not in low, (split, tname, text[:80])
-                    for base in MENU:
-                        assert base.lower() not in low, (split, base, text[:80])
+                text = final["content"]
+                assert text and not PRICE_RE.search(text), final
+                # v5 incident D: balasan yang dibaca pelanggan tidak boleh
+                # menyebut nama tool ataupun produk katalog (fakta produk selalu
+                # dari tool). v7: juga tidak boleh ada penanda aneh seperti
+                # "#FAQ_Toko" yang muncul di QA 19 Sep.
+                low = text.lower()
+                for tname in TOOL_NAMES:
+                    assert tname not in low, (split, tname, text[:80])
+                for base in MENU:
+                    assert base.lower() not in low, (split, base, text[:80])
+                assert "#" not in text and "KONTEKS" not in text, (split, text[:80])
             # holdout products/flavour never outside test (args + meta scope)
             if split != "test" and "tool_calls" in final:
                 args_l = final["tool_calls"][0]["function"]["arguments"].lower()
                 for hp in HOLDOUT_PRODUCTS | {HOLDOUT_FLAVOUR}:
                     assert hp.lower() not in args_l, (split, args_l)
+            # topik FAQ khusus test tidak pernah bocor ke train/validation
+            if split != "test":
+                for t in TOPIK_TEST.values():
+                    assert t["doc_q"] not in last_user, (split, t["doc_q"])
 
 
 def _check_v5_coverage(rows_by_split):
@@ -1760,36 +1916,23 @@ def stats(rows_by_split):
                       "tool_rows": tool_rows, "non_tool_rows": len(rows) - tool_rows,
                       "en_share": round(langs["en"] / len(rows), 3),
                       "multi_turn_share": round(mt / len(rows), 3),
-                      "noised_share": round(noised / len(rows), 3)}
+                      "noised_share": round(noised / len(rows), 3),
+                      "konteks_share": round(sum(1 for r in rows if r["meta"]["konteks"])
+                                             / len(rows), 3)}
     return out
 
 
 def main():
     g = Gen()
-
-    # Split test DIBEKUKAN dari v1: hasil eval (baseline & v1) hanya sebanding
-    # kalau test byte-identik. RNG generator tunggal, jadi test TIDAK digenerate
-    # ulang; teks user-nya diregistrasikan agar train/val v2 tetap bebas overlap.
-    frozen_path = OUT_DIR / "test.jsonl"
-    frozen_test = None
-    if frozen_path.exists():
-        frozen_test = [json.loads(l) for l in frozen_path.open(encoding="utf-8")]
-        for row in frozen_test:
-            for m in row["messages"]:
-                if m["role"] == "user":
-                    g._register_text(m["content"], "test")
-        print(f"test split dibekukan dari file lama ({len(frozen_test)} rows)")
-
-    order = list(TRAIN_COUNTS)
-    split_plan = [("train", TRAIN_COUNTS), ("validation", VAL_COUNTS)]
-    if frozen_test is None:
-        split_plan.append(("test", TEST_COUNTS))
-    for split, counts in split_plan:
-        for rtype in order:
+    # v7: split test tidak lagi dibekukan — digenerate dari potongan template,
+    # produk, dan topik FAQ khusus test (lihat pool_split, HOLDOUT_*, TOPIK_TEST).
+    # Test dibuat PERTAMA supaya teksnya terdaftar dan train/val tidak bisa
+    # menghasilkan kalimat yang sama.
+    for split, counts in (("test", TEST_COUNTS), ("train", TRAIN_COUNTS),
+                          ("validation", VAL_COUNTS)):
+        for rtype in counts:
             g.gen_type(rtype, split, counts[rtype])
         g.rng.shuffle(g.rows[split])
-    if frozen_test is not None:
-        g.rows["test"] = frozen_test
 
     self_check(g.rows)
     _check_v5_history(g.rows)
@@ -1797,9 +1940,6 @@ def main():
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for split, rows in g.rows.items():
-        if split == "test" and frozen_test is not None:
-            print(f"skip tulis {OUT_DIR / 'test.jsonl'} (dibekukan, {len(rows)} rows)")
-            continue
         path = OUT_DIR / f"{split}.jsonl"
         with path.open("w", encoding="utf-8") as f:
             for row in rows:

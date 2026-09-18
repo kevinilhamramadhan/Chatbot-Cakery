@@ -1,15 +1,22 @@
-"""Audit dataset v6: apakah isinya benar, dan benar-benar aturan v6?
+"""Audit dataset v7: isinya benar, dan bentuknya sama dengan yang dilihat model di produksi?
 
-22 pemeriksaan: jumlah baris, tipe baru, daftar tool = 13 tool runtime, paritas
-system prompt, keabsahan argumen, aturan perilaku v6 (keluhan tidak dieskalasi,
-tidak ada tawaran admin di luar kue custom), rujukan produk pada jawaban jumlah
-polos, kebocoran test ke train, dan teks kembar.
+Diperiksa terhadap KODE RUNTIME (bukan terhadap generator), supaya generator yang
+salah tidak bisa lolos dengan meluluskan dirinya sendiri:
+
+- paritas: system block, letak konteks FAQ (pesan pelanggan, dirakit
+  agent.pertanyaan_dengan_konteks), daftar tool per peran, argumen vs skema tool
+- cakupan: setiap tool runtime punya contoh latihan (v6 tidak punya satu pun untuk
+  check_cart dan resend_payment_method — tidak ada pemeriksaan yang menangkapnya)
+- aturan perilaku v6 dan v7
+- FAQ sebagai keterampilan: jawaban N1 berasal dari konteks, ada fakta tandingan,
+  dan topik khusus test tidak bocor
+- kebocoran test dan teks kembar
 
 Pakai:
     chatbot-service/.venv/bin/python finetune/audit_dataset.py finetune/data
 
 Jalankan juga terhadap salinan yang DIUNDUH DARI HF sebelum training — itu yang
-benar-benar dibaca notebook, dan berkas lokal bisa saja lebih baru:
+benar-benar dibaca notebook:
 
     for s in train validation test; do
       curl -sSL "https://huggingface.co/datasets/LasagnaS/toti-cakery-toolcall/resolve/main/data/$s.jsonl" -o "/tmp/hf/$s.jsonl"
@@ -17,23 +24,32 @@ benar-benar dibaca notebook, dan berkas lokal bisa saja lebih baru:
     chatbot-service/.venv/bin/python finetune/audit_dataset.py /tmp/hf
 """
 import json
+import re
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
-sys.path.insert(0, "/home/kevin/clcode/chatbot/chatbot-service")
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "chatbot-service"))
+sys.path.insert(0, str(ROOT / "finetune"))
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
+
+from app.llm.agent import pertanyaan_dengan_konteks  # noqa: E402
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER  # noqa: E402
 from app.tools.registry import ALL_TOOLS, TOOLS_UMUM  # noqa: E402
+import faq_topik  # noqa: E402
 
 DIR = Path(sys.argv[1])
-TOOL_RUNTIME = {t["function"]["name"] for t in (convert_to_openai_tool(t) for t in ALL_TOOLS)}
+SKEMA = {t["function"]["name"]: t["function"]["parameters"]
+         for t in (convert_to_openai_tool(t) for t in ALL_TOOLS)}
+TOOL_RUNTIME = set(SKEMA)
 TOOL_UMUM = {t["function"]["name"] for t in (convert_to_openai_tool(t) for t in TOOLS_UMUM)}
+SYSTEM_BLOCK = SYSTEM_PROMPT + "\n\n" + TOOL_REMINDER
+PREFIX = pertanyaan_dengan_konteks("", "X").split("X")[0]
+PENANYA = pertanyaan_dengan_konteks("Y", "X").split("X", 1)[1].rsplit("Y", 1)[0]
 
-rows = {}
-for split in ("train", "validation", "test"):
-    rows[split] = [json.loads(l) for l in (DIR / f"{split}.jsonl").open(encoding="utf-8")]
-
+rows = {s: [json.loads(line) for line in (DIR / f"{s}.jsonl").open(encoding="utf-8")]
+        for s in ("train", "validation", "test")}
 gagal, catat = [], []
 
 
@@ -41,138 +57,168 @@ def cek(nama, ok, detail=""):
     (catat if ok else gagal).append(f"{'OK  ' if ok else 'GAGAL'} | {nama}{' — ' + detail if detail else ''}")
 
 
-# 1. Jumlah baris
-for split, harap in (("train", 1255), ("validation", 129), ("test", 100)):
-    cek(f"jumlah baris {split} = {harap}", len(rows[split]) == harap, str(len(rows[split])))
-
-# 2. Tipe baru ada, dan tipe lama menyusut sesuai rencana
-tipe = {s: Counter(r["meta"]["type"] for r in rows[s]) for s in rows}
-cek("T14 (keluhan) ada di train", tipe["train"]["T14"] == 45, str(tipe["train"]["T14"]))
-cek("N9 (minta orang/nego) ada di train", tipe["train"]["N9"] == 35, str(tipe["train"]["N9"]))
-cek("T7 (jawaban jumlah) naik jadi 55", tipe["train"]["T7"] == 55, str(tipe["train"]["T7"]))
-cek("T10 (eskalasi) turun jadi 30", tipe["train"]["T10"] == 30, str(tipe["train"]["T10"]))
-cek("test memuat 2 baris keluhan", tipe["test"]["T14"] == 2, str(tipe["test"]["T14"]))
-cek("test memuat 1 baris nego (tanpa tool)", tipe["test"]["N9"] == 1, str(tipe["test"]["N9"]))
-
-# 3. Daftar tool yang ditawarkan = persis yang dilihat peran itu waktu disajikan.
-# Pelanggan tidak pernah dikirimi definisi tool Owner (registry.tools_untuk),
-# jadi barisnya pun tidak boleh memuatnya.
-for split in rows:
-    salah = []
-    for i, r in enumerate(rows[split]):
-        punya = {t["function"]["name"] for t in json.loads(r["tools_json"])}
-        harap = TOOL_RUNTIME if r["meta"]["type"] in ("T11", "T12") else TOOL_UMUM
-        if punya != harap:
-            salah.append(i)
-    cek(f"tools_json {split} sesuai peran (11 umum / 13 Owner)", not salah,
-        f"{len(salah)} baris menyimpang")
-
-# 4. System prompt = prompt runtime + reminder (paritas latih-sajian)
-harap_sys = SYSTEM_PROMPT + "\n\n" + TOOL_REMINDER
-for split in ("train", "validation"):
-    beda = [i for i, r in enumerate(rows[split])
-            if not r["messages"][0]["content"].startswith(SYSTEM_PROMPT.rstrip()[:200])
-            or not r["messages"][0]["content"].rstrip().endswith(TOOL_REMINDER.rstrip()[-80:])]
-    cek(f"system block {split} = prompt runtime + reminder", not beda, f"{len(beda)} baris beda")
-
-# 5. Argumen tool sah menurut skema runtime
 def args_of(r):
     a = r["messages"][-1]
     return [(c["function"]["name"], json.loads(c["function"]["arguments"]))
             for c in (a.get("tool_calls") or [])]
 
 
-tak_dikenal = [(s, n) for s in rows for r in rows[s] for n, _ in args_of(r) if n not in TOOL_RUNTIME]
-cek("semua nama tool dikenal runtime", not tak_dikenal, str(tak_dikenal[:3]))
+def user_akhir(r):
+    return r["messages"][-2]["content"]
 
+
+def pisah_konteks(teks):
+    """(dokumen[], pertanyaan mentah) dari pesan pelanggan terakhir."""
+    if not teks.startswith(PREFIX):
+        return [], teks
+    isi, tanya = teks[len(PREFIX):].split(PENANYA, 1)
+    return isi.split("\n\n---\n\n"), tanya
+
+
+# 1. Ukuran
+for split, minimal in (("train", 1400), ("validation", 140), ("test", 140)):
+    cek(f"jumlah baris {split} >= {minimal}", len(rows[split]) >= minimal, str(len(rows[split])))
+
+# 2. Paritas system block — identik di SEMUA baris, semua split
+for split in rows:
+    beda = sum(1 for r in rows[split] if r["messages"][0]["content"] != SYSTEM_BLOCK)
+    cek(f"system block {split} identik dengan runtime", not beda, f"{beda} baris beda")
+
+# 3. Konteks FAQ: hanya di pesan pelanggan TERAKHIR, bentuknya = fungsi runtime
+for split in rows:
+    salah = 0
+    for r in rows[split]:
+        for m in r["messages"][1:-2]:
+            if m["role"] == "user" and m["content"].startswith(PREFIX):
+                salah += 1
+        docs, tanya = pisah_konteks(user_akhir(r))
+        if docs and pertanyaan_dengan_konteks(tanya, "\n\n---\n\n".join(docs)) != user_akhir(r):
+            salah += 1
+    cek(f"konteks FAQ {split} dirakit persis seperti runtime", not salah, f"{salah} baris")
+bagian = sum(1 for r in rows["train"] if user_akhir(r).startswith(PREFIX)) / len(rows["train"])
+cek("porsi baris ber-konteks train mendekati runtime (±65%)", 0.55 <= bagian <= 0.75, f"{bagian:.2f}")
+tool_berkonteks = sum(1 for r in rows["train"] if args_of(r) and user_akhir(r).startswith(PREFIX))
+cek("baris tool juga membawa konteks (model belajar mengabaikan konteks tak relevan)",
+    tool_berkonteks >= 300, str(tool_berkonteks))
+
+# 4. Daftar tool per peran
+for split in rows:
+    salah = [i for i, r in enumerate(rows[split])
+             if {t["function"]["name"] for t in json.loads(r["tools_json"])}
+             != (TOOL_RUNTIME if r["meta"]["type"] in ("T11", "T12") else TOOL_UMUM)]
+    cek(f"tools_json {split} sesuai peran (11 umum / 13 Owner)", not salah, f"{len(salah)} baris")
+
+# 5. Argumen sesuai SKEMA runtime (nama, parameter wajib, tidak ada parameter karangan)
 rusak = []
 for s in rows:
     for r in rows[s]:
         for n, a in args_of(r):
-            if n == "add_to_cart" and not (set(a) == {"items"} and a["items"]):
-                rusak.append((s, n, a))
-            if n == "send_apology" and not (set(a) == {"keluhan"} and a["keluhan"]):
-                rusak.append((s, n, a))
-            if n == "escalate_to_admin" and not (set(a) == {"reason"} and a["reason"]):
-                rusak.append((s, n, a))
-cek("argumen add_to_cart/send_apology/escalate valid", not rusak, str(rusak[:2]))
-
-# 6. ATURAN v6: keluhan tidak boleh escalate; eskalasi hanya kue custom
-KATA_KELUHAN = ("basi", "kecewa", "salah kirim", "telat", "komplain", "penyok",
-                "rusak", "ga sesuai", "tidak sesuai", "stale", "damaged", "late",
-                "wrong cake", "disappointed")
-salah_escalate = []
-for s in rows:
-    for r in rows[s]:
-        for n, a in args_of(r):
-            if n != "escalate_to_admin":
+            sk = SKEMA.get(n)
+            if sk is None:
+                rusak.append((s, n, "tool tak dikenal"))
                 continue
-            teks = [m for m in r["messages"] if m["role"] == "user"][-1]["content"].lower()
-            if any(k in teks for k in KATA_KELUHAN) or "ngomong sama admin" in teks \
-               or "speak to a human" in teks or "nego" in teks:
-                salah_escalate.append((s, teks[:60]))
-cek("tidak ada keluhan/minta-orang/nego yang di-escalate", not salah_escalate,
-    str(salah_escalate[:3]))
+            props = sk.get("properties", {})
+            if set(a) - set(props):
+                rusak.append((s, n, f"parameter karangan {set(a) - set(props)}"))
+            if set(sk.get("required") or []) - set(a):
+                rusak.append((s, n, "parameter wajib hilang"))
+            if n == "add_to_cart":
+                if not (set(a) == {"items"} and a["items"]
+                        and all(set(i) == {"product", "qty"} and isinstance(i["qty"], int)
+                                and i["qty"] >= 1 for i in a["items"])):
+                    rusak.append((s, n, a))
+cek("argumen tool cocok dengan skema runtime", not rusak, str(rusak[:3]))
 
-# 7. Balasan teks tidak menawarkan sambungan ke admin
-TAWARAN = ("sambungkan ke admin", "kusambungkan", "teruskan ke admin", "hubungkan kamu ke admin",
-           "dibantu admin", "connect you with our admin", "forward you to our admin",
-           "forward it to our admin", "nanti kuteruskan")
-# Kue custom memang dieskalasi, jadi kalimat "pesanan custom diteruskan ke admin"
-# di jawaban FAQ bukan pelanggaran — yang dilarang adalah menawarkan admin untuk
-# pertanyaan biasa.
-nawarkan = []
+# 6. Cakupan: setiap tool punya contoh di train
+jumlah_tool = Counter(n for r in rows["train"] for n, _ in args_of(r))
+kurang = {t: jumlah_tool[t] for t in TOOL_RUNTIME if jumlah_tool[t] < 25}
+cek("setiap tool runtime punya >= 25 contoh di train", not kurang, str(kurang))
+kurang_test = [t for t in TOOL_RUNTIME if not any(n == t for r in rows["test"] for n, _ in args_of(r))]
+cek("setiap tool runtime diuji di split test", not kurang_test, str(kurang_test))
+
+# 7. Aturan v6: keluhan -> send_apology, eskalasi hanya kue custom, tanpa tawaran admin
+KELUHAN = ("basi", "kecewa", "salah kirim", "telat", "komplain", "penyok", "rusak",
+           "ga sesuai", "tidak sesuai", "stale", "damaged", "late", "wrong cake", "disappointed")
+salah_esc = [(s, pisah_konteks(user_akhir(r))[1][:50]) for s in rows for r in rows[s]
+             for n, _ in args_of(r) if n == "escalate_to_admin"
+             and any(k in pisah_konteks(user_akhir(r))[1].lower() for k in KELUHAN)]
+cek("tidak ada keluhan yang di-escalate", not salah_esc, str(salah_esc[:3]))
+t14 = [s for s in rows for r in rows[s] if r["meta"]["type"] == "T14"
+       and (not args_of(r) or args_of(r)[0][0] != "send_apology")]
+cek("semua keluhan (T14) memanggil send_apology", not t14, str(t14[:2]))
+TAWARAN = ("sambungkan ke admin", "kusambungkan", "teruskan ke admin", "dibantu admin",
+           "connect you with our admin", "forward you to our admin", "nanti kuteruskan")
+nawar = [(s, r["meta"]["type"]) for s in rows for r in rows[s] if not args_of(r)
+         and "custom" not in r["messages"][-1]["content"].lower()
+         and any(k in r["messages"][-1]["content"].lower() for k in TAWARAN)]
+cek("tidak ada tawaran admin di luar kue custom", not nawar, str(nawar[:3]))
+
+
+# 8. Aturan v7 (QA E2E 18-19 Sep)
+def langgar(t):
+    return [(s, args_of(r)) for s in rows for r in rows[s]
+            if r["meta"]["type"] == t and args_of(r)]
+
+
+cek("N10: bukan Owner minta laporan -> teks, tanpa tool", not langgar("N10"))
+cek("N10: baris itu tidak ditawari tool Owner",
+    all("financial_report" not in r["tools_json"] for s in rows for r in rows[s]
+        if r["meta"]["type"] == "N10"))
+cek("N12: pesan pendek ('order', 'oke gas', '1') tidak memanggil tool", not langgar("N12"))
+cek("N11: ganti cara bayar -> teks, tanpa tool", not langgar("N11"))
+t15 = [r for r in rows["train"] if r["meta"]["type"] == "T15"]
+t16 = [r for r in rows["train"] if r["meta"]["type"] == "T16"]
+cek("T15 -> check_cart", bool(t15) and all(args_of(r)[0][0] == "check_cart" for r in t15),
+    str(len(t15)))
+cek("T16 -> resend_payment_method, selalu sesudah tagihan terbit",
+    bool(t16) and all(args_of(r)[0][0] == "resend_payment_method"
+                      and any("Pesanan kamu sudah dibuat" in (m.get("content") or "")
+                              for m in r["messages"][1:-1]) for r in t16), str(len(t16)))
+aneh = [(s, r["messages"][-1]["content"][:50]) for s in rows for r in rows[s] if not args_of(r)
+        and re.search(r"#|KONTEKS|Pertanyaan pelanggan", r["messages"][-1]["content"])]
+cek("balasan bebas penanda internal (#FAQ_…, KONTEKS)", not aneh, str(aneh[:2]))
+
+# 9. FAQ sebagai keterampilan membaca konteks
+STOP = set("yang di ke dari dan atau untuk pada dengan kami kamu kak ya adalah bisa juga "
+           "itu ini nya akan sudah belum tidak ga hanya saja kalau jika hari jam".split())
+tak_berdasar = []
 for s in rows:
     for r in rows[s]:
-        a = r["messages"][-1]
-        if a.get("tool_calls"):
+        if r["meta"]["type"] != "N1" or r["meta"]["lang"] != "id":
             continue
-        low = (a.get("content") or "").lower()
-        if "custom" in low:
-            continue
-        if any(k in low for k in TAWARAN):
-            nawarkan.append((s, r["meta"]["type"], low[:70]))
-cek("tidak ada balasan yang menawarkan admin di luar kue custom", not nawarkan,
-    str(nawarkan[:3]))
+        docs, _ = pisah_konteks(user_akhir(r))
+        kata = [w for w in re.findall(r"[a-z0-9.\-]+", r["messages"][-1]["content"].lower())
+                if w not in STOP and len(w) > 2]
+        teks = " ".join(docs).lower()
+        if not docs or sum(w in teks for w in kata) / max(1, len(kata)) < 0.6:
+            tak_berdasar.append((s, r["messages"][-1]["content"][:50]))
+cek("jawaban N1 bersumber dari konteks di baris itu", not tak_berdasar, str(tak_berdasar[:2]))
+jawab_per_tanya = defaultdict(set)
+for r in rows["train"]:
+    if r["meta"]["type"] == "N1":
+        for d in pisah_konteks(user_akhir(r))[0]:
+            q, a = d.split("\nA: ", 1)
+            jawab_per_tanya[q].add(a)
+satu_versi = [q for q, a in jawab_per_tanya.items() if len(a) < 2]
+cek("fakta tandingan: tiap dokumen FAQ muncul dengan >= 2 versi jawaban", not satu_versi,
+    str(satu_versi[:2]))
+tanpa_jawab = [r for r in rows["train"] if r["meta"]["type"] == "N1x"]
+cek("ada baris konteks-tanpa-jawaban (N1x) -> jujur belum tahu", len(tanpa_jawab) >= 30,
+    str(len(tanpa_jawab)))
+doc_test = [t["doc_q"] for t in faq_topik.TOPIK_TEST.values()]
+bocor_topik = [s for s in ("train", "validation") for r in rows[s]
+               if any(q in user_akhir(r) for q in doc_test)]
+cek("topik FAQ khusus test tidak muncul di train/val", not bocor_topik, str(len(bocor_topik)))
+cek("split test memakai topik FAQ khusus test",
+    any(q in user_akhir(r) for r in rows["test"] for q in doc_test))
 
-# 8. Baris jawaban jumlah polos: riwayat memuat penanda detail, produknya sama
-polos = []
-for r in rows["train"] + rows["validation"]:
-    if r["meta"]["type"] != "T7":
-        continue
-    u = [m for m in r["messages"] if m["role"] == "user"][-1]["content"]
-    if len(u.split()) > 3:
-        continue
-    hist = [m["content"] for m in r["messages"][:-1] if m["role"] == "assistant"]
-    penanda = [h for h in hist if h.startswith("[Aku sudah menampilkan detail")]
-    calls = args_of(r)
-    ok = bool(penanda) and calls and calls[0][0] == "add_to_cart"
-    if ok:
-        produk_hist = penanda[-1].split("detail ")[1].split(" + ")[0]
-        ok = calls[0][1]["items"][0]["product"] == produk_hist
-    if not ok:
-        polos.append((u, penanda[-1][:60] if penanda else "(tanpa penanda)", calls[:1]))
-cek("jawaban jumlah polos merujuk produk di penanda riwayat", not polos, str(polos[:2]))
-
-# 9. Keluhan selalu memakai send_apology
-keluhan_salah = [(s, args_of(r)) for s in rows for r in rows[s]
-                 if r["meta"]["type"] == "T14"
-                 and (not args_of(r) or args_of(r)[0][0] != "send_apology")]
-cek("semua baris T14 memanggil send_apology", not keluhan_salah, str(keluhan_salah[:2]))
-
-# 10. Tidak ada kebocoran: teks user test tidak muncul di train/val
-teks_test = {tuple(m["content"] for m in r["messages"] if m["role"] == "user")[-1]
-             for r in rows["test"]}
+# 10. Kebocoran & duplikat
+tanya_test = {pisah_konteks(user_akhir(r))[1] for r in rows["test"]}
 bocor = [t for s in ("train", "validation") for r in rows[s]
-         for t in [[m["content"] for m in r["messages"] if m["role"] == "user"][-1]]
-         if t in teks_test]
-cek("tidak ada teks user test yang bocor ke train/val", not bocor, str(bocor[:2]))
-
-# 11. Duplikat teks user di dalam train
-dup = [t for t, n in Counter(
-    [m["content"] for r in rows["train"] for m in r["messages"][-2:] if m["role"] == "user"]
-).items() if n > 1]
-cek("tidak ada teks user kembar di train", not dup, f"{len(dup)} kembar")
+         for t in [pisah_konteks(user_akhir(r))[1]] if t in tanya_test]
+cek("tidak ada teks pelanggan test yang bocor ke train/val", not bocor, str(bocor[:2]))
+dup = [t for t, n in Counter(pisah_konteks(user_akhir(r))[1] for r in rows["train"]).items() if n > 1]
+cek("tidak ada teks pelanggan kembar di train", not dup, f"{len(dup)} kembar")
 
 print("\n".join(catat))
 print()

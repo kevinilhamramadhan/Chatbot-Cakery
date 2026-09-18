@@ -1,11 +1,12 @@
 """Shared helpers for the eval harnesses (v4): runtime-parity message assembly
 and policy-neutral argument scoring.
 
-Assembly (PROMPT_FINETUNE_V4 §5): replay must mirror app/llm/agent.py run_agent()
-exactly — CURRENT production SYSTEM_PROMPT (+ the row's FAQ block), history
-passed through _history_view() (markers/truncation), TOOL_REMINDER as a second
-SystemMessage, then the question. Ollama collates the system messages into one
-top block, so the model sees byte-identical prompts to production.
+Assembly: replay must mirror app/llm/agent.py run_agent() exactly — production
+SYSTEM_PROMPT, history passed through _history_view() (markers/truncation),
+TOOL_REMINDER as a second SystemMessage, then the question. v7 rows store the
+final question exactly as the runtime builds it (FAQ context included, via
+pertanyaan_dengan_konteks), so it is replayed verbatim. Ollama collates the
+system messages into one top block, so the model sees byte-identical prompts.
 
 Argument scoring: v4 trains VERBATIM customer words while the frozen test split
 stores canonical gold names. Both refer to the same product, so product fields
@@ -29,20 +30,13 @@ from app.llm.agent import _history_view  # noqa: E402
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER  # noqa: E402
 from app.tools.formatting import _tokens  # noqa: E402
 
-from generate_dataset import FAQ_HEADER, MENU  # noqa: E402  (single menu truth)
+from generate_dataset import MENU  # noqa: E402  (single menu truth)
 
 # ── Runtime-parity assembly ───────────────────────────────────────────────────
 
 def to_lc_messages(messages: list[dict]):
-    """messages = row["messages"][:-1] (everything up to the gold turn).
-
-    Works for old-format rows (frozen test: stale system prompt, literal
-    history) and v4-format rows (already marker-ized) alike.
-    """
-    sysc = messages[0]["content"]
-    faq = sysc[sysc.index(FAQ_HEADER):] if FAQ_HEADER in sysc else ""
-    faq = faq.removesuffix("\n\n" + TOOL_REMINDER)  # v4 rows carry the reminder
-    out = [SystemMessage(content=SYSTEM_PROMPT + faq)]
+    """messages = row["messages"][:-1] (everything up to the gold turn)."""
+    out = [SystemMessage(content=SYSTEM_PROMPT)]
     body = messages[1:]
     hist, question = body[:-1], body[-1]
     assert question["role"] == "user", "last pre-gold message must be the user question"
@@ -179,14 +173,14 @@ if __name__ == "__main__":  # self-check
     assert not args_match("add_to_cart",
                           {"items": [{"product": "cupcake isi 9 rasa coklat", "qty": 1}]},
                           {"items": [{"product": "Cupcakes isi 9 Cokelat", "qty": 2}]})
-    assert args_match("get_menu", {"kategori": "cake"}, {"kategori": "cake"})
-    assert not args_match("get_menu", {}, {"kategori": "cake"})
-    msgs = [{"role": "system", "content": "OLD SYSTEM" + FAQ_HEADER + "Q: a\nA: b"},
+    assert args_match("get_menu", {}, {})
+    tanya = "KONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\nQ: a\nA: b\n\nPertanyaan pelanggan: ada menu apa aja?"
+    msgs = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + TOOL_REMINDER},
             {"role": "user", "content": "menu dong"},
             {"role": "assistant", "content": "Berikut menu Toti Cakery:\n• X — Rp10.000"},
-            {"role": "user", "content": "ada menu apa aja?"}]
+            {"role": "user", "content": tanya}]
     lc = to_lc_messages(msgs)
-    assert lc[0].content.startswith(SYSTEM_PROMPT) and lc[0].content.endswith("Q: a\nA: b")
+    assert lc[0].content == SYSTEM_PROMPT
     assert lc[2].content == "[Aku sudah menampilkan daftar menu via tool get_menu]"
-    assert lc[-2].content == TOOL_REMINDER and lc[-1].content == "ada menu apa aja?"
+    assert lc[-2].content == TOOL_REMINDER and lc[-1].content == tanya
     print("eval_common self-check OK")

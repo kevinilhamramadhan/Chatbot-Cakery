@@ -1,0 +1,85 @@
+{
+ "sumber": "faq_items aktif di Postgres VM, diambil 19 Sep 2026",
+ "baris": [
+  {
+   "id": 2,
+   "pertanyaan": "Berapa lama daya tahan kue Toti Cakery?",
+   "jawaban": "Kue kami tahan 3-4 hari di suhu ruang, dan hingga 10-14 hari jika disimpan di lemari es atau chiller dalam wadah tertutup rapat. Kue paling enak dinikmati di hari yang sama. Hindari menyimpan terlalu lama di suhu ruang, terutama untuk kue yang memakai krim segar."
+  },
+  {
+   "id": 4,
+   "pertanyaan": "Bagaimana metode pengiriman di Toti Cakery? Apakah bisa kirim ke luar kota?",
+   "jawaban": "Toti Cakery menyediakan dua metode: ambil sendiri (pickup) di outlet, atau pengiriman (delivery) untuk area dalam kota secara instan/sameday. Untuk delivery, kurirnya dipesan sendiri oleh pelanggan lewat ojek online seperti GoSend atau GrabExpress dari alamat toko kami — saat pesanan siap, kami kirimkan nama toko dan alamat lengkapnya supaya mudah dipakai memesan kurir. Untuk luar kota, saat ini belum kami layani."
+  },
+  {
+   "id": 5,
+   "pertanyaan": "Jam berapa Toti Cakery buka?",
+   "jawaban": "Toti Cakery buka setiap hari Senin sampai Sabtu pukul 09.00 - 19.00 WIB. Hari Minggu kami libur. Untuk pesanan dalam jumlah besar, disarankan memesan minimal H-2."
+  },
+  {
+   "id": 6,
+   "pertanyaan": "Apakah Toti Cakery menerima pesanan kue custom?",
+   "jawaban": "Ya, kami menerima pesanan kue custom seperti kue ulang tahun dengan desain khusus, tulisan, dan tema tertentu. Karena kue custom butuh diskusi detail, pesanan custom akan kami teruskan ke admin kami. Silakan sampaikan kebutuhanmu, nanti admin yang akan membantu lebih lanjut."
+  },
+  {
+   "id": 7,
+   "pertanyaan": "Metode pembayaran apa saja yang tersedia?",
+   "jawaban": "Pembayaran dilakukan secara non-tunai melalui QRIS atau transfer Virtual Account (VA) bank BCA, keduanya otomatis lewat Midtrans. Setelah kamu konfirmasi pesanan, kami kirimkan QR code atau nomor VA beserta nominal dan batas waktunya. Tersedia opsi bayar penuh atau DP 50%. Pesanan diproses setelah pembayaran kami terima."
+  },
+  {
+   "id": 8,
+   "pertanyaan": "Bagaimana cara memesan lewat WhatsApp?",
+   "jawaban": "Cukup sebutkan nama kue dan jumlahnya, misalnya \"aku mau 2 brownies fudgy almond\". Nanti kami tampilkan ringkasan pesanan beserta totalnya. Kalau sudah pas, ketik \"sudah sesuai\", lalu kami minta nama dan alamatmu, menanyakan mau diambil sendiri atau dikirim, dan terakhir memilih cara bayarnya. Kalau ingin melihat daftar kue lebih dulu, ketik \"menu\"."
+  },
+  {
+   "id": 9,
+   "pertanyaan": "Berapa lama batas waktu pembayaran setelah pesanan dibuat?",
+   "jawaban": "Batas waktunya 30 menit sejak tagihan terbit. Lewat dari itu, pesanan dibatalkan otomatis oleh sistem dan kamu akan kami kabari lewat chat ini. Tidak masalah, kamu bisa memesan ulang kapan saja."
+  },
+  {
+   "id": 10,
+   "pertanyaan": "Bagaimana cara mengecek status pesanan saya?",
+   "jawaban": "Ketik \"status pesanan\" di chat ini, nanti kami tampilkan nomor invoice, status pembayaran, dan totalnya. Kalau pembayaranmu sudah masuk, sistem mendeteksinya otomatis dan kami kabari tanpa perlu kamu kirimkan bukti transfer."
+  },
+  {
+   "id": 11,
+   "pertanyaan": "Bagaimana kalau saya ingin membatalkan pesanan?",
+   "jawaban": "Ketik \"batal\" di chat ini. Pesanan yang belum dibayar bisa dibatalkan kapan saja. Untuk pesanan yang sudah dibayar dan sudah masuk proses produksi, sampaikan di chat ini supaya bisa kami teruskan ke admin."
+  },
+  {
+   "id": 12,
+   "pertanyaan": "Kode QR atau nomor VA saya hilang, bisa dikirim ulang?",
+   "jawaban": "Bisa. Ketik \"kirim ulang kode pembayaran\" di chat ini, nanti kami kirimkan lagi kode QR atau nomor VA untuk tagihan yang masih berjalan, beserta nominal yang harus dibayar."
+  },
+  {
+   "id": 13,
+   "pertanyaan": "Bisa pesan lagi padahal pesanan sebelumnya belum dibayar?",
+   "jawaban": "Belum bisa. Satu pelanggan hanya bisa punya satu pesanan aktif dalam satu waktu, supaya tidak tertukar. Selesaikan dulu pembayaran yang sedang berjalan, atau ketik \"batal\" untuk membatalkannya, baru kita buat pesanan baru."
+  },
+  {
+   "id": 14,
+   "pertanyaan": "Apakah bisa melihat foto kuenya dulu?",
+   "jawaban": "Bisa. Sebutkan nama kuenya, misalnya \"brownies fudgy almond itu seperti apa?\", nanti kami kirimkan fotonya beserta deskripsi dan harganya."
+  },
+  {
+   "id": 15,
+   "pertanyaan": "Apakah saya sedang chat dengan bot atau manusia?",
+   "jawaban": "Kamu sedang chat dengan asisten virtual Toti Cakery. Kalau ada hal yang lebih enak dibicarakan langsung dengan orang, sampaikan saja di chat ini — nanti kami sambungkan ke admin, dan admin akan membalasmu lewat chat yang sama."
+  },
+  {
+   "id": 16,
+   "pertanyaan": "Apakah bisa memesan lewat website, bukan lewat WhatsApp?",
+   "jawaban": "Bisa. Pemesanan juga tersedia lewat website Toti Cakery, dan status pesanannya tetap bisa kamu tanyakan lewat chat ini."
+  },
+  {
+   "id": 17,
+   "pertanyaan": "Apa itu DP 50% dan bagaimana sisanya dibayar?",
+   "jawaban": "DP 50% berarti kamu membayar separuh dari total pesanan lebih dulu supaya pesanan bisa kami proses, dan sisanya dilunasi kemudian. Saat memilih cara bayar, ketik \"DP\" untuk memilih opsi ini, atau \"penuh\" kalau ingin melunasi sekaligus."
+  },
+  {
+   "id": 18,
+   "pertanyaan": "Apakah kue Toti Cakery halal?",
+   "jawaban": "Ya, semua produk Toti Cakery dibuat dari bahan-bahan halal."
+  }
+ ]
+}

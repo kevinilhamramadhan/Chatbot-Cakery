@@ -14,7 +14,7 @@ tags:
   - chatbot
 pretty_name: Toti Cakery WhatsApp Chatbot — Tool-Calling SFT
 size_categories:
-  - n<1K
+  - 1K<n<10K
 configs:
   - config_name: default
     data_files:
@@ -26,94 +26,79 @@ configs:
         path: data/test.jsonl
 ---
 
-# Toti Cakery — Tool-Calling Fine-Tuning Dataset (Qwen3, v4)
+# Toti Cakery — Tool-Calling Fine-Tuning Dataset (Qwen3, v7)
 
-Synthetic bilingual (Indonesian ~79% / English ~21%) SFT dataset for a WhatsApp
-cake-shop chatbot with **9 LangChain tools**. Goal: sharpen tool-calling
-accuracy on a small model **without degrading conversational ability**
-(~63% tool-call rows : ~37% conversation/refusal/clarification rows).
+Synthetic bilingual (Indonesian ~78% / English ~22%) SFT dataset for the Toti
+Cakery WhatsApp chatbot: **13 LangChain tools** (11 for customers, +2 owner-only
+reports) and grounded answers from **RAG FAQ context**. Rows are built from the
+live runtime code (`SYSTEM_PROMPT`, `TOOL_REMINDER`, tool schemas via
+`convert_to_openai_tool`, `_history_view`, `pertanyaan_dengan_konteks`), so the
+training prompt is byte-identical to what the model receives in production.
 
-Built for the production system it serves — the system prompt, tool schemas
-(generated from the live code via `convert_to_openai_tool`), and single-pass
-serving contract are **bit-identical to runtime** (Ollama + `ChatOllama.bind_tools`).
+## What v7 changes (QA end-to-end, 18–19 Sep 2026)
 
-**v4 (2026-07-16)** closes four failure modes observed in live WhatsApp testing
-of the v3 model (menu hallucinated from memorized training prices, detail
-questions mis-routed to `get_menu`, history mimicry instead of tool calls,
-guessed product variants):
-
-1. **No menu/price/product content in any TRAINED assistant answer.** Data
-   questions end at the tool call — there is nothing to memorize.
-2. **History mirrors production exactly**: past bot replies enter the context
-   through the runtime's `_history_view()` — menu/detail replies become compact
-   markers (`[Aku sudah menampilkan daftar menu via tool get_menu]`), long text
-   is truncated. Many rows carry such "contaminated" marker history and the
-   assistant must STILL call the tool.
-3. **Tool arguments are the customer's words verbatim** ("beli 4 cupcake" →
-   `{"product": "cupcake", "qty": 4}`). The code-side resolver decides or asks;
-   the model never invents a variant name.
-4. **The runtime routing reminder is baked into the end of the system content**
-   (joined with "\n\n"), exactly how Ollama collates the runtime's second
-   SystemMessage into the top system block.
+1. **FAQ context where production puts it.** The runtime prepends retrieved FAQ
+   to the customer's message (`KONTEKS FAQ … Pertanyaan pelanggan: …`) on ~65%
+   of turns. v6 had it on 7% of rows and inside the system block. v7: 66% of
+   rows, tool rows included (the model learns to ignore irrelevant context).
+2. **FAQ as a reading skill, not memory.** FAQ documents are rendered from fact
+   slots (opening hours, payment deadline, deposit %, …), so the same question
+   has different correct answers on different rows — only reading the context
+   gets it right. Rows with context that does NOT contain the answer teach
+   "I don't have that info yet". Two FAQ topics exist only in `test`. When the
+   shop edits its FAQ, the model follows the new text.
+3. **Every tool is trained.** `check_cart` and `resend_payment_method` had zero
+   rows up to v6. v7 adds them (T15/T16) plus near-negatives seen in QA
+   (non-owner asking for reports, changing payment method after the invoice,
+   short messages like "order"/"oke gas"/"1", English meta questions).
+4. **Tool schemas match runtime:** `get_menu` takes no arguments (v6 still
+   trained a `kategori` argument).
+5. **Test split regenerated** from held-out templates, products and FAQ topics
+   (no longer frozen since v1); all 13 tools are tested.
 
 ## Row format
 
 ```json
 {"messages": [
-   {"role": "system", "content": "<production system prompt>[ + KONTEKS FAQ block] + \n\n + <TOOL_REMINDER>"},
+   {"role": "system", "content": "<SYSTEM_PROMPT>\n\n<TOOL_REMINDER>"},
    {"role": "user", "content": "menu dong"},
    {"role": "assistant", "content": "[Aku sudah menampilkan daftar menu via tool get_menu]"},
-   {"role": "user", "content": "beli 4 cupcake"},
-   {"role": "assistant", "content": "",
-    "tool_calls": [{"type": "function", "function": {
-       "name": "add_to_cart",
-       "arguments": "{\"items\":[{\"product\":\"cupcake\",\"qty\":4}]}"}}]}
+   {"role": "user", "content": "KONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\nQ: …\nA: …\n\nPertanyaan pelanggan: lapis legit premium 1"},
+   {"role": "assistant", "content": "", "tool_calls": [{"type": "function", "function": {
+       "name": "add_to_cart", "arguments": "{\"items\":[{\"product\":\"lapis legit premium\",\"qty\":1}]}"}}]}
  ],
- "tools_json": "<the 9 tool JSON schemas, serialized>",
- "meta": {"type": "T5", "lang": "id", "multi_turn": true, "noised": false}}
+ "tools_json": "<11 customer tools, or 13 for owner-report rows>",
+ "meta": {"type": "T5", "lang": "id", "multi_turn": true, "noised": false, "konteks": 1}}
 ```
 
-Key properties:
-
 - **Single-pass tool calling**: rows end at the assistant `tool_calls` turn
-  (production returns tool outputs verbatim; there is no second LLM pass, so
-  there are no `tool` role turns to learn).
-- `arguments` is a **JSON string** (parse it before `apply_chat_template` — see
-  the Colab cell below). `tools_json` is a string for Arrow-schema stability.
-- **Train on the FINAL assistant turn only.** History assistant turns (markers,
-  chat small talk, cart summaries) are context, not targets — unmask only the
-  last assistant segment. Training every assistant turn is how v3 learned to
-  hallucinate menus (`train_on_responses_only` alone unmasks all of them).
-- Non-tool rows teach the decision boundary: grounded FAQ answers, greeting
-  small talk, out-of-scope refusals, truly-unresolvable ambiguity → clarifying
-  question ("mau pesan kue" with no product word; "yang kedua" after a marker
-  history where the list is no longer visible), and adversarial near-negatives
-  ("cara batalin gimana?" must NOT call `cancel_order`).
+  (production returns tool output verbatim; no second LLM pass).
+- `arguments` is a JSON string — parse it before `apply_chat_template`.
+- Tool arguments are the customer's words verbatim; the code-side resolver
+  decides or asks.
+- **Train on the FINAL assistant turn only** (history assistant turns are context).
 
 ## Splits
 
 | Split | Rows | Purpose |
 |---|---|---|
-| `train` | 1005 | weight updates |
-| `validation` | 102 | same distribution as train (iid) — pass as `eval_dataset` to monitor val-loss / early stopping |
-| `test` | 100 | **held-out & FROZEN since v1**: ~15% of phrasing templates, 2 products (`Cake 22cm`, `Giant Cookies 15cm`), 1 flavour (`Matcha`), and 2 FAQ docs appear ONLY here. Used by the functional eval harness, never during training. Note: test rows still store the v1 message format — the eval harness reassembles them runtime-style at replay |
+| `train` | 1540 | weight updates |
+| `validation` | 156 | same distribution as train — `eval_dataset` for val-loss / early stopping |
+| `test` | 160 | held-out templates (last ~15% of every pool), 2 products (`Cake 22cm`, `Giant Cookies 15cm`), 1 flavour (`Matcha`), 2 FAQ topics — evaluation only |
 
-Composition (train, **v4**): tool rows 630 (T1 menu 70, T2 kategori 30, T3
-detail 90, T4 compare 40, T5 single order 140 — incl. ~25% generic verbatim
-orders, T6 multi-item 35, T7 follow-up 25, T8 status 50, T9 cancel 30, T10
-escalate 60, T11/T12 owner reports 30+30); non-tool 375 (N1 FAQ-grounded 90,
-N2 no-info 25, N3 greetings 50, N4 out-of-scope 60, N5 clarify 70, N6
-adversarial 80). Validation keeps the same proportions. Zero verbatim (even
-punctuation-normalized) **final user-message** overlap across splits.
+Types (train): tool rows T1–T16 (menu, detail, compare, order, multi-item,
+follow-up quantity, order status, cancel, custom-cake escalation, owner
+reports, payment claim, complaint, **cart**, **resend payment**); non-tool rows
+N1 (FAQ from context, 150), **N1x** (context without the answer, 40), N2–N13
+(no-info, greetings, out-of-scope, clarifying questions, adversarial, prompt
+injection, short hails, human/negotiation, **non-owner reports**, **payment
+change**, **short ambiguous messages**, **language**). Exact counts in
+`data/stats.json`.
 
-**v4 (2026-07-16)**: marker history + verbatim args + reminder-in-system (the
-four rules above); detail T3 70→90, single order T5 90→140 (absorbs the former
-under-specified-order clarify cases — the resolver asks now), clarify N5
-110→70, follow-up T7 35→25. **v3 (2026-07-06)**: T5 60→90, owner reports T11
-12→30 & T12 13→30. **v2 (2026-07-05)**: clarify N5 50→110, adversarial N6
-45→80, escalate T10 35→60 (v1 models were trigger-happy on ambiguous requests —
-fixed: false_tool 0.20→0.025). The `test` split is byte-identical to v1 across
-all versions, so every eval stays comparable.
+`finetune/audit_dataset.py` runs 34 checks against the RUNTIME code (system
+block, FAQ placement, tool list per role, argument schemas, every tool covered,
+behaviour rules, grounded FAQ answers, counterfactual facts, leakage). v7 passes
+all; the v6 dataset fails 16 of them.
 
 ## Using with the Unsloth Colab (Qwen3)
 
@@ -150,25 +135,12 @@ Training notes:
 
 ## After training: export + measure
 
-1. Export GGUF from Unsloth (`q4_k_m`, quantized from the f16 source), create
-   the Ollama model with the **same chat template as the base model** (a
-   mismatched template is the #1 cause of "worse after export"), e.g.
-   `ollama create toti-qwen-1.7b-v4 -f Modelfile.qwen3-1.7b-v4`.
-2. Run the functional eval harness (BFCL-style) on the held-out test split
-   against the REAL serving path, plus the regression scenario suite:
-
-```bash
-python finetune/eval_tool_calling.py --model toti-qwen-1.7b-v4
-python finetune/scenario_suite.py    --model toti-qwen-1.7b-v4   # + regresi R1-R6
-```
-
-Metrics reported: function-selection accuracy, parameter match (product
-references are compared by resolution, so verbatim v4 output and canonical
-gold both count), invalid-call rate, irrelevance detection, false-tool-call
-rate — per category and aggregate, plus a regression pass/fail gate for the
-live incidents (incl. marker-contaminated history). Compare against the
-same-harness baseline; that comparison (not training loss) is the verdict.
-Then point the chatbot's `.env` `LLM_MODEL` at the new model.
+The Colab notebook `finetune/finetune_toti_qwen3.ipynb` measures the base model
+and the fine-tuned model on `test` under identical conditions (production
+prompt, sampling 0.7/0.8, 192-token cap = production `num_predict`), prints the
+before/after comparison table, and uploads it with the GGUF to the model repo
+(`perbandingan_v7.md` / `.json`, also embedded in the model card). The final
+verdict is the end-to-end QA on the deployed stack.
 
 ## Provenance
 
@@ -176,4 +148,4 @@ Generated deterministically (seed 42) by `finetune/generate_dataset.py` in the
 project repo — templates + slot-filling over the real shop menu; no LLM was
 used to synthesize rows. Independently audited (structure, §-rules, behavior,
 statistics, leakage) before every release. v4 rules distilled from live
-WhatsApp failure analysis (`finetune/PROMPT_FINETUNE_V4.md` §2–§3).
+WhatsApp failure analysis (`finetune/PROMPT_FINETUNE_V4.md` … `PROMPT_FINETUNE_V7.md`).
