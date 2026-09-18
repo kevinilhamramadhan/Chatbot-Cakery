@@ -495,12 +495,6 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "another message in a moment \u2014 if it keeps happening, reach us "
              "through our store number from your saved contacts."),
     },
-    "balasan_lambat": {
-        ID: ("Maaf kak, balasanku lagi lebih lambat dari biasanya 🙏 Boleh kirim ulang "
-             "pesannya sebentar lagi? Kalau mau lihat daftar kue, ketik *menu*."),
-        EN: ("Sorry, I'm replying more slowly than usual right now 🙏 Could you send your "
-             "message again in a moment? Type *menu* to see our cakes."),
-    },
     "di_luar_cakupan": {
         ID: ("Maaf, aku hanya bisa membantu seputar {toko} ya — menu, pemesanan, "
              "pembayaran, pengiriman, dan info toko. Ada yang bisa kubantu soal itu? 😊"),
