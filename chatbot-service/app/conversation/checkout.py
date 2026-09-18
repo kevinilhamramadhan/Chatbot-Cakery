@@ -13,7 +13,7 @@ import httpx
 
 from app.backend_client import api as backend
 from app.backend_client import products as products_api
-from app.conversation import store
+from app.conversation import bahasa, store
 from app.conversation.states import State
 from app.core.config import settings
 from app.tools.formatting import rupiah
@@ -46,7 +46,7 @@ def _alasan_backend(exc: httpx.HTTPStatusError) -> str:
     return detail if 0 < len(detail) <= 200 else ""
 
 
-async def reprice_cart(cart: list[dict]) -> tuple[list[dict], list[str]]:
+async def reprice_cart(cart: list[dict], lang: str | None = None) -> tuple[list[dict], list[str]]:
     """Refresh every line against the live backend price just before charging.
 
     Prices are snapshotted at add_to_cart time and a draft cart can sit in the
@@ -59,18 +59,16 @@ async def reprice_cart(cart: list[dict]) -> tuple[list[dict], list[str]]:
     for item in cart:
         p = await products_api.get_product(int(item["product_id"]))
         if p is None or not p.get("is_available", True):
-            notes.append(f"{item['nama']} sudah tidak tersedia dan aku keluarkan dari pesanan")
+            notes.append(bahasa.teks("item_dikeluarkan", lang, nama=item["nama"]))
             continue
         harga = p.get("harga_jual")
         if harga is None:
-            notes.append(f"{item['nama']} sudah tidak tersedia dan aku keluarkan dari pesanan")
+            notes.append(bahasa.teks("item_dikeluarkan", lang, nama=item["nama"]))
             continue
         harga = float(harga)
         if harga != float(item["harga"]):
-            notes.append(
-                f"harga {item['nama']} berubah dari {rupiah(item['harga'])} "
-                f"jadi {rupiah(harga)}"
-            )
+            notes.append(bahasa.teks("harga_berubah", lang, nama=item["nama"],
+                                     lama=rupiah(item["harga"]), baru=rupiah(harga)))
         fresh.append({**item, "harga": harga})
     return fresh, notes
 
@@ -78,32 +76,27 @@ async def reprice_cart(cart: list[dict]) -> tuple[list[dict], list[str]]:
 async def finalize_order(wa_number: str) -> str:
     cart = await store.get_cart(wa_number)
     cust = await store.get_customer(wa_number)
+    lang = await store.get_lang(wa_number)
     if not cart:
         await store.set_state(wa_number, State.IDLE)
-        return "Keranjangmu kosong. Mau lihat menu dulu?"
+        return bahasa.teks("keranjang_kosong", lang)
 
     # Never charge from a stale snapshot: re-read prices/availability now.
     try:
-        cart, price_notes = await reprice_cart(cart)
+        cart, price_notes = await reprice_cart(cart, lang)
     except Exception as exc:  # noqa: BLE001 - backend hiccup: don't guess a price
         logger.exception("reprice failed: %s", exc)
-        return "Maaf, harga tidak bisa dipastikan sekarang. Coba ulangi sebentar lagi ya 🙏"
+        return bahasa.teks("harga_belum_pasti", lang)
     if not cart:
         await store.set_cart(wa_number, [])
         await store.set_state(wa_number, State.IDLE)
-        return (
-            "Maaf, semua item di pesananmu sudah tidak tersedia. "
-            "Mau lihat menu terbaru?"
-        )
+        return bahasa.teks("semua_item_habis", lang)
     if price_notes:
         # Changed total = a new offer; the customer must re-confirm it.
         await store.set_cart(wa_number, cart)
         await store.set_state(wa_number, State.AWAITING_CART_CONFIRMATION)
-        return (
-            "Sebelum lanjut, ada update: " + "; ".join(price_notes) + ".\n\n"
-            + f"Total sekarang: {rupiah(cart_total(cart))}\n"
-            "Ketik *sudah sesuai* kalau setuju, atau *batal* untuk membatalkan ya 🙏"
-        )
+        return bahasa.teks("ada_update_harga", lang, catatan="; ".join(price_notes),
+                           total=rupiah(cart_total(cart)))
 
     total = cart_total(cart)
     payment_type = cust.get("payment_type", "full")
@@ -135,11 +128,7 @@ async def finalize_order(wa_number: str) -> str:
         if exc.response is not None and exc.response.status_code == 409:
             logger.info("backend refused a second order for this customer")
             await store.set_state(wa_number, State.IDLE)
-            return (
-                "Kamu masih punya tagihan yang belum dibayar. Selesaikan dulu "
-                "pembayaran itu, atau ketik *batal* untuk membatalkannya, baru "
-                "kita buat pesanan baru ya 🙏"
-            )
+            return bahasa.teks("masih_ada_tagihan", lang)
         # 400 juga jawaban bisnis, bukan gangguan sesaat: backend menolak
         # pesanan yang stok bahannya tidak cukup. Menyuruh "coba ulangi sebentar
         # lagi" mengirim pelanggan ke pengulangan yang tidak akan pernah
@@ -149,16 +138,13 @@ async def finalize_order(wa_number: str) -> str:
             logger.info("backend refused the order: %s", alasan)
             await store.set_state(wa_number, State.IDLE)
             await store.set_cart(wa_number, [])
-            return (
-                f"Maaf, {alasan[0].lower()}{alasan[1:]}\n\n"
-                "Pesanannya belum jadi dibuat ya. Mau pilih kue yang lain? "
-                "Ketik *menu* untuk lihat daftarnya 🙏"
-            )
+            return bahasa.teks("pesanan_ditolak", lang,
+                               alasan=f"{alasan[0].lower()}{alasan[1:]}")
         logger.exception("create order failed: %s", exc)
-        return "Maaf, pembuatan pesanan gagal. Coba ulangi sebentar lagi ya 🙏"
+        return bahasa.teks("pesanan_gagal", lang)
     except Exception as exc:  # noqa: BLE001
         logger.exception("create order failed: %s", exc)
-        return "Maaf, pembuatan pesanan gagal. Coba ulangi sebentar lagi ya 🙏"
+        return bahasa.teks("pesanan_gagal", lang)
 
     order_id = order["order_id"]
     nomor_invoice = order.get("nomor_invoice") or f"#{order_id}"
@@ -176,7 +162,7 @@ async def finalize_order(wa_number: str) -> str:
             await backend.cancel_order(order_id)
         except Exception:  # noqa: BLE001
             logger.warning("could not cancel orphaned order %s", order_id)
-        return "Maaf, pembuatan tagihan gagal. Coba ulangi sebentar lagi ya 🙏"
+        return bahasa.teks("tagihan_gagal", lang)
 
     # An invoice nobody can pay is worse than an honest failure. The backend
     # answers 201 even when Midtrans rejects the charge (a second charge on the
@@ -192,13 +178,9 @@ async def finalize_order(wa_number: str) -> str:
             await backend.cancel_order(order_id)
         except Exception:  # noqa: BLE001
             logger.warning("could not cancel unpayable order %s", order_id)
-        return (
-            "Maaf, tagihannya gagal diterbitkan jadi pesanannya belum kubuat. "
-            "Coba ulangi sebentar lagi ya 🙏"
-        )
+        return bahasa.teks("tagihan_tanpa_cara_bayar", lang)
 
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.payment_timeout_minutes)
-    paid_label = "Pembayaran penuh" if payment_type == "full" else "DP 50%"
     pay_line = f"💳 Virtual Account: *{va}*" if va else f"Scan QRIS: {qris}"
 
     # 3) Track locally (order_ref = backend order_id) for timeout/poll/guard.
@@ -221,11 +203,13 @@ async def finalize_order(wa_number: str) -> str:
     await store.set_cart(wa_number, [])
     await store.set_state(wa_number, State.AWAITING_PAYMENT)
 
-    return (
-        f"Pesanan kamu sudah dibuat ✅\nNo. Invoice: *{nomor_invoice}*\n\n"
-        f"{paid_label} yang harus dibayar: *{rupiah(amount_due)}*"
-        + (f" (total pesanan {rupiah(total)})" if payment_type == "dp" else "")
-        + f"\n\n{pay_line}\n\n"
-        f"Batas waktu pembayaran: {settings.payment_timeout_minutes} menit. "
-        "Pembayaran akan terdeteksi otomatis. Ketik *batal* kalau ingin membatalkan."
+    return bahasa.teks(
+        "pesanan_dibuat", lang,
+        invoice=nomor_invoice,
+        label=bahasa.teks("label_bayar_penuh" if payment_type == "full" else "label_dp", lang),
+        jumlah=rupiah(amount_due),
+        total=(bahasa.teks("total_pesanan_dp", lang, total=rupiah(total))
+               if payment_type == "dp" else ""),
+        cara_bayar=pay_line,
+        menit=settings.payment_timeout_minutes,
     )

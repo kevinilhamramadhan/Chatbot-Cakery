@@ -637,3 +637,21 @@ async def test_c4_ready_push_matches_by_order_ref(patch_externals):
     await store.update_pending_order((await store.get_active_pending(WA)).id, status="paid")
     assert await background.notify_ready(777) is True          # backend order id
     assert any("siap" in t.lower() for _, t in patch_externals["sent"])
+
+
+async def test_pesan_pesanan_dibuat_ikut_bahasa_pelanggan(patch_externals):
+    """QA 18 Sep: pelanggan yang bercakap Inggris dari awal menerima
+    "Pesanan kamu sudah dibuat" — checkout.py belum memakai bahasa.py."""
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    await store.set_lang(WA, "en")
+
+    for msg in ("yes", "Rudi Hartono", "Jl. Test 1", "pickup", "yes", "full"):
+        await handle_message(WA, msg)
+    r = (await handle_message(WA, "va")).text or ""
+
+    assert "Your order has been created" in r, r
+    assert "Full payment due" in r, r
+    assert "8808123456789012" in r, r
+    for kata in ("Pesanan kamu", "yang harus dibayar", "Batas waktu", "Ketik"):
+        assert kata not in r, r
+

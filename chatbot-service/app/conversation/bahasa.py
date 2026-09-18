@@ -155,6 +155,71 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "• Type *VA* — bank transfer via Virtual Account\n"
              "• Type *QRIS* — scan a QR code (GoPay/OVO/Dana/mobile banking)"),
     },
+    # ── Membuat pesanan & tagihan (checkout.finalize_order) ─────────────────
+    "pesanan_dibuat": {
+        ID: ("Pesanan kamu sudah dibuat ✅\nNo. Invoice: *{invoice}*\n\n"
+             "{label} yang harus dibayar: *{jumlah}*{total}\n\n{cara_bayar}\n\n"
+             "Batas waktu pembayaran: {menit} menit. Pembayaran akan terdeteksi "
+             "otomatis. Ketik *batal* kalau ingin membatalkan."),
+        EN: ("Your order has been created ✅\nInvoice no.: *{invoice}*\n\n"
+             "{label} due: *{jumlah}*{total}\n\n{cara_bayar}\n\n"
+             "Payment deadline: {menit} minutes. Your payment is detected "
+             "automatically. Type *cancel* if you'd like to cancel."),
+    },
+    "label_bayar_penuh": {ID: "Pembayaran penuh", EN: "Full payment"},
+    "label_dp": {ID: "DP 50%", EN: "50% deposit"},
+    "total_pesanan_dp": {ID: " (total pesanan {total})", EN: " (order total {total})"},
+    "harga_belum_pasti": {
+        ID: "Maaf, harga tidak bisa dipastikan sekarang. Coba ulangi sebentar lagi ya 🙏",
+        EN: "Sorry, I can't confirm the prices right now. Please try again in a moment 🙏",
+    },
+    "semua_item_habis": {
+        ID: "Maaf, semua item di pesananmu sudah tidak tersedia. Mau lihat menu terbaru?",
+        EN: ("Sorry, none of the items in your order are available anymore. "
+             "Want to see the latest menu?"),
+    },
+    "item_dikeluarkan": {
+        ID: "{nama} sudah tidak tersedia dan aku keluarkan dari pesanan",
+        EN: "{nama} is no longer available, so I've removed it from your order",
+    },
+    "harga_berubah": {
+        ID: "harga {nama} berubah dari {lama} jadi {baru}",
+        EN: "the price of {nama} changed from {lama} to {baru}",
+    },
+    "ada_update_harga": {
+        ID: ("Sebelum lanjut, ada update: {catatan}.\n\nTotal sekarang: {total}\n"
+             "Ketik *sudah sesuai* kalau setuju, atau *batal* untuk membatalkan ya 🙏"),
+        EN: ("Before we continue, there's an update: {catatan}.\n\nNew total: {total}\n"
+             "Type *confirm* if that's fine, or *cancel* to cancel 🙏"),
+    },
+    "masih_ada_tagihan": {
+        ID: ("Kamu masih punya tagihan yang belum dibayar. Selesaikan dulu "
+             "pembayaran itu, atau ketik *batal* untuk membatalkannya, baru "
+             "kita buat pesanan baru ya 🙏"),
+        EN: ("You still have an unpaid invoice. Please finish that payment first, "
+             "or type *cancel* to cancel it, and then we can make a new order 🙏"),
+    },
+    # {alasan} datang dari backend dan selalu berbahasa Indonesia.
+    "pesanan_ditolak": {
+        ID: ("Maaf, {alasan}\n\nPesanannya belum jadi dibuat ya. Mau pilih kue yang "
+             "lain? Ketik *menu* untuk lihat daftarnya 🙏"),
+        EN: ("Sorry, we couldn't create your order: {alasan}\n\nWould you like to "
+             "pick a different cake? Type *menu* to see the list 🙏"),
+    },
+    "pesanan_gagal": {
+        ID: "Maaf, pembuatan pesanan gagal. Coba ulangi sebentar lagi ya 🙏",
+        EN: "Sorry, I couldn't create your order. Please try again in a moment 🙏",
+    },
+    "tagihan_gagal": {
+        ID: "Maaf, pembuatan tagihan gagal. Coba ulangi sebentar lagi ya 🙏",
+        EN: "Sorry, I couldn't create the invoice. Please try again in a moment 🙏",
+    },
+    "tagihan_tanpa_cara_bayar": {
+        ID: ("Maaf, tagihannya gagal diterbitkan jadi pesanannya belum kubuat. "
+             "Coba ulangi sebentar lagi ya 🙏"),
+        EN: ("Sorry, the invoice couldn't be issued, so I haven't created the order. "
+             "Please try again in a moment 🙏"),
+    },
     # ── Konfirmasi keranjang & pembatalan ────────────────────────────────────
     "pesanan_dibatalkan": {
         ID: "Oke, pesanan dibatalkan ya. Ada lagi yang bisa kubantu? 😊",

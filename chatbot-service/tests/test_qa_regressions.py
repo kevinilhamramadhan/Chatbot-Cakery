@@ -1797,3 +1797,16 @@ async def test_keluhan_minta_maaf_lalu_menawarkan_admin(patch_externals):
     # Tawarannya tersimpan, jadi "ya" berikutnya benar-benar memulai takeover.
     sesi = await store.get_or_create_session(WA)
     assert sesi.pending_escalation and "Keluhan" in sesi.pending_escalation
+
+
+async def test_templat_checkout_lengkap_dua_bahasa():
+    from app.conversation import bahasa
+
+    isian = dict(invoice="INV-1", label="x", jumlah="Rp1", total="", cara_bayar="VA",
+                 menit=30, nama="Bolu", lama="Rp1", baru="Rp2", catatan="c", alasan="a")
+    for kunci in ("pesanan_dibuat", "harga_belum_pasti", "semua_item_habis",
+                  "item_dikeluarkan", "harga_berubah", "ada_update_harga",
+                  "masih_ada_tagihan", "pesanan_ditolak", "pesanan_gagal",
+                  "tagihan_gagal", "tagihan_tanpa_cara_bayar"):
+        idn, eng = bahasa.teks(kunci, bahasa.ID, **isian), bahasa.teks(kunci, bahasa.EN, **isian)
+        assert idn != eng and "{" not in idn + eng, kunci
