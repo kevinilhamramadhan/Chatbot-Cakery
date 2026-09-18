@@ -1,6 +1,6 @@
 """Tools: financial_report / business_analytics — Owner-only, REAL data.
 
-Both consume one backend endpoint: GET /reports/summary (X-Service-Key).
+Both consume one backend endpoint: GET /reports/financial-summary (X-Service-Key).
 Until the backend ships it, get_report_summary returns None and the tools say
 so honestly — no dummy numbers.
 Access is gated by role: the sender must be Owner (rbac level 1). The role
@@ -72,7 +72,8 @@ async def business_analytics() -> str:
     data = await _summary()
     if data is None:
         return _UNAVAILABLE
-    top = data.get("top_products") or []
+    # Backend tidak mengurutkan top_products; "terlaris" berarti jumlah terjual.
+    top = sorted(data.get("top_products") or [], key=lambda p: -(p.get("qty") or 0))
     lines = [f"📈 *Analitik Bisnis* ({_month_range()[0]} s/d {_month_range()[1]})"]
     if top:
         lines.append("Produk terlaris:")

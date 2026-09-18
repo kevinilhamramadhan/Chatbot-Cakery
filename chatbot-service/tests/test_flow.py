@@ -550,7 +550,8 @@ async def test_reports_owner_gating_and_real_data(patch_externals):
     async def summary(start, end):
         return {"revenue": 500000, "expenses": 200000, "order_count": 3,
                 "avg_order_value": 166667,
-                "top_products": [{"nama_produk": "Brownies Coklat", "qty": 4, "revenue": 200000}]}
+                "top_products": [{"nama_produk": "Cake 22cm", "qty": 1, "revenue": 300000},
+                                 {"nama_produk": "Brownies Coklat", "qty": 4, "revenue": 200000}]}
     patch_externals["monkeypatch"].setattr(
         patch_externals["backend"], "get_report_summary", summary)
 
@@ -562,6 +563,7 @@ async def test_reports_owner_gating_and_real_data(patch_externals):
     assert "Rp500.000" in fin and "Rp300.000" in fin     # revenue & profit
     ana = await business_analytics.ainvoke({})
     assert "Brownies Coklat" in ana and "Rp166.667" in ana
+    assert ana.index("Brownies Coklat") < ana.index("Cake 22cm"), ana  # urut jumlah terjual
 
 
 async def test_reports_unavailable_when_endpoint_missing(patch_externals):
