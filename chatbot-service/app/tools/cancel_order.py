@@ -6,21 +6,20 @@ import logging
 from langchain_core.tools import tool
 
 from app.backend_client import api as backend
-from app.conversation import store
+from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
-from app.conversation.states import State
+from app.conversation.states import State, text_is_cancel
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _jalur_tindak_lanjut() -> str:
+def _jalur_tindak_lanjut(lang: str) -> str:
     """Satu jalan yang benar-benar bisa ditempuh pelanggan, bukan 'hubungi admin'."""
     email = settings.store_support_email.strip()
     if email:
-        return (f"\n\nKirim nomor pesananmu ke {email} ya, nanti tim kami yang "
-                "menindaklanjuti 🙏")
-    return "\n\nSampaikan nomor pesananmu ke kontak resmi Toti Cakery ya 🙏"
+        return bahasa.teks("tindak_lanjut_email", lang, email=email)
+    return bahasa.teks("tindak_lanjut_umum", lang)
 
 
 @tool
@@ -32,14 +31,20 @@ async def cancel_order() -> str:
     dengan pertanyaan konfirmasi lebih dulu, karena pembatalannya sekalian
     dengan pengembalian dana.
     """
-    wa = get_turn_context().wa_number
+    ctx = get_turn_context()
+    wa = ctx.wa_number
+    lang = await store.get_lang(wa)
+    # Penjaga data: model pernah memanggil tool ini untuk pesan "order" saja.
+    # Membatalkan tanpa kata batal dari pelanggan terlalu mahal kalau salah.
+    if ctx.user_text and not text_is_cancel(ctx.user_text):
+        return bahasa.teks("bukan_niat_batal", lang)
     order = await store.get_active_pending(wa)
 
     if order is None:
         # Only a draft cart, not a finalized order.
         await store.set_cart(wa, [])
         await store.set_state(wa, State.IDLE)
-        return "Oke, draft pesanan dikosongkan. Ada lagi yang bisa kubantu?"
+        return bahasa.teks("draft_dikosongkan", lang)
 
     # SETIAP pembatalan pesanan ditanyakan dulu — bukan hanya yang sudah dibayar.
     # Pesanan sudah masuk ke backend dan ke Admin Site, jadi menghapusnya karena
@@ -50,20 +55,15 @@ async def cancel_order() -> str:
     if sudah_dibayar and not await _masih_boleh_refund(wa):
         # Kebijakan toko: begitu admin memindahkan pesanan ke "sedang diproses",
         # kuenya sudah dikerjakan dan pembatalan mandiri tidak berlaku lagi.
-        return _teks_sudah_dikerjakan()
+        return _teks_sudah_dikerjakan(lang)
 
     get_turn_context().next_state = State.AWAITING_CANCEL_CONFIRMATION
-    return konfirmasi_batal(order, sudah_dibayar)
+    return konfirmasi_batal(order, sudah_dibayar, lang)
 
 
-def _teks_sudah_dikerjakan() -> str:
-    email = settings.store_support_email.strip()
-    alamat = email or "kontak resmi Toti Cakery"
-    return (
-        "Pesanan ini sudah dalam tahap pengerjaan sehingga tidak bisa dibatalkan.\n"
-        f"Jika ada keluhan mohon kirim ke alamat email kami di {alamat}\n"
-        "Terima Kasih"
-    )
+def _teks_sudah_dikerjakan(lang: str) -> str:
+    alamat = settings.store_support_email.strip() or bahasa.teks("kontak_resmi", lang)
+    return bahasa.teks("sudah_dikerjakan", lang, alamat=alamat)
 
 
 async def _masih_boleh_refund(wa_number: str) -> bool:
@@ -99,23 +99,14 @@ def _bayar_pakai_va(order) -> bool:
     return str(cust.get("channel") or "") == "bank_transfer"
 
 
-def konfirmasi_batal(order, sudah_dibayar: bool) -> str:
+def konfirmasi_batal(order, sudah_dibayar: bool, lang: str | None = None) -> str:
     """Pertanyaan tertutup sebelum pesanan benar-benar dibatalkan."""
     label = order.nomor_invoice or f"#{order.order_ref}"
     if sudah_dibayar:
-        cara = ("Dananya dikembalikan tim kami lewat transfer, jadi butuh waktu "
-                "beberapa hari kerja." if _bayar_pakai_va(order) else
-                "Dananya kembali otomatis ke aplikasi yang kamu pakai buat bayar.")
-        return (
-            f"Pesanan *{label}* sudah dibayar, jadi pembatalannya sekalian dengan "
-            f"pengembalian dana. {cara}\n\n"
-            "Mau aku proses sekarang? Ketik *ya* untuk membatalkan dan mengembalikan "
-            "dananya, atau *tidak* kalau pesanannya diteruskan saja 🙏"
-        )
-    return (
-        f"Pesanan *{label}* mau dibatalkan ya?\n\n"
-        "Ketik *ya* untuk membatalkan, atau *tidak* kalau pesanannya diteruskan 🙏"
-    )
+        cara = bahasa.teks("cara_refund_transfer" if _bayar_pakai_va(order)
+                           else "cara_refund_otomatis", lang)
+        return bahasa.teks("konfirmasi_batal_berbayar", lang, label=label, cara=cara)
+    return bahasa.teks("konfirmasi_batal", lang, label=label)
 
 
 async def proses_pembatalan(wa_number: str) -> str:
@@ -126,10 +117,11 @@ async def proses_pembatalan(wa_number: str) -> str:
     endpoint refund. Selama keduanya menolak, pelanggan tidak dibiarkan buntu —
     dia diberi alamat email yang benar-benar ditangani orang.
     """
+    lang = await store.get_lang(wa_number)
     order = await store.get_active_pending(wa_number)
     if order is None:
         await store.set_state(wa_number, State.IDLE)
-        return "Tidak ada pesanan aktif yang perlu dibatalkan 😊"
+        return bahasa.teks("tidak_ada_yang_dibatalkan", lang)
 
     sudah_dibayar = order.status in ("paid", "ready")
     berhasil = False
@@ -148,10 +140,7 @@ async def proses_pembatalan(wa_number: str) -> str:
 
     if not berhasil:
         logger.info("refund pelanggan belum bisa otomatis untuk %s", order.order_ref)
-        return (
-            "Pembatalannya perlu diproses tim kami dulu supaya dananya bisa "
-            "dikembalikan." + _jalur_tindak_lanjut()
-        )
+        return bahasa.teks("batal_perlu_tim", lang) + _jalur_tindak_lanjut(lang)
 
     # Refund manual belum selesai saat ini juga — uangnya baru berpindah setelah
     # admin mentransfernya. Barisnya disimpan dengan status menunggu supaya
@@ -164,18 +153,10 @@ async def proses_pembatalan(wa_number: str) -> str:
     await store.set_state(wa_number, State.IDLE)
     if not sudah_dibayar:
         # Belum ada uang yang masuk — jangan menjanjikan pengembalian dana.
-        return "Pesanan kamu sudah dibatalkan. Terima kasih 🙏"
+        return bahasa.teks("batal_belum_bayar", lang)
     if manual:
         email = settings.store_support_email.strip()
-        tutup = (f"Kalau dalam 3 hari kerja belum masuk, kabari kami di {email} ya 🙏"
-                 if email else "Kalau dalam 3 hari kerja belum masuk, kabari kami ya 🙏")
-        return (
-            "Pesanan kamu sudah dibatalkan ✅\n\n"
-            "Pengembalian dananya diproses tim kami lewat transfer, jadi mohon "
-            f"ditunggu beberapa hari kerja. {tutup}"
-        )
-    return (
-        "Pesanan kamu sudah dibatalkan dan pengembalian dananya diproses ✅\n\n"
-        "Dananya kembali otomatis ke aplikasi yang kamu pakai buat bayar, biasanya "
-        "dalam beberapa menit sampai beberapa jam ya 🙏"
-    )
+        tutup = (bahasa.teks("tutup_refund_email", lang, email=email) if email
+                 else bahasa.teks("tutup_refund_umum", lang))
+        return bahasa.teks("batal_refund_manual", lang, tutup=tutup)
+    return bahasa.teks("batal_refund_otomatis", lang)

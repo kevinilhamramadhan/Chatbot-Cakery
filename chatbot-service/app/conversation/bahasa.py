@@ -260,6 +260,96 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Oke, pesanannya tetap kami proses ya 😊",
         EN: "Alright, we'll keep processing your order 😊",
     },
+    # ── cancel_order & proses_pembatalan ─────────────────────────────────────
+    "draft_dikosongkan": {
+        ID: "Oke, draft pesanan dikosongkan. Ada lagi yang bisa kubantu?",
+        EN: "Alright, I've cleared your draft order. Anything else I can help with?",
+    },
+    "bukan_niat_batal": {
+        ID: ("Ada yang bisa kubantu? Ketik *menu* untuk lihat daftar kue, atau *batal* "
+             "kalau memang mau membatalkan pesanan 😊"),
+        EN: ("How can I help? Type *menu* to see our cakes, or *cancel* if you do want "
+             "to cancel your order 😊"),
+    },
+    "konfirmasi_batal": {
+        ID: ("Pesanan *{label}* mau dibatalkan ya?\n\n"
+             "Ketik *ya* untuk membatalkan, atau *tidak* kalau pesanannya diteruskan 🙏"),
+        EN: ("Do you want to cancel order *{label}*?\n\n"
+             "Type *yes* to cancel, or *no* to keep the order 🙏"),
+    },
+    "konfirmasi_batal_berbayar": {
+        ID: ("Pesanan *{label}* sudah dibayar, jadi pembatalannya sekalian dengan "
+             "pengembalian dana. {cara}\n\n"
+             "Mau aku proses sekarang? Ketik *ya* untuk membatalkan dan mengembalikan "
+             "dananya, atau *tidak* kalau pesanannya diteruskan saja 🙏"),
+        EN: ("Order *{label}* has already been paid, so cancelling it also means a "
+             "refund. {cara}\n\n"
+             "Shall I process it now? Type *yes* to cancel and get your money back, or "
+             "*no* to keep the order 🙏"),
+    },
+    "cara_refund_transfer": {
+        ID: ("Dananya dikembalikan tim kami lewat transfer, jadi butuh waktu "
+             "beberapa hari kerja."),
+        EN: "Our team returns the money by bank transfer, so it takes a few working days.",
+    },
+    "cara_refund_otomatis": {
+        ID: "Dananya kembali otomatis ke aplikasi yang kamu pakai buat bayar.",
+        EN: "The money goes back automatically to the app you paid with.",
+    },
+    "sudah_dikerjakan": {
+        ID: ("Pesanan ini sudah dalam tahap pengerjaan sehingga tidak bisa dibatalkan.\n"
+             "Jika ada keluhan mohon kirim ke alamat email kami di {alamat}\n"
+             "Terima Kasih"),
+        EN: ("This order is already being made, so it can no longer be cancelled.\n"
+             "If you have a complaint, please email us at {alamat}\n"
+             "Thank you"),
+    },
+    "kontak_resmi": {ID: "kontak resmi Toti Cakery", EN: "Toti Cakery's official contact"},
+    "tidak_ada_yang_dibatalkan": {
+        ID: "Tidak ada pesanan aktif yang perlu dibatalkan 😊",
+        EN: "There's no active order to cancel 😊",
+    },
+    "batal_perlu_tim": {
+        ID: "Pembatalannya perlu diproses tim kami dulu supaya dananya bisa dikembalikan.",
+        EN: "Our team needs to process this cancellation first so the money can be returned.",
+    },
+    "tindak_lanjut_email": {
+        ID: ("\n\nKirim nomor pesananmu ke {email} ya, nanti tim kami yang "
+             "menindaklanjuti 🙏"),
+        EN: "\n\nPlease send your order number to {email} and our team will follow up 🙏",
+    },
+    "tindak_lanjut_umum": {
+        ID: "\n\nSampaikan nomor pesananmu ke kontak resmi Toti Cakery ya 🙏",
+        EN: "\n\nPlease send your order number to Toti Cakery's official contact 🙏",
+    },
+    "batal_belum_bayar": {
+        ID: "Pesanan kamu sudah dibatalkan. Terima kasih 🙏",
+        EN: "Your order has been cancelled. Thank you 🙏",
+    },
+    "batal_refund_manual": {
+        ID: ("Pesanan kamu sudah dibatalkan ✅\n\n"
+             "Pengembalian dananya diproses tim kami lewat transfer, jadi mohon "
+             "ditunggu beberapa hari kerja. {tutup}"),
+        EN: ("Your order has been cancelled ✅\n\n"
+             "Our team is processing your refund by bank transfer, so please allow a "
+             "few working days. {tutup}"),
+    },
+    "tutup_refund_email": {
+        ID: "Kalau dalam 3 hari kerja belum masuk, kabari kami di {email} ya 🙏",
+        EN: "If it hasn't arrived within 3 working days, let us know at {email} 🙏",
+    },
+    "tutup_refund_umum": {
+        ID: "Kalau dalam 3 hari kerja belum masuk, kabari kami ya 🙏",
+        EN: "If it hasn't arrived within 3 working days, please let us know 🙏",
+    },
+    "batal_refund_otomatis": {
+        ID: ("Pesanan kamu sudah dibatalkan dan pengembalian dananya diproses ✅\n\n"
+             "Dananya kembali otomatis ke aplikasi yang kamu pakai buat bayar, biasanya "
+             "dalam beberapa menit sampai beberapa jam ya 🙏"),
+        EN: ("Your order has been cancelled and your refund is being processed ✅\n\n"
+             "The money goes back automatically to the app you paid with, usually "
+             "within a few minutes to a few hours 🙏"),
+    },
     # ── Eskalasi ke admin ────────────────────────────────────────────────────
     "tawaran_admin": {
         ID: ("Sepertinya ini lebih enak ditangani admin kami langsung. "

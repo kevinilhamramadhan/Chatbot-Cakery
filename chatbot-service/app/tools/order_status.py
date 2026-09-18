@@ -7,11 +7,22 @@ from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.tools.formatting import rupiah
 
-_ORDER = {"pending": "Menunggu pembayaran", "in_process": "Sedang diproses",
-          "ready": "Siap diambil/dikirim", "delivered": "Dikirim",
-          "picked_up": "Sudah diambil", "cancelled": "Dibatalkan",
-          "refunded": "Dibatalkan, dana sudah dikembalikan"}
-_INV = {"unpaid": "belum dibayar", "partial": "DP terbayar", "paid": "lunas", "refunded": "dikembalikan"}
+_ORDER = {
+    bahasa.ID: {"pending": "Menunggu pembayaran", "in_process": "Sedang diproses",
+                "ready": "Siap diambil/dikirim", "delivered": "Dikirim",
+                "picked_up": "Sudah diambil", "cancelled": "Dibatalkan",
+                "refunded": "Dibatalkan, dana sudah dikembalikan"},
+    bahasa.EN: {"pending": "Awaiting payment", "in_process": "Being prepared",
+                "ready": "Ready for pickup/delivery", "delivered": "Delivered",
+                "picked_up": "Picked up", "cancelled": "Cancelled",
+                "refunded": "Cancelled, money refunded"},
+}
+_INV = {
+    bahasa.ID: {"unpaid": "belum dibayar", "partial": "DP terbayar", "paid": "lunas",
+                "refunded": "dikembalikan"},
+    bahasa.EN: {"unpaid": "unpaid", "partial": "deposit paid", "paid": "paid in full",
+                "refunded": "refunded"},
+}
 
 
 @tool
@@ -30,8 +41,8 @@ async def get_order_status() -> str:
 
     inv = o.get("invoice") or {}
     nomor = inv.get("nomor_invoice") or f"#{o.get('id')}"
-    order_lbl = _ORDER.get(o.get("status"), o.get("status"))
-    inv_lbl = _INV.get(inv.get("status"), inv.get("status"))
+    order_lbl = _ORDER[bahasa.normalkan(lang)].get(o.get("status"), o.get("status"))
+    inv_lbl = _INV[bahasa.normalkan(lang)].get(inv.get("status"), inv.get("status"))
     items = o.get("items") or []
     return bahasa.teks("status_pesanan", lang, nomor=nomor, status=order_lbl,
                        bayar=inv_lbl, jumlah=len(items),

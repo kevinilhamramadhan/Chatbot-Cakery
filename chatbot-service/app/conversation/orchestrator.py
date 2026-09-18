@@ -358,13 +358,16 @@ async def _handle_cancel_confirmation(wa_number: str, text: str, lang: str) -> R
     """
     from app.tools.cancel_order import proses_pembatalan
 
-    if text_is_confirm(text) and not text_is_cancel(text) and not mentions_quantity(text):
-        return Reply(text=await proses_pembatalan(wa_number))
-
-    # "tidak", "gajadi", atau apa pun yang bukan persetujuan: pesanan diteruskan.
-    if text_is_cancel(text) or _menolak(text):
+    # "tidak", "gajadi", "jangan batal": pesanan diteruskan. Dicek lebih dulu
+    # supaya "ga jadi batal" tidak terbaca sebagai permintaan batal.
+    if _menolak(text):
         await store.set_state(wa_number, State.ORDER_ACTIVE)
         return Reply(text=bahasa.teks("batal_dibatalkan", lang))
+
+    # Pertanyaannya "jadi dibatalkan?", jadi "batal"/"cancel" di sini berarti ya.
+    # QA 18 Sep: "batal" dulu dibaca sebagai penolakan dan pesanannya diteruskan.
+    if (text_is_confirm(text) or text_is_cancel(text)) and not mentions_quantity(text):
+        return Reply(text=await proses_pembatalan(wa_number))
 
     # Pertanyaan lain dijawab model dulu, lalu pertanyaannya diulang.
     return await _answer_then_reask(
@@ -374,7 +377,7 @@ async def _handle_cancel_confirmation(wa_number: str, text: str, lang: str) -> R
 
 
 _KATA_TOLAK = {"tidak", "ga", "gak", "nggak", "engga", "enggak", "jangan", "lanjut",
-               "lanjutkan", "teruskan", "no"}
+               "lanjutkan", "teruskan", "gajadi", "no", "not", "dont", "don", "keep"}
 
 
 def _menolak(text: str) -> bool:

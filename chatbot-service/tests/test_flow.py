@@ -655,3 +655,70 @@ async def test_pesan_pesanan_dibuat_ikut_bahasa_pelanggan(patch_externals):
     for kata in ("Pesanan kamu", "yang harus dibayar", "Batas waktu", "Ketik"):
         assert kata not in r, r
 
+
+
+# ── QA 18 Sep: pembatalan & status dua bahasa ────────────────────────────────
+async def _seed_order_waiting_cancel_answer(lang="id"):
+    await store.create_pending_order(
+        wa_number=WA, order_ref="77", payment_type="full", total_amount=100, amount_due=100,
+        nomor_invoice="INV-77", items_json="[]", customer_json="{}",
+        delivery_method="pickup",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    await store.set_lang(WA, lang)
+    await store.set_state(WA, State.AWAITING_CANCEL_CONFIRMATION)
+
+
+async def test_kata_batal_di_konfirmasi_batal_berarti_ya(patch_externals):
+    """Ditanya "jadi dibatalkan?", pelanggan mengetik "batal" — dulu pesanannya
+    malah diteruskan."""
+    await _seed_order_waiting_cancel_answer()
+    r = (await handle_message(WA, "batal")).text
+    assert "sudah dibatalkan" in r, r
+    assert await store.get_active_pending(WA) is None
+
+
+async def test_ga_jadi_batal_tetap_meneruskan_pesanan(patch_externals):
+    await _seed_order_waiting_cancel_answer()
+    r = (await handle_message(WA, "ga jadi batal")).text
+    assert "tetap kami proses" in r, r
+    assert await store.get_active_pending(WA) is not None
+
+
+async def test_konfirmasi_dan_hasil_batal_bahasa_inggris(patch_externals):
+    from app.tools.cancel_order import cancel_order
+
+    await _seed_order_waiting_cancel_answer("en")
+    await store.set_state(WA, State.AWAITING_PAYMENT)
+    set_turn_context(TurnContext(wa_number=WA, user_text="cancel my order"))
+    tanya = await cancel_order.ainvoke({})
+    assert "Do you want to cancel order *INV-77*" in tanya, tanya
+
+    await store.set_state(WA, State.AWAITING_CANCEL_CONFIRMATION)
+    r = (await handle_message(WA, "cancel")).text
+    assert "Your order has been cancelled" in r, r
+
+
+async def test_cancel_order_tidak_jalan_tanpa_kata_batal(patch_externals):
+    """Model memanggil cancel_order untuk pesan "order" saja."""
+    from app.tools.cancel_order import cancel_order
+
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    set_turn_context(TurnContext(wa_number=WA, user_text="order"))
+    out = await cancel_order.ainvoke({})
+    assert "dikosongkan" not in out, out
+    assert await store.get_cart(WA) != []
+
+
+async def test_status_pesanan_bahasa_inggris(patch_externals):
+    from app.tools.order_status import get_order_status
+
+    async def latest(wa):
+        return {"id": 9, "status": "pending", "total_harga_pesanan": 100000,
+                "invoice": {"nomor_invoice": "INV-9", "status": "unpaid"}, "items": []}
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "get_latest_order", latest)
+    await store.set_lang(WA, "en")
+    set_turn_context(TurnContext(wa_number=WA))
+    out = await get_order_status.ainvoke({})
+    assert "Awaiting payment" in out and "unpaid" in out, out
+    assert "Menunggu" not in out and "belum dibayar" not in out, out
