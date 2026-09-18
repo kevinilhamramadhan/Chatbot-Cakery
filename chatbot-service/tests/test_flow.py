@@ -724,3 +724,11 @@ async def test_status_pesanan_bahasa_inggris(patch_externals):
     out = await get_order_status.ainvoke({})
     assert "Awaiting payment" in out and "unpaid" in out, out
     assert "Menunggu" not in out and "belum dibayar" not in out, out
+
+
+def test_periode_laporan_mengikuti_wib():
+    from app.tools.reports import _month_range
+
+    # 30 Sep 18.00 UTC = 1 Okt 01.00 WIB: laporan sudah masuk bulan Oktober.
+    utc = dt.datetime(2026, 9, 30, 18, 0, tzinfo=dt.timezone.utc)
+    assert _month_range(utc) == ("2026-10-01", "2026-10-01")

@@ -8,7 +8,7 @@ comes from the backend user directory, so promoting someone to Owner in Admin
 Site is enough — no .env edit, no redeploy.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from langchain_core.tools import tool
 
@@ -31,8 +31,14 @@ async def _is_owner(wa: str) -> bool:
     return await rbac.boleh(wa, rbac.OWNER)
 
 
-def _month_range() -> tuple[str, str]:
-    now = datetime.now(timezone.utc)
+# Toko di Batam: bulan dan hari laporan mengikuti WIB, bukan jam UTC container
+# (tanggal 1 pukul 00.00-07.00 WIB dulu masih terhitung bulan sebelumnya).
+# WIB tidak punya DST, jadi offset tetap cukup dan tidak butuh tzdata.
+_WIB = timezone(timedelta(hours=7))
+
+
+def _month_range(now: datetime | None = None) -> tuple[str, str]:
+    now = (now or datetime.now(timezone.utc)).astimezone(_WIB)
     return now.replace(day=1).strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
 
 
