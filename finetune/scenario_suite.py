@@ -2,7 +2,7 @@
 """Timed, 3x-repeated behavioural scenario suite for the fine-tuned models.
 
 For each held-out scenario TYPE (T1-T12 tool, N1-N6 non-tool) it picks a
-representative row from the frozen test split and replays the user turn through
+representative row from the test split and replays the user turn through
 the SAME serving path as production (ChatOllama + bind_tools + production
 sampling from config.py) N times (default 3), recording:
 
@@ -42,7 +42,7 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 # Human labels + expectation per type (for the report).
 TYPE_LABEL = {
     "T1":  "Lihat seluruh menu            -> get_menu",
-    "T2":  "Menu per kategori             -> get_menu(kategori)",
+    "T2":  "Menu per kategori             -> get_menu",
     "T3":  "Detail 1 produk               -> get_product_detail",
     "T4":  "Bandingkan produk             -> compare_products",
     "T5":  "Pesan 1 item                  -> add_to_cart",
@@ -53,12 +53,21 @@ TYPE_LABEL = {
     "T10": "Eskalasi ke admin             -> escalate_to_admin",
     "T11": "Laporan keuangan (owner)      -> financial_report",
     "T12": "Analisa bisnis (owner)        -> business_analytics",
+    "T13": "Klaim sudah bayar             -> check_payment_status",
+    "T14": "Keluhan                       -> send_apology",
+    "T15": "Isi keranjang                 -> check_cart",
+    "T16": "Kirim ulang cara bayar        -> resend_payment_method",
     "N1":  "FAQ (grounded)                -> jawab teks, TANPA tool",
     "N2":  "Permintaan di luar layanan    -> teks, TANPA tool",
     "N3":  "Basa-basi / terima kasih      -> teks, TANPA tool",
     "N4":  "Out-of-scope                  -> tolak, TANPA tool",
     "N5":  "Ambigu                        -> tanya balik, TANPA tool",
     "N6":  "Adversarial (jebakan)         -> teks, TANPA tool",
+    "N1x": "Konteks tanpa jawaban         -> jujur belum tahu, TANPA tool",
+    "N10": "Bukan Owner minta laporan     -> teks, TANPA tool",
+    "N11": "Ganti cara bayar              -> teks, TANPA tool",
+    "N12": "Pesan pendek ambigu           -> tanya balik, TANPA tool",
+    "N13": "Bahasa percakapan             -> teks, TANPA tool",
     "R1":  "Regresi: menu fresh           -> get_menu (bukan jawab hafalan)",
     "R2":  "Regresi: detail by name       -> get_product_detail (bukan get_menu)",
     "R3":  "Regresi: menu lagi (penanda)  -> get_menu (bukan meniru history)",
@@ -67,7 +76,8 @@ TYPE_LABEL = {
     "R6":  "Regresi: menu + history cemar -> get_menu (persis insiden live #1)",
 }
 
-ORDER = [f"T{i}" for i in range(1, 13)] + [f"N{i}" for i in range(1, 7)]
+ORDER = ([f"T{i}" for i in range(1, 17)] + [f"N{i}" for i in range(1, 7)]
+         + ["N1x", "N10", "N11", "N12", "N13"])
 
 
 # ── Skenario regresi 4 insiden live WA 15-16 Jul 2026 (PROMPT_FINETUNE_V4 §2) ──

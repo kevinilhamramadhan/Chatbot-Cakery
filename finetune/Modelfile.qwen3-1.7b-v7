@@ -1,10 +1,10 @@
-# Modelfile untuk model hasil fine-tune toti-qwen-1.7b (basis qwen3:1.7b).
+# Modelfile untuk model hasil fine-tune toti-qwen-1.7b V7 (basis qwen3:1.7b).
 # TEMPLATE + parameter disalin PERSIS dari `ollama show qwen3:1.7b --template/--parameters`
-# (keluarga qwen3 memakai Go-template klasik, bukan RENDERER seperti qwen3.5).
+# (keluarga qwen3 memakai Go-template klasik).
 # Pemakaian:
-#   1. Taruh GGUF hasil Colab di folder ini dengan nama toti-qwen-1.7b.Q8_0.gguf
-#   2. ollama create toti-qwen-1.7b -f Modelfile.qwen3-1.7b
-FROM ./toti-qwen-1.7b.Q8_0.gguf
+#   1. Taruh GGUF hasil Colab di folder ini dengan nama toti-qwen-1.7b.Q4_K_M.gguf.v7
+#   2. ollama create toti-qwen-1.7b-v7 -f Modelfile.qwen3-1.7b-v7
+FROM ./toti-qwen-1.7b.Q4_K_M.gguf.v7
 TEMPLATE """
 {{- $lastUserIdx := -1 -}}
 {{- range $idx, $msg := .Messages -}}
