@@ -8,6 +8,7 @@ real data (prices, order summaries) accurate and avoids hallucinated rephrasing.
 import asyncio
 import logging
 import re
+import time
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -61,6 +62,19 @@ _AWALAN_TAKEOVER = tuple(
 )
 
 
+def pertanyaan_dengan_konteks(user_text: str, rag_context: str | None) -> str:
+    """Pesan pelanggan seperti yang diterima model: FAQ hasil RAG menumpang di depannya.
+
+    Satu-satunya tempat bentuk ini ditulis — dataset fine-tuning
+    (finetune/generate_dataset.py) memanggil fungsi yang sama, jadi yang dilatih
+    dan yang dilayani tidak bisa bergeser diam-diam.
+    """
+    if not rag_context:
+        return user_text
+    return ("KONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\n"
+            + rag_context + "\n\nPertanyaan pelanggan: " + user_text)
+
+
 def _history_view(content: str) -> str:
     """Compact view of a past bot reply for the LLM's context window.
 
@@ -94,15 +108,24 @@ def _history_view(content: str) -> str:
 async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # 1) Retrieval + scope guard (PROMPT §7). retrieve() does blocking I/O
     # (Ollama embed + Chroma query) — keep it off the event loop.
-    retrieval = await asyncio.to_thread(retrieve, user_text)
-    rag_context = retrieval.context_text() if retrieval.in_scope else None
-    logger.info(
-        "RAG best_sim=%.3f in_scope=%s", retrieval.best_similarity, retrieval.in_scope
-    )
     _ctx = get_turn_context_or_none()
-    if _ctx is not None:
-        _ctx.rag_similarity = retrieval.best_similarity
-        _ctx.rag_in_scope = retrieval.in_scope
+    mulai = _ctx.mulai if _ctx is not None else time.monotonic()
+    try:
+        retrieval = await asyncio.wait_for(asyncio.to_thread(retrieve, user_text),
+                                           timeout=settings.batas_rag_detik)
+    except TimeoutError:
+        # Lebih baik menjawab tanpa FAQ daripada melewati batas waktu balasan.
+        logger.warning("RAG melewati %.0fs — giliran lanjut tanpa konteks FAQ",
+                       settings.batas_rag_detik)
+        retrieval = None
+    rag_context = retrieval.context_text() if retrieval and retrieval.in_scope else None
+    if retrieval is not None:
+        logger.info(
+            "RAG best_sim=%.3f in_scope=%s", retrieval.best_similarity, retrieval.in_scope
+        )
+        if _ctx is not None:
+            _ctx.rag_similarity = retrieval.best_similarity
+            _ctx.rag_in_scope = retrieval.in_scope
 
     # LATENCY, not cosmetics: Ollama reuses its KV cache only for the longest
     # COMMON PREFIX of the prompt, and the system block (with the 9 tool
@@ -122,15 +145,7 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # Routing reminder (see TOOL_REMINDER note in prompt.py: Ollama collates it
     # into the top system block — the dataset/eval reproduce that placement).
     messages.append(SystemMessage(content=TOOL_REMINDER))
-    question = user_text
-    if rag_context:
-        question = (
-            "KONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\n"
-            + rag_context
-            + "\n\nPertanyaan pelanggan: "
-            + user_text
-        )
-    messages.append(HumanMessage(content=question))
+    messages.append(HumanMessage(content=pertanyaan_dengan_konteks(user_text, rag_context)))
 
     # Tool Owner tidak dimuat untuk pelanggan biasa — bukan cuma ditolak waktu
     # dipanggil. Prefix KV-cache tetap aman: daftarnya konstan per peran, jadi
@@ -142,8 +157,15 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     diizinkan = {t.name for t in tools}
     llm = get_llm().bind_tools(tools)
 
+    sisa = settings.batas_balas_detik - (time.monotonic() - mulai)
     try:
-        ai: AIMessage = await llm.ainvoke(messages)
+        # Membatalkan ainvoke memutus koneksi HTTP, dan Ollama menghentikan
+        # generasinya — CPU langsung bebas untuk pesan berikutnya.
+        ai: AIMessage = await asyncio.wait_for(llm.ainvoke(messages), timeout=max(1.0, sisa))
+    except TimeoutError:
+        logger.warning("LLM melewati batas balasan (%.0fs) — kirim balasan tetap",
+                       settings.batas_balas_detik)
+        return bahasa.teks("balasan_lambat", lang)
     except Exception as exc:  # noqa: BLE001
         logger.exception("LLM invocation failed: %s", exc)
         return "Maaf, lagi ada gangguan di sistem kami. Coba beberapa saat lagi ya 🙏"

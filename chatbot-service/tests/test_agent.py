@@ -153,3 +153,56 @@ async def test_tool_owner_tidak_dijalankan_untuk_pelanggan(monkeypatch):
 
     assert dimuat and not (dimuat[0] & registry.NAMA_TOOL_OWNER), dimuat
     assert "Omzet" not in jawab and "Laporan Keuangan" not in jawab, jawab
+
+
+async def test_model_lambat_dipotong_sebelum_batas_balasan(monkeypatch):
+    """Kevin minta setiap pesan dibalas < 60 detik. QA 19 Sep: satu giliran
+    148 detik karena CPU direbut proses lain. Lewat batas, generasi dibatalkan
+    dan pelanggan menerima kalimat tetap — bukan menunggu terus."""
+    import asyncio
+    import time
+
+    from app.core.config import settings
+
+    class _Lambat:
+        dibatalkan = False
+
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                _Lambat.dibatalkan = True
+                raise
+
+    monkeypatch.setattr(agent_mod, "get_llm", lambda: _Lambat())
+    _mock_retrieval(monkeypatch, 0.0)
+    monkeypatch.setattr(settings, "batas_balas_detik", 0.3)
+
+    set_turn_context(TurnContext(wa_number=WA))
+    t0 = time.monotonic()
+    out = await agent_mod.run_agent(WA, "halo kak", [])
+    assert time.monotonic() - t0 < 2, "harus berhenti di batas, bukan menunggu model"
+    assert "lebih lambat dari biasanya" in out, out
+    assert _Lambat.dibatalkan, "generasi Ollama harus ikut dibatalkan"
+
+
+async def test_rag_lambat_tidak_menahan_balasan(monkeypatch):
+    import time
+
+    from app.core.config import settings
+
+    def rag_lambat(query, top_k=None):
+        time.sleep(1.0)
+        raise AssertionError("hasilnya tidak boleh dipakai")
+
+    monkeypatch.setattr(agent_mod, "retrieve", rag_lambat)
+    monkeypatch.setattr(settings, "batas_rag_detik", 0.1)
+    _mock_llm(monkeypatch, AIMessage(content="Halo kak 😊"))
+    set_turn_context(TurnContext(wa_number=WA))
+    t0 = time.monotonic()
+    out = await agent_mod.run_agent(WA, "halo kak", [])
+    assert out == "Halo kak 😊"
+    assert time.monotonic() - t0 < 0.9

@@ -6,6 +6,7 @@ image"). We pass that through context variables set for the duration of one
 incoming message.
 """
 
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
@@ -29,6 +30,8 @@ class TurnContext:
     # Filled during the turn so a single log line can describe what happened.
     tools_called: list[str] = field(default_factory=list)
     rag_similarity: float | None = None
+    # Kapan pesan ini mulai diproses — dasar batas waktu balasan (run_agent).
+    mulai: float = field(default_factory=time.monotonic)
     rag_in_scope: bool | None = None
 
 

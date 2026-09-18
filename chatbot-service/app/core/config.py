@@ -72,7 +72,18 @@ class Settings(BaseSettings):
     # far more than a WhatsApp reply needs (tool calls are ~30 tokens; the long
     # outputs customers see, like the menu, are printed by the TOOL, not
     # generated). Raise only if replies start getting cut off mid-sentence.
-    llm_num_predict: int = 384
+    llm_num_predict: int = 192
+    # Batas waktu satu balasan, dihitung sejak pesan mulai diproses. Kevin minta
+    # setiap pesan dijawab di bawah 60 detik (19 Sep 2026); QA hari itu mencatat
+    # giliran 100-148 detik saat CPU VM direbut proses lain. Inferensi model
+    # adalah satu-satunya bagian yang tidak terbatas, jadi di situlah batasnya
+    # dipasang (agent.run_agent): lewat batas, generasinya dibatalkan dan
+    # pelanggan menerima kalimat tetap. Sisa beberapa detik di bawah 60 untuk
+    # eksekusi tool dan pengiriman WhatsApp.
+    batas_balas_detik: float = 50.0
+    # Pencarian FAQ (embedding lewat Ollama) tidak boleh ikut menghabiskan
+    # jatah: lewat batas ini, giliran lanjut tanpa konteks FAQ.
+    batas_rag_detik: float = 8.0
     # Keep the LLM + embedding models resident in Ollama's RAM instead of
     # unloading after idle, in SECONDS: -1 = forever, or a positive count to
     # auto-unload (e.g. 300 = 5m). Must be an int: OllamaEmbeddings rejects a
