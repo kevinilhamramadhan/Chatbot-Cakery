@@ -15,7 +15,8 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+import httpx
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response
 
 from app.backend_client import api as backend
 from app.conversation import background, bahasa, store
@@ -278,3 +279,54 @@ async def mark_refunded(order_id: int, x_internal_key: str | None = Header(defau
     _require_internal_key(x_internal_key)
     ok = await background.notify_refunded(order_id)
     return {"status": "ok" if ok else "not_found", "order_id": order_id}
+
+
+# ── Nomor WhatsApp chatbot, diatur Owner dari Admin Site lewat backend ────────
+# Backend yang memeriksa peran (Admin/Owner boleh lihat, hanya Owner yang boleh
+# ganti); di sini cukup X-Internal-Key, sama seperti endpoint internal lainnya.
+# Gateway sendiri tetap tidak pernah terbuka ke luar jaringan Docker.
+@router.get("/internal/wa/status")
+async def wa_status(x_internal_key: str | None = Header(default=None)):
+    """keadaan: tersambung | menunggu_scan | terputus. Nomor hanya saat tersambung."""
+    _require_internal_key(x_internal_key)
+    try:
+        if await whatsapp_client.session_state() == "CONNECTED":
+            return {"keadaan": "tersambung", **await whatsapp_client.akun()}
+        if await whatsapp_client.qr_png():
+            return {"keadaan": "menunggu_scan", "nomor": None, "nama_profil": None}
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Status WA gagal dibaca: %s: %s", type(exc).__name__, exc)
+    return {"keadaan": "terputus", "nomor": None, "nama_profil": None}
+
+
+@router.get("/internal/wa/qr")
+async def wa_qr(x_internal_key: str | None = Header(default=None)):
+    """PNG QR yang berlaku sekarang; 404 kalau tidak sedang menunggu scan.
+
+    QR berganti kira-kira tiap 20 detik, jadi tidak boleh di-cache di mana pun.
+    """
+    _require_internal_key(x_internal_key)
+    try:
+        png = await whatsapp_client.qr_png()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="gateway WhatsApp tidak terjawab") from exc
+    if png is None:
+        raise HTTPException(status_code=404, detail="tidak sedang menunggu scan")
+    return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/internal/wa/ganti-nomor")
+async def wa_ganti_nomor(x_internal_key: str | None = Header(default=None)):
+    """Putus nomor lama lalu mulai sesi baru yang menampilkan QR.
+
+    Sejak panggilan ini sampai nomor baru discan, chatbot tidak bisa membalas
+    siapa pun — konfirmasinya urusan halaman Admin Site. Kalau start_session
+    kehabisan waktu, sesinya tetap berjalan; loop penyembuh juga menyalakannya.
+    """
+    _require_internal_key(x_internal_key)
+    try:
+        await whatsapp_client.logout()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="gateway WhatsApp tidak terjawab") from exc
+    await whatsapp_client.start_session()
+    return {"status": "ok"}

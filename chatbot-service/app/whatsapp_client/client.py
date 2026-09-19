@@ -130,6 +130,41 @@ class WhatsAppClient:
         logger.info("Permintaan menyalakan sesi WhatsApp terkirim (sukses=%s)", ok)
         return ok
 
+    # ── Ganti nomor dari Admin Site ──────────────────────────────────────────
+    async def _get(self, path: str) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            return await client.get(self._base + path.format(s=self._session),
+                                    headers=self._headers)
+
+    async def akun(self) -> dict:
+        """Nomor dan nama profil yang sedang tertaut. Hanya sah saat CONNECTED."""
+        info = (await self._get("/client/getClassInfo/{s}")).json().get("sessionInfo") or {}
+        return {"nomor": (info.get("wid") or {}).get("user"),
+                "nama_profil": info.get("pushname")}
+
+    async def qr_png(self) -> bytes | None:
+        """Gambar QR yang sedang berlaku, atau None kalau tidak sedang menunggu scan.
+
+        Gateway membalas JSON `{success: false}` dengan status 200 saat QR belum
+        ada atau sudah discan, jadi yang dibedakan adalah jenis isinya.
+        """
+        resp = await self._get("/session/qr/{s}/image")
+        if resp.headers.get("content-type", "").startswith("image/png"):
+            return resp.content
+        return None
+
+    async def logout(self) -> None:
+        """Putus nomor yang tertaut dan hapus kredensialnya dari volume.
+
+        Sesudahnya sesi tidak ada sama sekali; start_session() membuat sesi baru
+        yang menampilkan QR. Loop penyembuh di background.py tidak mengganggu QR
+        itu: /session/start pada sesi yang sudah ada ditolak gateway (422), bukan
+        memulai ulang.
+        """
+        resp = await self._get("/session/terminate/{s}")
+        resp.raise_for_status()
+        logger.warning("Nomor WhatsApp diputus: %s", resp.text[:120])
+
     async def send_image(
         self, wa_number: str, image_url: str, caption: str | None = None
     ) -> dict:
