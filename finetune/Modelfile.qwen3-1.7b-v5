@@ -75,3 +75,9 @@ PARAMETER stop "<|im_end|>"
 PARAMETER temperature 0.6
 PARAMETER top_k 20
 PARAMETER top_p 0.95
+# 2 thread, bukan semua inti. VM punya 4 vCPU dan gateway WhatsApp (Chromium)
+# terus memakai sebagian CPU. Terukur 19 Sep 2026: dengan 4 thread, satu inti
+# yang sibuk membuat generasi anjlok dari ~9 ke 0,3 token/detik (balasan 85-229
+# detik); dengan 2 thread tetap ~8 token/detik (13-15 detik), dan saat CPU
+# senggang sama cepatnya dengan 4 thread.
+PARAMETER num_thread 2
