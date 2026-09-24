@@ -286,7 +286,12 @@ async def tandai_lunas(order) -> bool:
     Dipakai polling DAN webhook. Sama seperti refund: kabari dulu, tandai
     belakangan — kalau pengiriman gagal, barisnya tetap dipantau dan dicoba lagi.
     """
-    if order.notified_paid:
+    # Klaim dulu, baru kirim. Urutan sebaliknya -- yang dipakai sebelumnya --
+    # membiarkan polling dan webhook sama-sama lolos pemeriksaan notified_paid
+    # lalu sama-sama mengirim; pelanggan menerima kabar identik dua kali.
+    # Klaim yang gagal DILEPAS lagi di bawah, jadi janji "kabari dulu, tandai
+    # belakangan" tetap berlaku: baris yang gagal dikirim tetap dicoba ulang.
+    if not await store.klaim_kabar_lunas(order.id):
         return False
     terkirim = await _notify(
         order.wa_number,
@@ -295,10 +300,11 @@ async def tandai_lunas(order) -> bool:
         "Terima kasih! 🎂",
     )
     if not terkirim:
+        await store.update_pending_order(order.id, notified_paid=False)  # lepas klaim
         logger.warning("Kabar pembayaran %s gagal terkirim — dicoba lagi siklus berikutnya",
                        order.order_ref)
         return False
-    await store.update_pending_order(order.id, status="paid", notified_paid=True)
+    await store.update_pending_order(order.id, status="paid")
     await store.set_state(order.wa_number, State.ORDER_ACTIVE)
     logger.info("Pembayaran %s masuk — pelanggan sudah dikabari", order.order_ref)
     return True

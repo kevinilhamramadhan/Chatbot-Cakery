@@ -9,7 +9,7 @@ repeating them costs nothing and never invents a second charge.
 
 from langchain_core.tools import tool
 
-from app.conversation import store
+from app.conversation import checkout, store
 from app.conversation.context import get_turn_context
 from app.core.config import settings
 from app.tools.formatting import rupiah
@@ -36,6 +36,11 @@ async def resend_payment_method() -> str:
             f"*{order.nomor_invoice or order.order_ref}*. Ketik *batal* lalu pesan "
             "ulang ya, nanti tagihannya kuterbitkan lagi 🙏"
         )
+    # Gambar QR-nya ikut dikirim ulang, bukan cuma kalimatnya: pesanan QRIS yang
+    # dibuat sebelum kolom ini ada tidak punya URL-nya, dan itu tidak apa-apa --
+    # pay_instruction lama masih memuat tautannya apa adanya.
+    if order.qris_url:
+        checkout.kirim_gambar_qris(order.qris_url, await store.get_lang(order.wa_number))
     label = "DP 50%" if order.payment_type == "dp" else "Pembayaran penuh"
     return (
         f"Ini lagi ya untuk pesanan *{order.nomor_invoice or order.order_ref}*:\n\n"

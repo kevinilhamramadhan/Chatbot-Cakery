@@ -30,6 +30,10 @@ class PendingOrder(Base):
     # again — on WhatsApp the checkout message is buried within minutes.
     nomor_invoice: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pay_instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # URL gambar QR Midtrans, dipisah dari pay_instruction supaya bisa dikirim
+    # sebagai GAMBAR (pelanggan tinggal scan) dan tidak perlu diurai balik dari
+    # kalimat. Kosong untuk pembayaran Virtual Account.
+    qris_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Snapshots so notifications work without re-querying.
     items_json: Mapped[str] = mapped_column(Text, default="[]")

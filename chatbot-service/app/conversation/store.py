@@ -221,6 +221,26 @@ async def update_pending_order(order_id: int, **fields) -> None:
         await db.commit()
 
 
+async def klaim_kabar_lunas(order_id: int) -> bool:
+    """Klaim hak mengirim kabar "pembayaran diterima" untuk pesanan ini.
+
+    True hanya untuk SATU pemanggil. Dua jalur bisa tiba berbarengan -- polling
+    30 detik di background dan webhook dari backend -- dan keduanya dulu membaca
+    notified_paid=False lalu sama-sama mengirim: pelanggan menerima kabar yang
+    sama dua kali (terlihat 24 Sep 2026, dua pesan identik di menit yang sama).
+    Pemeriksaan di Python tidak bisa menutup celah itu; UPDATE bersyarat bisa,
+    karena SQLite menyerialkan tulisan.
+    """
+    async with async_session_factory() as db:
+        res = await db.execute(
+            update(PendingOrder)
+            .where(PendingOrder.id == order_id, PendingOrder.notified_paid.is_(False))
+            .values(notified_paid=True)
+        )
+        await db.commit()
+        return res.rowcount == 1
+
+
 async def purge_old_data() -> tuple[int, int]:
     """Delete stale personal data: old transcripts + identity blobs on finished
     orders (nama/alamat/nomor HP). The backend keeps the authoritative order

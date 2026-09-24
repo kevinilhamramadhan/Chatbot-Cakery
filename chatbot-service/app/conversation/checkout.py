@@ -14,6 +14,7 @@ import httpx
 from app.backend_client import api as backend
 from app.backend_client import products as products_api
 from app.conversation import bahasa, store
+from app.conversation.context import OutboundMedia, get_turn_context_or_none
 from app.conversation.states import State
 from app.core.config import settings
 from app.tools.formatting import rupiah
@@ -71,6 +72,19 @@ async def reprice_cart(cart: list[dict], lang: str | None = None) -> tuple[list[
                                      lama=rupiah(item["harga"]), baru=rupiah(harga)))
         fresh.append({**item, "harga": harga})
     return fresh, notes
+
+
+def kirim_gambar_qris(qris_url: str, lang: str) -> None:
+    """Titipkan gambar QR ke giliran yang sedang berjalan.
+
+    Diam saja kalau dipanggil di luar giliran (mis. dari tugas latar): kabar
+    proaktif tidak punya tempat menitipkan lampiran, dan teksnya sudah cukup.
+    """
+    ctx = get_turn_context_or_none()
+    if ctx is None:
+        return
+    ctx.media.append(OutboundMedia(image_url=qris_url,
+                                   caption=bahasa.teks("kapsi_qris", lang)))
 
 
 async def finalize_order(wa_number: str) -> str:
@@ -181,7 +195,12 @@ async def finalize_order(wa_number: str) -> str:
         return bahasa.teks("tagihan_tanpa_cara_bayar", lang)
 
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.payment_timeout_minutes)
-    pay_line = f"💳 Virtual Account: *{va}*" if va else f"Scan QRIS: {qris}"
+    # QRIS dikirim sebagai GAMBAR, bukan tautan. Pelanggan di WhatsApp tidak bisa
+    # men-scan URL: dia harus membukanya di browser lalu memotretnya dengan HP
+    # lain. Tautannya tetap disimpan di kolom qris_url supaya bisa dikirim ulang
+    # (resend_payment_method) tanpa menerbitkan tagihan baru.
+    pay_line = (f"💳 Virtual Account: *{va}*" if va
+                else bahasa.teks("scan_qris", lang))
 
     # 3) Track locally (order_ref = backend order_id) for timeout/poll/guard.
     # The invoice number and the payment line are snapshotted here so every
@@ -195,6 +214,7 @@ async def finalize_order(wa_number: str) -> str:
         amount_due=amount_due,
         nomor_invoice=nomor_invoice,
         pay_instruction=pay_line,
+        qris_url=None if va else qris,
         items_json=json.dumps(cart, ensure_ascii=False),
         customer_json=json.dumps(cust, ensure_ascii=False),
         delivery_method=delivery,
@@ -203,6 +223,8 @@ async def finalize_order(wa_number: str) -> str:
     await store.set_cart(wa_number, [])
     await store.set_state(wa_number, State.AWAITING_PAYMENT)
 
+    if not va and qris:
+        kirim_gambar_qris(qris, lang)
     return bahasa.teks(
         "pesanan_dibuat", lang,
         invoice=nomor_invoice,

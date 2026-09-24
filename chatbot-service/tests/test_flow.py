@@ -418,8 +418,15 @@ async def test_qris_channel_returns_qr_link():
     for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "full"):
         await handle_message(WA, msg)
     r = await handle_message(WA, "qris")
-    assert "https://api.qr/mid-test" in r.text   # QR link relayed to customer
+    # QR dikirim sebagai GAMBAR, bukan tautan: pelanggan di WhatsApp tidak bisa
+    # men-scan URL. Tautannya tetap tidak muncul di teks.
+    assert [m.image_url for m in r.media] == ["https://api.qr/mid-test"]
+    assert "https://api.qr/mid-test" not in r.text
+    assert "QRIS" in r.text
     assert "8808" not in r.text
+    # Tersimpan supaya resend_payment_method bisa mengirim gambar yang sama.
+    order = await store.get_active_pending(WA)
+    assert order.qris_url == "https://api.qr/mid-test"
 
 
 async def test_identity_validation_rejects_bad_input():

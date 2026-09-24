@@ -1810,3 +1810,46 @@ async def test_templat_checkout_lengkap_dua_bahasa():
                   "tagihan_gagal", "tagihan_tanpa_cara_bayar"):
         idn, eng = bahasa.teks(kunci, bahasa.ID, **isian), bahasa.teks(kunci, bahasa.EN, **isian)
         assert idn != eng and "{" not in idn + eng, kunci
+
+
+async def test_kabar_lunas_tidak_dobel_saat_polling_dan_webhook_bersamaan(patch_externals):
+    """Dua jalur memanggil tandai_lunas: polling 30 detik dan webhook backend.
+
+    Sebelum klaim atomik, keduanya membaca notified_paid=False lalu sama-sama
+    mengirim, dan pelanggan menerima kabar identik dua kali (terlihat langsung
+    di WhatsApp, 24 Sep 2026). Pemeriksaan di Python tidak menutup celahnya.
+    """
+    import asyncio
+
+    from app.conversation import background
+
+    pesanan = await store.create_pending_order(
+        wa_number=WA, order_ref="145", payment_ref="MID-145", payment_type="full",
+        total_amount=85000, amount_due=85000, items_json="[]", customer_json="{}",
+        delivery_method="pickup", nomor_invoice="INV-20260924-145",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+
+    hasil = await asyncio.gather(background.tandai_lunas(pesanan),
+                                 background.tandai_lunas(pesanan))
+
+    kabar = [t for _wa, t in patch_externals["sent"] if "Pembayaran sudah kami terima" in t]
+    assert len(kabar) == 1, f"pelanggan dikabari {len(kabar)} kali, harusnya sekali"
+    assert sorted(hasil) == [False, True], "hanya satu pemanggil yang boleh mengklaim"
+
+
+async def test_permintaan_ganti_bahasa_menang_atas_deteksi(patch_externals):
+    """"tolong pakai bahasa Inggris" seluruhnya kata Indonesia.
+
+    Kalau permintaannya dibaca oleh deteksi(), percakapan justru dikunci ke
+    Bahasa Indonesia — kebalikan dari yang diminta pelanggan.
+    """
+    from app.conversation import bahasa
+
+    r = await handle_message(WA, "tolong pakai bahasa inggris")
+    assert (await store.get_lang(WA)) == bahasa.EN
+    assert "English" in r.text
+
+    r = await handle_message(WA, "bahasa indonesia aja deh")
+    assert (await store.get_lang(WA)) == bahasa.ID
+    assert "Bahasa Indonesia" in r.text

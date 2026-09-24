@@ -40,6 +40,12 @@ class Reply:
     suppressed: bool = False  # true when human takeover blocks auto-reply
 
 
+def _media_giliran() -> list:
+    """Lampiran yang dititipkan tool/checkout pada giliran ini (mis. QR QRIS)."""
+    ctx = get_turn_context_or_none()
+    return list(ctx.media) if ctx is not None else []
+
+
 def _wa_digits(wa_number: str) -> str:
     return "".join(c for c in wa_number if c.isdigit())
 
@@ -192,6 +198,19 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     session = await store.get_or_create_session(wa_number)
     await store.log_message(wa_number, "in", text)
     state = session.state
+
+    # Permintaan eksplisit menang atas deteksi, dan diperiksa LEBIH DULU:
+    # "tolong pakai bahasa Inggris" seluruhnya kata Indonesia, jadi deteksi()
+    # akan mengunci percakapan ke Indonesia -- persis kebalikan yang diminta.
+    diminta = bahasa.permintaan_ganti_bahasa(text)
+    if diminta:
+        await store.set_lang(wa_number, diminta)
+        session.lang = diminta
+        # Giliran ini berhenti di sini dan TIDAK masuk mesin status: di tengah
+        # checkout, "pakai bahasa Inggris" bukan nama pelanggan dan bukan
+        # pilihan metode bayar. Statusnya tidak diubah, jadi pelanggan tinggal
+        # mengulang jawabannya di pesan berikutnya -- sudah dalam bahasa baru.
+        return Reply(text=bahasa.teks("bahasa_diganti", diminta))
 
     # Bahasa hanya diperbarui kalau pesannya cukup menentukan; "ok" atau "2"
     # tidak mengubah apa pun, jadi percakapan tidak berganti bahasa di tengah.
@@ -397,7 +416,8 @@ async def _handle_confirmation(wa_number: str, text: str, lang: str) -> Reply:
         if cust.get("channel"):
             # Re-confirmation after checkout bounced the cart back (e.g. a price
             # changed) — identity is already complete, don't ask for it again.
-            return Reply(text=await checkout.finalize_order(wa_number))
+            teks_checkout = await checkout.finalize_order(wa_number)
+            return Reply(text=teks_checkout, media=_media_giliran())
         await store.set_customer(wa_number, {})  # reset identity collection
         await store.set_state(wa_number, State.COLLECTING_IDENTITY)
         return Reply(text=bahasa.teks("minta_nama", lang))
@@ -504,7 +524,7 @@ async def _handle_identity(wa_number: str, text: str, lang: str) -> Reply:
             return Reply(text=_channel_prompt(lang))
         await store.set_customer(wa_number, cust)
         reply_text = await checkout.finalize_order(wa_number)
-        return Reply(text=reply_text)
+        return Reply(text=reply_text, media=_media_giliran())
 
     # Shouldn't reach here; reset to be safe.
     await store.set_state(wa_number, State.IDLE)

@@ -78,6 +78,44 @@ def deteksi(teks: str) -> str | None:
     return EN if skor_en > skor_id else ID
 
 
+# ── Permintaan ganti bahasa ──────────────────────────────────────────────────
+# Pelanggan boleh meminta bahasanya diganti dengan kalimat biasa. Ini TIDAK bisa
+# diserahkan ke deteksi(): "tolong pakai bahasa Inggris" seluruhnya kata
+# Indonesia, jadi deteksi() justru mengunci percakapan ke Indonesia -- kebalikan
+# dari yang diminta. Maksudnya yang dibaca, bukan bahasa kalimatnya.
+_MINTA_EN = re.compile(
+    r"(pakai|pake|gunakan|ganti|pindah|balas|jawab|ngomong|bicara|switch|speak|reply|answer|talk|use)"
+    r"[^.!?\n]{0,24}\b(inggris|english)\b"
+    r"|\b(in|pakai|pake)\s+english\b"
+    r"|\benglish\s+(please|dong|aja|saja|ya)\b"
+    # "bahasa inggris dong", "aku mau bahasa Inggris" -- menyebut namanya saja
+    # sudah permintaan; tidak ada alasan lain pelanggan toko kue mengetik ini.
+    r"|\bbahasa\s+(inggris|english)\b",
+    re.IGNORECASE,
+)
+_MINTA_ID = re.compile(
+    r"(pakai|pake|gunakan|ganti|pindah|balas|jawab|ngomong|bicara|switch|speak|reply|answer|talk|use)"
+    r"[^.!?\n]{0,24}\b(indonesia|indonesian|bahasa)\b"
+    r"|\bin\s+(indonesian|bahasa)\b"
+    r"|\bbahasa\s+indonesia\b",
+    re.IGNORECASE,
+)
+
+
+def permintaan_ganti_bahasa(teks: str) -> str | None:
+    """Bahasa yang DIMINTA pelanggan, atau None kalau dia tidak meminta apa pun.
+
+    Inggris diperiksa lebih dulu: "pakai bahasa Inggris" memuat kata "bahasa",
+    jadi pola Indonesia juga cocok kalau urutannya dibalik.
+    """
+    t = teks or ""
+    if _MINTA_EN.search(t):
+        return EN
+    if _MINTA_ID.search(t):
+        return ID
+    return None
+
+
 def normalkan(lang: str | None) -> str:
     return EN if str(lang or "").lower().startswith("en") else ID
 
@@ -213,6 +251,18 @@ _TEMPLAT: dict[str, dict[str, str]] = {
     "tagihan_gagal": {
         ID: "Maaf, pembuatan tagihan gagal. Coba ulangi sebentar lagi ya 🙏",
         EN: "Sorry, I couldn't create the invoice. Please try again in a moment 🙏",
+    },
+    "bahasa_diganti": {
+        ID: "Siap, mulai sekarang aku balas pakai Bahasa Indonesia ya 😊 Ada yang bisa kubantu?",
+        EN: "Got it — I'll reply in English from now on 😊 What can I help you with?",
+    },
+    "scan_qris": {
+        ID: "Scan kode QRIS di gambar yang aku kirim ya 👆",
+        EN: "Scan the QRIS code in the image I sent 👆",
+    },
+    "kapsi_qris": {
+        ID: "Kode QRIS pembayaranmu — scan pakai GoPay/OVO/Dana/m-banking",
+        EN: "Your QRIS payment code — scan with GoPay/OVO/Dana/mobile banking",
     },
     "tagihan_tanpa_cara_bayar": {
         ID: ("Maaf, tagihannya gagal diterbitkan jadi pesanannya belum kubuat. "
