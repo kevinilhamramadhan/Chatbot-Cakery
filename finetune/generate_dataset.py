@@ -673,13 +673,24 @@ N3_ID = [("halo{part}", "greet"), ("hai kak", "greet"), ("assalamualaikum", "gre
          ("halo bot", "bot"), ("kamu bot ya{part}?", "bot"), ("kamu manusia atau robot{part}?", "bot"),
          ("makasih ya kak!", "thanks"), ("makasih banyak infonya{part}", "thanks"),
          ("oke sip{part}", "ack"), ("mantap{part}", "ack"), ("oke deh, nanti aku kabari lagi", "ack"),
-         ("sip, jelas banget", "thanks"), ("wih keren juga ya toko ini", "ack")]
+         ("sip, jelas banget", "thanks"), ("wih keren juga ya toko ini", "ack"),
+         # v8: pengisi POLOS. Justru bentuk inilah yang diketik pelanggan
+         # sungguhan, dan v7 tidak punya satu pun: setiap baris "ack" v7 masih
+         # membawa kata lain yang menandai bahasanya. Giliran tanpa sinyal
+         # bahasa sama sekali adalah tempat v7 meleset ke bahasa Inggris.
+         ("ok", "ack"), ("oke", "ack"), ("iya", "ack"), ("sip", "ack"),
+         ("ok kak", "ack"), ("siap", "ack"), ("yoi", "ack"), ("oke oke", "ack"),
+         ("baik kak", "ack"), ("noted", "ack"), ("ya udah", "ack"), ("hmm oke", "ack")]
 N3_EN = [("hi!", "greet"), ("hello{part}", "greet"), ("good morning!", "greet"),
          ("thanks a lot!", "thanks"), ("okay great{part}", "ack"), ("are you a bot?", "bot"),
          ("hey there", "greet"), ("thank you so much!", "thanks"), ("good evening", "greet"),
          ("thanks, that helps!", "thanks"), ("alright, noted", "ack"), ("cool, thanks!", "thanks"),
          ("am I talking to a robot?", "bot"), ("hiya", "greet"), ("many thanks!", "thanks"),
-         ("okay got it, thank you", "thanks")]
+         ("okay got it, thank you", "thanks"),
+         # v8: padanan pengisi polos di sisi Inggris, supaya kelas yang sama
+         # terwakili di kedua bahasa.
+         ("ok", "ack"), ("okay", "ack"), ("sure", "ack"), ("alright", "ack"),
+         ("got it", "ack"), ("noted", "ack"), ("k", "ack"), ("fine", "ack")]
 N3_REPLY = {
     ("greet", "id"): ["Halo! Selamat datang di Toti Cakery 😊 Mau lihat menu atau pesan sesuatu?",
                       "Hai kak! Ada yang bisa kubantu? Bisa tanya menu, pesan kue, atau cek pesanan ya 😊",
@@ -919,8 +930,8 @@ N2_TOPIK_TERLARANG = {"jam", "kemasan", "lokasi", "samedy"}
 TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 115, "T4": 40, "T5": 180, "T6": 35, "T7": 55,
                 "T8": 55, "T9": 30, "T10": 30, "T11": 30, "T12": 30, "T13": 40,
                 "T14": 45, "T15": 35, "T16": 40,
-                "N1": 150, "N1x": 40, "N2": 25, "N3": 50, "N4": 60, "N5": 70, "N6": 80,
-                "N7": 45, "N8": 35, "N9": 35, "N10": 25, "N11": 20, "N12": 30, "N13": 15}
+                "N1": 150, "N1x": 40, "N2": 25, "N3": 90, "N4": 60, "N5": 70, "N6": 80,
+                "N7": 45, "N8": 55, "N9": 35, "N10": 25, "N11": 20, "N12": 30, "N13": 15}
 VAL_COUNTS = {k: max(2, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 TEST_COUNTS = {k: max(3, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
@@ -933,7 +944,7 @@ EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2
 MT_SHARE = {"T1": .35, "T2": .2, "T3": .45, "T4": .25, "T5": .45, "T6": .35, "T7": 1.0,
             "T8": .5, "T9": .4, "T10": .3, "T11": .1, "T12": .1, "T13": .6,
             "T14": .45, "T15": .7, "T16": 1.0,
-            "N1": .3, "N1x": .3, "N2": .2, "N3": .3, "N4": .25, "N5": .3, "N6": .4,
+            "N1": .3, "N1x": .3, "N2": .2, "N3": .6, "N4": .25, "N5": .3, "N6": .4,
             "N7": .2, "N8": .35, "N9": .3, "N10": .2, "N11": 1.0, "N12": .3, "N13": .2}
 assert set(TRAIN_COUNTS) == set(EN_SHARE) == set(MT_SHARE)
 

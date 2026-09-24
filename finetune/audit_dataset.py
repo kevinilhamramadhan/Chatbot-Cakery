@@ -36,6 +36,7 @@ from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa
 
 from app.llm.agent import pertanyaan_dengan_konteks  # noqa: E402
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER  # noqa: E402
+from app.conversation import bahasa  # noqa: E402
 from app.tools.registry import ALL_TOOLS, TOOLS_UMUM  # noqa: E402
 import faq_topik  # noqa: E402
 
@@ -79,10 +80,20 @@ def pisah_konteks(teks):
 for split, minimal in (("train", 1400), ("validation", 140), ("test", 140)):
     cek(f"jumlah baris {split} >= {minimal}", len(rows[split]) >= minimal, str(len(rows[split])))
 
-# 2. Paritas system block — identik di SEMUA baris, semua split
+# 2. Paritas system block — v8: dua bentuk sah, satu per bahasa. Runtime
+# menempel arahan bahasa (agent.py: TOOL_REMINDER + bahasa.arahan(lang)), jadi
+# baris yang TIDAK memuatnya melatih model dengan prompt yang tidak pernah ia
+# terima. Bahasanya pun harus cocok dengan meta baris itu, bukan asal ada.
+SYSTEM_BLOK = {l: SYSTEM_BLOCK + bahasa.arahan(l) for l in (bahasa.ID, bahasa.EN)}
 for split in rows:
-    beda = sum(1 for r in rows[split] if r["messages"][0]["content"] != SYSTEM_BLOCK)
+    beda = sum(1 for r in rows[split] if r["messages"][0]["content"] not in SYSTEM_BLOK.values())
     cek(f"system block {split} identik dengan runtime", not beda, f"{beda} baris beda")
+    salah_bahasa = sum(
+        1 for r in rows[split]
+        if r["messages"][0]["content"] != SYSTEM_BLOK[bahasa.normalkan(r["meta"].get("lang"))]
+    )
+    cek(f"arahan bahasa {split} cocok dengan meta baris", not salah_bahasa,
+        f"{salah_bahasa} baris salah bahasa")
 
 # 3. Konteks FAQ: hanya di pesan pelanggan TERAKHIR, bentuknya = fungsi runtime
 for split in rows:
@@ -179,8 +190,15 @@ aneh = [(s, r["messages"][-1]["content"][:50]) for s in rows for r in rows[s] if
 cek("balasan bebas penanda internal (#FAQ_…, KONTEKS)", not aneh, str(aneh[:2]))
 
 # 9. FAQ sebagai keterampilan membaca konteks
+# Kata fungsi, bukan kata fakta. Pemeriksaan ini menanyakan "apakah FAKTA di
+# jawaban ada di konteks", jadi kata perangkai tidak boleh ikut dihitung: tanpa
+# tambahan v8 di baris kedua, parafrase pendek yang benar-benar bersumber dari
+# konteks ("Bisa lewat QRIS saja kak — semuanya non-tunai") dihitung salah
+# hanya karena "lewat" dan "semuanya" tidak muncul di dokumen.
 STOP = set("yang di ke dari dan atau untuk pada dengan kami kamu kak ya adalah bisa juga "
-           "itu ini nya akan sudah belum tidak ga hanya saja kalau jika hari jam".split())
+           "itu ini nya akan sudah belum tidak ga hanya saja kalau jika hari jam "
+           "lewat semuanya semua cuma aja pakai buat dulu nanti langsung silakan "
+           "tinggal mohon maaf kok deh sih pun agar supaya".split())
 tak_berdasar = []
 for s in rows:
     for r in rows[s]:

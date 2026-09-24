@@ -1,6 +1,6 @@
 {
   "train": {
-    "total": 1540,
+    "total": 1600,
     "per_type": {
       "N1": 150,
       "N10": 25,
@@ -9,12 +9,12 @@
       "N13": 15,
       "N1x": 40,
       "N2": 25,
-      "N3": 50,
+      "N3": 90,
       "N4": 60,
       "N5": 70,
       "N6": 80,
       "N7": 45,
-      "N8": 35,
+      "N8": 55,
       "N9": 35,
       "T1": 70,
       "T10": 30,
@@ -34,14 +34,14 @@
       "T9": 30
     },
     "tool_rows": 860,
-    "non_tool_rows": 680,
-    "en_share": 0.215,
-    "multi_turn_share": 0.408,
+    "non_tool_rows": 740,
+    "en_share": 0.216,
+    "multi_turn_share": 0.422,
     "noised_share": 0.224,
-    "konteks_share": 0.659
+    "konteks_share": 0.656
   },
   "validation": {
-    "total": 156,
+    "total": 162,
     "per_type": {
       "N1": 15,
       "N10": 2,
@@ -50,12 +50,12 @@
       "N13": 2,
       "N1x": 4,
       "N2": 2,
-      "N3": 5,
+      "N3": 9,
       "N4": 6,
       "N5": 7,
       "N6": 8,
       "N7": 4,
-      "N8": 4,
+      "N8": 6,
       "N9": 4,
       "T1": 7,
       "T10": 3,
@@ -75,14 +75,14 @@
       "T9": 3
     },
     "tool_rows": 88,
-    "non_tool_rows": 68,
-    "en_share": 0.231,
-    "multi_turn_share": 0.391,
-    "noised_share": 0.199,
-    "konteks_share": 0.692
+    "non_tool_rows": 74,
+    "en_share": 0.228,
+    "multi_turn_share": 0.42,
+    "noised_share": 0.198,
+    "konteks_share": 0.66
   },
   "test": {
-    "total": 160,
+    "total": 166,
     "per_type": {
       "N1": 15,
       "N10": 3,
@@ -91,12 +91,12 @@
       "N13": 3,
       "N1x": 4,
       "N2": 3,
-      "N3": 5,
+      "N3": 9,
       "N4": 6,
       "N5": 7,
       "N6": 8,
       "N7": 4,
-      "N8": 4,
+      "N8": 6,
       "N9": 4,
       "T1": 7,
       "T10": 3,
@@ -116,10 +116,10 @@
       "T9": 3
     },
     "tool_rows": 88,
-    "non_tool_rows": 72,
-    "en_share": 0.25,
-    "multi_turn_share": 0.4,
-    "noised_share": 0.194,
-    "konteks_share": 0.613
+    "non_tool_rows": 78,
+    "en_share": 0.247,
+    "multi_turn_share": 0.41,
+    "noised_share": 0.193,
+    "konteks_share": 0.614
   }
 }

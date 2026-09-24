@@ -26,7 +26,7 @@ configs:
         path: data/test.jsonl
 ---
 
-# Toti Cakery — Tool-Calling Fine-Tuning Dataset (Qwen3, v7)
+# Toti Cakery — Tool-Calling Fine-Tuning Dataset (Qwen3, v8)
 
 Synthetic bilingual (Indonesian ~78% / English ~22%) SFT dataset for the Toti
 Cakery WhatsApp chatbot: **13 LangChain tools** (11 for customers, +2 owner-only
@@ -35,7 +35,32 @@ live runtime code (`SYSTEM_PROMPT`, `TOOL_REMINDER`, tool schemas via
 `convert_to_openai_tool`, `_history_view`, `pertanyaan_dengan_konteks`), so the
 training prompt is byte-identical to what the model receives in production.
 
-## What v7 changes (QA end-to-end, 18–19 Sep 2026)
+## What v8 changes (QA 24–25 Sep 2026)
+
+1. **The session's language is stated in the system block.** The runtime already
+   decides the conversation language and makes it sticky, but v7 never told the
+   model — the prompt asked it to guess from the customer's text each turn. On
+   turns with no language signal at all ("ok", "iya", "sure") the guess missed:
+   an Indonesian conversation answered *"Still here 😊 Type \*menu\* untuk lihat
+   daftarnya ya"*, 3 of 6 times at temperature 0.7 and still 1 of 13 at 0.3.
+   Every v8 row carries `bahasa.arahan(lang)` at the end of the system block,
+   rendered by the same runtime function, matching `meta.lang`.
+2. **Filler turns are actually trained.** The failing class was the thinnest in
+   the data: 29 short (≤2 word) mid-conversation turns out of 1540 rows, and
+   **zero** bare fillers — every v7 "ack" row still carried another word that
+   gave the language away. v8: 53 mid-conversation filler turns, with bare
+   `ok`/`oke`/`iya`/`sip`/`sure`/`noted`/`k` in both languages.
+3. **Language adherence is measured.** The eval harness reports
+   `wrong_language_rate` (share of text replies that miss the session language);
+   v7's metrics were all tool-related, so the bug customers actually saw could
+   not be caught. Three smoke cases cover turns with no language signal.
+4. **Recipe unchanged on purpose.** Same hyperparameters as v6/v7 (2 epochs,
+   lr 2e-4, LoRA r/alpha 16), so v7 → v8 is a clean data-only comparison.
+
+Details: `PROMPT_FINETUNE_V8.md` in the chatbot repo. Earlier revisions are kept
+as branches: `v5`, `v6`, `v7`.
+
+## What v7 changed (QA end-to-end, 18–19 Sep 2026)
 
 1. **FAQ context where production puts it.** The runtime prepends retrieved FAQ
    to the customer's message (`KONTEKS FAQ … Pertanyaan pelanggan: …`) on ~65%
@@ -60,7 +85,7 @@ training prompt is byte-identical to what the model receives in production.
 
 ```json
 {"messages": [
-   {"role": "system", "content": "<SYSTEM_PROMPT>\n\n<TOOL_REMINDER>"},
+   {"role": "system", "content": "<SYSTEM_PROMPT>\n\n<TOOL_REMINDER><ARAHAN_BAHASA>"},
    {"role": "user", "content": "menu dong"},
    {"role": "assistant", "content": "[Aku sudah menampilkan daftar menu via tool get_menu]"},
    {"role": "user", "content": "KONTEKS FAQ (jawab pertanyaan umum berdasarkan ini):\nQ: …\nA: …\n\nPertanyaan pelanggan: lapis legit premium 1"},
@@ -82,9 +107,9 @@ training prompt is byte-identical to what the model receives in production.
 
 | Split | Rows | Purpose |
 |---|---|---|
-| `train` | 1540 | weight updates |
-| `validation` | 156 | same distribution as train — `eval_dataset` for val-loss / early stopping |
-| `test` | 160 | held-out templates (last ~15% of every pool), 2 products (`Cake 22cm`, `Giant Cookies 15cm`), 1 flavour (`Matcha`), 2 FAQ topics — evaluation only |
+| `train` | 1600 | weight updates |
+| `validation` | 162 | same distribution as train — `eval_dataset` for val-loss / early stopping |
+| `test` | 166 | held-out templates (last ~15% of every pool), 2 products (`Cake 22cm`, `Giant Cookies 15cm`), 1 flavour (`Matcha`), 2 FAQ topics — evaluation only |
 
 Types (train): tool rows T1–T16 (menu, detail, compare, order, multi-item,
 follow-up quantity, order status, cancel, custom-cake escalation, owner
