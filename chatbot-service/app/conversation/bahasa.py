@@ -523,5 +523,29 @@ def teks(kunci: str, lang: str | None = None, **isian) -> str:
         return pola
 
 
+# ── Arahan bahasa untuk model ────────────────────────────────────────────────
+# Balasan BEBAS (sapaan, basa-basi, jawaban FAQ) tidak lewat _TEMPLAT, jadi
+# bahasanya dulu ditentukan model sendiri tiap giliran -- dan model menebak dari
+# teks mentah, bukan dari bahasa sesi. Terukur: "ok" di tengah percakapan
+# Indonesia dijawab "Still here 😊 Type *menu* untuk lihat daftarnya ya", 3 dari
+# 6 kali, bahkan di temperature 0,3. Sesi sudah tahu jawabannya (deteksi() +
+# lengket lewat store.set_lang) -- kalimat ini yang menyampaikannya ke model.
+_ARAHAN = {
+    ID: ("\n- BAHASA: pelanggan ini memakai Bahasa Indonesia. Balas HANYA dalam "
+         "Bahasa Indonesia, termasuk untuk sapaan dan jawaban singkat."),
+    EN: ("\n- LANGUAGE: this customer speaks English. Reply ONLY in English, "
+         "including greetings and short acknowledgements."),
+}
+
+
+def arahan(lang: str | None) -> str:
+    """Satu baris perintah bahasa untuk ditempel ke blok system.
+
+    Bentuknya konstan per bahasa, bukan per giliran: prefix KV-cache Ollama
+    tetap utuh selama pelanggan tidak berganti bahasa di tengah percakapan.
+    """
+    return _ARAHAN[normalkan(lang)]
+
+
 def semua_kunci() -> list[str]:
     return sorted(_TEMPLAT)

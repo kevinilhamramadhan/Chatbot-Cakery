@@ -87,7 +87,7 @@ assert pertanyaan_dengan_konteks("x", "D").startswith(FAQ_USER_PREFIX)
 # every system message into the TOP system block joined by "\n\n" — verified in
 # ollama v0.23.2 template/template.go collate(). The dataset reproduces that
 # final rendering: system content ends with "\n\n" + TOOL_REMINDER).
-assert "SystemMessage(content=TOOL_REMINDER)" in _agent_src
+assert "SystemMessage(content=TOOL_REMINDER + bahasa.arahan(lang))" in _agent_src
 _store_src = (ROOT / "chatbot-service/app/rag/store.py").read_text()
 assert '"\\n\\n---\\n\\n".join' in _store_src
 
@@ -1171,7 +1171,11 @@ class Gen:
         # v4 §3.5 — reminder menempel di ujung system content, PERSIS seperti
         # yang dilihat model di serving (Ollama meng-collate semua system
         # message ke blok teratas, digabung "\n\n").
-        messages = [{"role": "system", "content": SYSTEM_BLOCK}] + history
+        # v8: arahan bahasa ikut ditempel, sama seperti runtime (agent.py).
+        # Tanpa ini model tidak pernah melihat perintah bahasa saat dilatih,
+        # lalu menebak sendiri di serving — "ok" dijawab bahasa Inggris.
+        messages = [{"role": "system",
+                     "content": SYSTEM_BLOCK + bahasa.arahan(lang)}] + history
         # v7: FAQ hasil RAG menumpang di pesan pelanggan — dirakit oleh fungsi
         # runtime yang sama (agent.pertanyaan_dengan_konteks). History tetap teks
         # mentah: runtime menyimpan pesan pelanggan apa adanya.
@@ -1777,13 +1781,22 @@ def _validate_args(name: str, obj: dict) -> None:
         raise AssertionError(name)
 
 
+# Dua bentuk sah, satu per bahasa — bukan bebas: kalau arahan bahasanya hilang
+# atau berubah bentuk, baris datasetnya tidak lagi cocok dengan yang dikirim
+# runtime dan self_check harus gagal, bukan lewat diam-diam.
+_SYSTEM_BLOK_SAH = frozenset(
+    SYSTEM_BLOCK + bahasa.arahan(l) for l in (bahasa.ID, bahasa.EN)
+)
+
+
 def self_check(rows_by_split):
     for split, rows in rows_by_split.items():
         for row in rows:
             msgs = row["messages"]
             # v7: system block SELALU identik (prompt + reminder) — FAQ tidak
             # pernah masuk sini lagi; itu yang membuat prefix KV-cache stabil.
-            assert msgs[0]["role"] == "system" and msgs[0]["content"] == SYSTEM_BLOCK, split
+            assert msgs[0]["role"] == "system", split
+            assert msgs[0]["content"] in _SYSTEM_BLOK_SAH, split
             body = msgs[1:]
             assert len(body) % 2 == 0 and len(body) <= 8
             for j, m in enumerate(body):

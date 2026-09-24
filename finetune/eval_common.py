@@ -28,11 +28,18 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # no
 
 from app.llm.agent import _history_view  # noqa: E402
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER  # noqa: E402
+from app.conversation import bahasa  # noqa: E402
 from app.tools.formatting import _tokens  # noqa: E402
 
 from generate_dataset import MENU  # noqa: E402  (single menu truth)
 
 # ── Runtime-parity assembly ───────────────────────────────────────────────────
+
+def _arahan_baris(system_msg: dict) -> str:
+    """Arahan bahasa yang dipakai baris ini, diambil dari blok system-nya."""
+    isi = system_msg.get("content", "")
+    return bahasa.arahan(bahasa.EN if isi.endswith(bahasa.arahan(bahasa.EN)) else bahasa.ID)
+
 
 def to_lc_messages(messages: list[dict]):
     """messages = row["messages"][:-1] (everything up to the gold turn)."""
@@ -47,7 +54,9 @@ def to_lc_messages(messages: list[dict]):
             c = m.get("content") or ""
             # _history_view is idempotent except on already-truncated text
             out.append(AIMessage(content=c if c.endswith("…(dipotong)") else _history_view(c)))
-    out.append(SystemMessage(content=TOOL_REMINDER))
+    # Bahasa baris dibaca dari blok system-nya sendiri (dataset menempelkannya
+    # di sana), supaya eval merakit prompt yang sama persis dengan runtime.
+    out.append(SystemMessage(content=TOOL_REMINDER + _arahan_baris(messages[0])))
     out.append(HumanMessage(content=question["content"]))
     return out
 
@@ -182,5 +191,8 @@ if __name__ == "__main__":  # self-check
     lc = to_lc_messages(msgs)
     assert lc[0].content == SYSTEM_PROMPT
     assert lc[2].content == "[Aku sudah menampilkan daftar menu via tool get_menu]"
-    assert lc[-2].content == TOOL_REMINDER and lc[-1].content == tanya
+    assert lc[-2].content == TOOL_REMINDER + bahasa.arahan(bahasa.ID)
+    assert lc[-1].content == tanya
+    msgs_en = [dict(msgs[0], content=msgs[0]["content"] + bahasa.arahan(bahasa.EN))] + msgs[1:]
+    assert to_lc_messages(msgs_en)[-2].content == TOOL_REMINDER + bahasa.arahan(bahasa.EN)
     print("eval_common self-check OK")

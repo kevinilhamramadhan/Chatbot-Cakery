@@ -125,6 +125,10 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # this host: variable system block = 39-46s/turn, constant = 3-6s/turn.
     # So the system block stays byte-identical and the retrieved context rides
     # along with the question instead.
+    from app.conversation import store
+
+    lang = await store.get_lang(wa_number)
+
     messages: list = [SystemMessage(content=SYSTEM_PROMPT)]
     for h in history:
         messages.append(
@@ -134,15 +138,19 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         )
     # Routing reminder (see TOOL_REMINDER note in prompt.py: Ollama collates it
     # into the top system block — the dataset/eval reproduce that placement).
-    messages.append(SystemMessage(content=TOOL_REMINDER))
+    #
+    # Bahasa balasan bebas ditempel di sini, BUKAN diserahkan ke model seperti
+    # dulu: sesi sudah memutuskannya (orchestrator memanggil bahasa.deteksi lalu
+    # menyimpannya), dan model yang menebak sendiri tiap giliran salah pada
+    # pesan pendek — "ok" dijawab bahasa Inggris. Prefix KV-cache tetap aman:
+    # kalimatnya konstan per bahasa, jadi bentuk prompt bertambah dari dua
+    # (peran) jadi empat, bukan berubah tiap giliran.
+    messages.append(SystemMessage(content=TOOL_REMINDER + bahasa.arahan(lang)))
     messages.append(HumanMessage(content=pertanyaan_dengan_konteks(user_text, rag_context)))
 
     # Tool Owner tidak dimuat untuk pelanggan biasa — bukan cuma ditolak waktu
     # dipanggil. Prefix KV-cache tetap aman: daftarnya konstan per peran, jadi
     # yang ada hanya dua bentuk prompt, bukan berubah tiap giliran.
-    from app.conversation import store
-
-    lang = await store.get_lang(wa_number)
     tools = await tools_untuk(wa_number)
     diizinkan = {t.name for t in tools}
     llm = get_llm().bind_tools(tools)
