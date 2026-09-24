@@ -34,14 +34,32 @@ class _RedactAccessLog(logging.Filter):
         re.compile(r"(/webhook/internal/takeover/)[^\s\"/?]+"),
     )
 
+    def _sensor(self, teks: str) -> str:
+        for pattern in self._PATTERNS:
+            teks = pattern.sub(r"\1***", teks)
+        return teks
+
     def filter(self, record: logging.LogRecord) -> bool:
+        # Yang disensor adalah ARGUMEN path-nya, bukan pesan jadinya. uvicorn
+        # AccessFormatter membongkar record.args jadi 5 nilai
+        # (client_addr, method, full_path, http_version, status_code); kalau
+        # filter ini menaruh pesan jadi di record.msg lalu mengosongkan args --
+        # seperti versi sebelumnya -- formatter itu jatuh dengan
+        # "ValueError: not enough values to unpack (expected 5, got 0)" dan
+        # SETIAP webhook mencetak "--- Logging error ---" + traceback ke log.
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
+            disensor = self._sensor(args[2])
+            if disensor != args[2]:
+                record.args = args[:2] + (disensor,) + args[3:]
+            return True
+        # Bentuk lain (pesan yang sudah jadi string): tidak ada placeholder yang
+        # perlu diisi, jadi aman menimpa msg dan mengosongkan args.
         try:
             message = record.getMessage()
         except Exception:  # noqa: BLE001 - never break logging over formatting
             return True
-        redacted = message
-        for pattern in self._PATTERNS:
-            redacted = pattern.sub(r"\1***", redacted)
+        redacted = self._sensor(message)
         if redacted != message:
             record.msg = redacted
             record.args = ()

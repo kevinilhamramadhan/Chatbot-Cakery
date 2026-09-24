@@ -138,3 +138,30 @@ def test_sanitize_relay_strips_links_and_truncates():
     assert "\n" not in sanitize_relay("baris1\nbaris2")
     assert len(sanitize_relay("a" * 500)) <= 205
     assert sanitize_relay("") == "(tidak ada keterangan)"
+
+
+# ── Token webhook disensor TANPA merusak access log uvicorn ──────────────────
+def test_redact_access_log_keeps_uvicorn_args():
+    """Sensor bekerja di argumen path, bukan di pesan jadi.
+
+    Versi lama menaruh pesan jadi di record.msg lalu mengosongkan record.args,
+    dan uvicorn.logging.AccessFormatter — yang membongkar args jadi 5 nilai —
+    jatuh dengan "not enough values to unpack" di SETIAP webhook.
+    """
+    import logging
+
+    from uvicorn.logging import AccessFormatter
+
+    from app.main import _RedactAccessLog
+
+    rekaman = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("172.18.0.5:46268", "POST", "/webhook/whatsapp/RAHASIA", "1.1", 200),
+        None,
+    )
+    assert _RedactAccessLog().filter(rekaman) is True
+    assert len(rekaman.args) == 5, "args harus tetap 5 nilai untuk AccessFormatter"
+    baris = AccessFormatter(use_colors=False).format(rekaman)
+    assert "RAHASIA" not in baris
+    assert "/webhook/whatsapp/***" in baris and "200" in baris
