@@ -231,12 +231,39 @@ cek("split test memakai topik FAQ khusus test",
     any(q in user_akhir(r) for r in rows["test"] for q in doc_test))
 
 # 10. Kebocoran & duplikat
-tanya_test = {pisah_konteks(user_akhir(r))[1] for r in rows["test"]}
-bocor = [t for s in ("train", "validation") for r in rows[s]
+# N14 dikecualikan, DAN itu justru inti tipe ini: pasangan kontras memakai teks
+# pelanggan yang sama persis di kedua bahasa ("ok" tetap "ok"), supaya satu-
+# satunya pembeda adalah bahasa sesi. Menuntut teks unik di sini sama saja
+# dengan melarang kontrasnya. Pemeriksaannya tetap penuh untuk semua tipe lain,
+# tempat teks yang berulang memang tanda hafalan atau bocor antar split.
+def bukan_n14(r):
+    return r["meta"]["type"] != "N14"
+
+tanya_test = {pisah_konteks(user_akhir(r))[1] for r in rows["test"] if bukan_n14(r)}
+bocor = [t for s in ("train", "validation") for r in rows[s] if bukan_n14(r)
          for t in [pisah_konteks(user_akhir(r))[1]] if t in tanya_test]
-cek("tidak ada teks pelanggan test yang bocor ke train/val", not bocor, str(bocor[:2]))
-dup = [t for t, n in Counter(pisah_konteks(user_akhir(r))[1] for r in rows["train"]).items() if n > 1]
-cek("tidak ada teks pelanggan kembar di train", not dup, f"{len(dup)} kembar")
+cek("tidak ada teks pelanggan test yang bocor ke train/val (selain N14)", not bocor, str(bocor[:2]))
+dup = [t for t, n in Counter(pisah_konteks(user_akhir(r))[1]
+                             for r in rows["train"] if bukan_n14(r)).items() if n > 1]
+cek("tidak ada teks pelanggan kembar di train (selain N14)", not dup, f"{len(dup)} kembar")
+
+# 11. v9 — pasangan kontras N14 benar-benar berpasangan
+n14 = [r for s in rows for r in rows[s] if r["meta"]["type"] == "N14"]
+per_bahasa = Counter(r["meta"]["lang"] for r in n14)
+cek("N14 seimbang id/en", per_bahasa.get("id") == per_bahasa.get("en"), str(dict(per_bahasa)))
+cek("N14 tidak pernah membawa konteks FAQ",
+    all(not user_akhir(r).startswith(PREFIX) for r in n14),
+    str(sum(user_akhir(r).startswith(PREFIX) for r in n14)))
+cek("N14 selalu ber-history (pengisi muncul di TENGAH percakapan)",
+    all(len(r["messages"]) > 3 for r in n14), str(min(len(r["messages"]) for r in n14)))
+# Balasan baris id tidak boleh memuat frasa pembuka Inggris, dan sebaliknya —
+# ini yang gagal di v8 (8 dari 25 balasan sesi Indonesia dibuka bahasa Inggris).
+_EN_FRASA = ("i'm ", "i am ", "here whenever", "sure thing", "noted!", "ready to help")
+salah_arah = [r["messages"][-1]["content"][:40] for r in n14
+              if r["meta"]["lang"] == "id"
+              and any(f in r["messages"][-1]["content"].lower() for f in _EN_FRASA)]
+cek("balasan N14 berbahasa Indonesia bebas frasa pembuka Inggris",
+    not salah_arah, str(salah_arah[:2]))
 
 print("\n".join(catat))
 print()

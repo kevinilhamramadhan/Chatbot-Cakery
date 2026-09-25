@@ -673,24 +673,52 @@ N3_ID = [("halo{part}", "greet"), ("hai kak", "greet"), ("assalamualaikum", "gre
          ("halo bot", "bot"), ("kamu bot ya{part}?", "bot"), ("kamu manusia atau robot{part}?", "bot"),
          ("makasih ya kak!", "thanks"), ("makasih banyak infonya{part}", "thanks"),
          ("oke sip{part}", "ack"), ("mantap{part}", "ack"), ("oke deh, nanti aku kabari lagi", "ack"),
-         ("sip, jelas banget", "thanks"), ("wih keren juga ya toko ini", "ack"),
-         # v8: pengisi POLOS. Justru bentuk inilah yang diketik pelanggan
-         # sungguhan, dan v7 tidak punya satu pun: setiap baris "ack" v7 masih
-         # membawa kata lain yang menandai bahasanya. Giliran tanpa sinyal
-         # bahasa sama sekali adalah tempat v7 meleset ke bahasa Inggris.
-         ("ok", "ack"), ("oke", "ack"), ("iya", "ack"), ("sip", "ack"),
-         ("ok kak", "ack"), ("siap", "ack"), ("yoi", "ack"), ("oke oke", "ack"),
-         ("baik kak", "ack"), ("noted", "ack"), ("ya udah", "ack"), ("hmm oke", "ack")]
+         ("sip, jelas banget", "thanks"), ("wih keren juga ya toko ini", "ack")]
 N3_EN = [("hi!", "greet"), ("hello{part}", "greet"), ("good morning!", "greet"),
          ("thanks a lot!", "thanks"), ("okay great{part}", "ack"), ("are you a bot?", "bot"),
          ("hey there", "greet"), ("thank you so much!", "thanks"), ("good evening", "greet"),
          ("thanks, that helps!", "thanks"), ("alright, noted", "ack"), ("cool, thanks!", "thanks"),
          ("am I talking to a robot?", "bot"), ("hiya", "greet"), ("many thanks!", "thanks"),
-         ("okay got it, thank you", "thanks"),
-         # v8: padanan pengisi polos di sisi Inggris, supaya kelas yang sama
-         # terwakili di kedua bahasa.
-         ("ok", "ack"), ("okay", "ack"), ("sure", "ack"), ("alright", "ack"),
-         ("got it", "ack"), ("noted", "ack"), ("k", "ack"), ("fine", "ack")]
+         ("okay got it, thank you", "thanks")]
+# ── v9: pengisi berpasangan kontras (N14) ───────────────────────────────────
+# Kegagalan yang mau ditutup: sesi Indonesia + pesan pengisi -> model membuka
+# dengan bahasa Inggris. Menambah contoh pengisi saja TIDAK cukup dan malah
+# memperburuk (v8 di VM: 8 dari 25 bercampur, v7 1 dari 25) -- model cuma
+# mendapat lebih banyak frasa Inggris siap pakai.
+#
+# Di sini pasangannya dibuat sengaja: teks pelanggan sama persis (separuh
+# daftar ini kata yang identik di kedua bahasa), history topik sama, yang beda
+# HANYA bahasa sesi. Satu-satunya cara menjawab benar adalah membaca arahan
+# bahasa di blok system dan bahasa history -- bukan menebak dari kata terakhir,
+# karena kata terakhirnya tidak menandakan apa pun.
+N14_PASANG = [
+    ("ok", "ok"), ("okay", "okay"), ("oke", "okay"), ("ok kak", "ok thanks"),
+    ("hmm ok", "hmm ok"), ("k", "k"), ("noted", "noted"), ("iya", "yes"),
+    ("sip", "alright"), ("siap", "got it"), ("baik", "sure"), ("ya udah", "fine"),
+    ("oke oke", "okay okay"), ("yoi", "cool"), ("oke sip", "okay cool"),
+]
+# Pembuka percakapan yang dipasangkan: isi sama, bahasa beda.
+N14_PEMBUKA = [
+    (("halo kak mau tanya", "Halo! Selamat datang di Toti Cakery 😊 Mau lihat menu atau pesan sesuatu?"),
+     ("hi, i want to ask something", "Hi! Welcome to Toti Cakery 😊 Would you like to see the menu or place an order?")),
+    (("halo, masih buka?", "Halo kak! 😊 Ada yang bisa kubantu — mau lihat menu atau pesan kue?"),
+     ("hello, are you open?", "Hi there! 😊 How can I help — menu, or would you like to order?")),
+    (("kak, aku mau pesan kue", "Boleh kak 😊 Sebutkan nama kue dan jumlahnya ya, atau ketik *menu* untuk lihat daftarnya."),
+     ("hi, i'd like to order a cake", "Sure 😊 Just tell me the cake and how many, or type *menu* to see the list.")),
+    (("makasih infonya ya", "Sama-sama kak! Kalau butuh apa-apa lagi, chat aja ya 😊"),
+     ("thanks for the info", "You're welcome! Message me anytime you need something 😊")),
+]
+# Balasan untuk giliran pengisi. Sengaja TIDAK diperbanyak: yang kurang di v7/v8
+# bukan jumlah frasa, melainkan pelajaran KAPAN frasa Inggris boleh dipakai.
+N14_REPLY = {
+    "id": ["Siap kak! Kalau sudah mau pesan atau ada pertanyaan lain, aku di sini ya 😊",
+           "Oke kak 😊 Kalau mau tanya atau pesan, tinggal bilang ya.",
+           "Baik kak 😊 Aku tunggu kabarnya ya."],
+    "en": ["Great! I'm here whenever you're ready to order 😊",
+           "Sure thing! Just message me when you need anything 😊",
+           "Noted! I'll be here if you need the menu or want to order 😊"],
+}
+
 N3_REPLY = {
     ("greet", "id"): ["Halo! Selamat datang di Toti Cakery 😊 Mau lihat menu atau pesan sesuatu?",
                       "Hai kak! Ada yang bisa kubantu? Bisa tanya menu, pesan kue, atau cek pesanan ya 😊",
@@ -930,28 +958,37 @@ N2_TOPIK_TERLARANG = {"jam", "kemasan", "lokasi", "samedy"}
 TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 115, "T4": 40, "T5": 180, "T6": 35, "T7": 55,
                 "T8": 55, "T9": 30, "T10": 30, "T11": 30, "T12": 30, "T13": 40,
                 "T14": 45, "T15": 35, "T16": 40,
-                "N1": 150, "N1x": 40, "N2": 25, "N3": 90, "N4": 60, "N5": 70, "N6": 80,
-                "N7": 45, "N8": 55, "N9": 35, "N10": 25, "N11": 20, "N12": 30, "N13": 15}
+                "N1": 150, "N1x": 40, "N2": 25, "N3": 50, "N4": 60, "N5": 70, "N6": 80,
+                "N7": 45, "N8": 35, "N9": 35, "N10": 25, "N11": 20, "N12": 30, "N13": 15,
+                # v9: pengisi berpasangan kontras — teks pelanggan sama, bahasa
+                # sesi beda. Separuh id separuh en, SELALU ber-history.
+                "N14": 60}
 VAL_COUNTS = {k: max(2, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 TEST_COUNTS = {k: max(3, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
             "T8": .2, "T9": .2, "T10": .2, "T11": .25, "T12": .25, "T13": .2,
             "T14": .2, "T15": .2, "T16": .2,
             "N1": .25, "N1x": .2, "N2": .2, "N3": .25, "N4": .25, "N5": .2, "N6": .2,
-            "N7": .2, "N8": .2, "N9": .2, "N10": .2, "N11": .2, "N12": .2, "N13": .6}
+            "N7": .2, "N8": .2, "N9": .2, "N10": .2, "N11": .2, "N12": .2, "N13": .6,
+            "N14": .5}
 # v5: T5/T6/T8 multi-turn up — that is where the "escalate" history kind lives.
 # v7: T16/N11 selalu ber-history (tagihan harus sudah terbit) — diatur di _build.
 MT_SHARE = {"T1": .35, "T2": .2, "T3": .45, "T4": .25, "T5": .45, "T6": .35, "T7": 1.0,
             "T8": .5, "T9": .4, "T10": .3, "T11": .1, "T12": .1, "T13": .6,
             "T14": .45, "T15": .7, "T16": 1.0,
-            "N1": .3, "N1x": .3, "N2": .2, "N3": .6, "N4": .25, "N5": .3, "N6": .4,
-            "N7": .2, "N8": .35, "N9": .3, "N10": .2, "N11": 1.0, "N12": .3, "N13": .2}
+            "N1": .3, "N1x": .3, "N2": .2, "N3": .3, "N4": .25, "N5": .3, "N6": .4,
+            "N7": .2, "N8": .35, "N9": .3, "N10": .2, "N11": 1.0, "N12": .3, "N13": .2,
+            "N14": 1.0}
 assert set(TRAIN_COUNTS) == set(EN_SHARE) == set(MT_SHARE)
 
 # Seberapa sering baris membawa KONTEKS FAQ di pesan pelanggan. Runtime (QA 19
 # Sep): 136 dari 208 giliran model (65%) lolos ambang RAG. Pertanyaan di luar
 # toko hampir tidak pernah lolos; sapaan kadang lolos.
-KONTEKS_SHARE = {"N4": .1, "N3": .4, "N8": .4, "N12": .4, "N13": .4}
+# N14 = 0: pesan pengisi ("ok") tidak pernah lolos ambang RAG di runtime, jadi
+# konteks FAQ di baris itu melatih bentuk yang tidak ada. Lagipula konteks yang
+# berbeda di kedua sisi pasangan justru merusak kontrasnya — yang harus berbeda
+# HANYA bahasanya.
+KONTEKS_SHARE = {"N4": .1, "N3": .4, "N8": .4, "N12": .4, "N13": .4, "N14": 0.0}
 KONTEKS_DEFAULT = .65
 # Sebagian kecil dokumen konteks diambil dari FAQ asli VM — contoh format yang
 # benar-benar diterima model di produksi.
@@ -1263,7 +1300,13 @@ class Gen:
     # ── per-type generators ──────────────────────────────────────────────────
     def gen_type(self, rtype, split, count):
         pools = self._pools(rtype, split)
-        plan = self.plan(count, EN_SHARE[rtype], MT_SHARE[rtype])
+        if rtype == "N14":
+            # Selang-seling ketat, bukan acak: baris genap (id) dan ganjil (en)
+            # membentuk PASANGAN yang isinya sama. Kalau urutannya diacak seperti
+            # tipe lain, pasangannya buyar dan kontrasnya hilang.
+            plan = [("id" if i % 2 == 0 else "en", True) for i in range(count)]
+        else:
+            plan = self.plan(count, EN_SHARE[rtype], MT_SHARE[rtype])
         # exact noise plan: 25% of ID rows / 15% of EN rows
         id_idx = [i for i, (l, _) in enumerate(plan) if l == "id"]
         en_idx = [i for i, (l, _) in enumerate(plan) if l == "en"]
@@ -1305,7 +1348,7 @@ class Gen:
                      "T13": ["payment", "payment", "chat"],
                      "T14": ["status", "chat", "payment"],
                      "N9": ["chat", "menu"],
-                     "N7": ["chat"], "N8": ["chat", "menu"],
+                     "N7": ["chat"], "N8": ["chat", "menu"], "N14": ["chat"],
                      }.get(rtype, ["chat", "menu", "status"])
         return self.history(kind_pool, n)
 
@@ -1672,6 +1715,22 @@ class Gen:
             text, kind = uniq(build)
             return self.make_row(split, rtype, lang, history, text,
                                  self.text_turn(rng.choice(N12_REPLY[(kind, lang)])), noised=False)
+
+        if rtype == "N14":
+            # Baris "id" memilih pasangannya; baris "en" berikutnya memakai
+            # pasangan yang SAMA. Karena rencananya selang-seling ketat, yang
+            # tersimpan di self selalu pasangan milik baris sebelumnya.
+            if lang == "id":
+                pasang = sel(N14_PASANG)
+                buka = sel(N14_PEMBUKA)
+                self._n14 = (self.pick_tpl("N14teks", pasang, P["regime"], total_count),
+                             rng.choice(buka))
+            teks_pas, buka_pas = self._n14
+            teks = teks_pas[0] if lang == "id" else teks_pas[1]
+            u, a = buka_pas[0] if lang == "id" else buka_pas[1]
+            history = [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
+            return self.make_row(split, rtype, lang, history, teks,
+                                 self.text_turn(rng.choice(N14_REPLY[lang])), noised=False)
 
         if rtype == "N3":
             pool = sel(N3_EN if lang == "en" else N3_ID)

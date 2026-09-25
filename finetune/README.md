@@ -26,7 +26,7 @@ configs:
         path: data/test.jsonl
 ---
 
-# Toti Cakery — Tool-Calling Fine-Tuning Dataset (Qwen3, v8)
+# Toti Cakery — Tool-Calling Fine-Tuning Dataset (Qwen3, v9)
 
 Synthetic bilingual (Indonesian ~78% / English ~22%) SFT dataset for the Toti
 Cakery WhatsApp chatbot: **13 LangChain tools** (11 for customers, +2 owner-only
@@ -35,7 +35,40 @@ live runtime code (`SYSTEM_PROMPT`, `TOOL_REMINDER`, tool schemas via
 `convert_to_openai_tool`, `_history_view`, `pertanyaan_dengan_konteks`), so the
 training prompt is byte-identical to what the model receives in production.
 
-## What v8 changes (QA 24–25 Sep 2026)
+## What v9 changes (measured failure of v8, 25 Sep 2026)
+
+v8 set out to stop Indonesian sessions being answered in English on filler
+turns. It made that worse. A/B on the live VM, 25 sessions per model, identical
+prompts: **v7 mixed English into 1/25 replies, v8 into 8/25.** v8 did remove the
+invented words v7 produced (0/25 vs 2/25), but on its own target it regressed.
+
+The cause is traceable to v8's own change: raising the filler row count while
+keeping the English share meant *more English filler openers* (~4 → ~15 rows)
+for exactly the turn type that was failing. The model was given more ready-made
+English phrases, never taught **when** they apply. v8's metric also hid it —
+`wrong_language_rate` read 0.000 because it only matched whole English
+sentences, not code-mixed replies.
+
+1. **v8's filler inflation is reverted** to v7 values (N3 50, N8 35, MT 0.3).
+2. **New type N14 — contrastive filler pairs.** Each pair is two rows identical
+   in everything but language: same customer text (12 of 30 pairs use a
+   byte-identical token — `ok`, `hmm ok`, `k`, `noted`), same opener content in
+   the two languages, reference reply in each language. Since the last message
+   carries no language signal at all, the only way to answer correctly is to
+   read the language directive and the history. 60 train / 6 val / 6 test.
+3. **N14 never carries FAQ context** — "ok" never passes the RAG threshold in
+   production, and differing context would break the contrast.
+4. **The language metric now matches words, not whole phrases**, and ignores
+   loanwords Indonesian customers use anyway (menu, order, chat, ok). With the
+   old detector, v8's failure was invisible.
+5. **Audit 37 → 41 checks** for the pair invariants; the "unique customer text"
+   and "no leakage across splits" checks now exempt N14, where repeated text is
+   the design.
+
+Details and pass/fail criteria: `PROMPT_FINETUNE_V9.md`. Earlier revisions are
+kept as branches: `v5`, `v6`, `v7`, `v8`.
+
+## What v8 changed (QA 24–25 Sep 2026)
 
 1. **The session's language is stated in the system block.** The runtime already
    decides the conversation language and makes it sticky, but v7 never told the
@@ -58,7 +91,7 @@ training prompt is byte-identical to what the model receives in production.
    lr 2e-4, LoRA r/alpha 16), so v7 → v8 is a clean data-only comparison.
 
 Details: `PROMPT_FINETUNE_V8.md` in the chatbot repo. Earlier revisions are kept
-as branches: `v5`, `v6`, `v7`.
+as branches: `v5`, `v6`, `v7`, `v8`.
 
 ## What v7 changed (QA end-to-end, 18–19 Sep 2026)
 
