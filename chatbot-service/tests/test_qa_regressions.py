@@ -900,6 +900,34 @@ async def test_terima_kasih_bukan_persetujuan_tawaran_admin(patch_externals):
     assert (reply.text or "").strip(), "pelanggan tetap harus dijawab"
 
 
+async def test_tawaran_admin_diterima_kalimat_panjang(patch_externals):
+    """Gladi demo 26 Sep: "iya mau ngobrol sama admin" ditolak karena lebih dari
+    empat kata, dan model menjawab "aku asisten virtual" alih-alih menyambungkan."""
+    from app.tools.escalate import escalate_to_admin
+
+    _mock_agent(patch_externals["monkeypatch"], "Aku asisten virtual kak 😊")
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom"}))
+
+    await handle_message(WA, "iya mau ngobrol sama admin")
+
+    assert await store.is_takeover_active(WA) is True
+
+
+async def test_tawaran_admin_ditolak_kalimat_panjang(patch_externals):
+    from app.tools.escalate import escalate_to_admin
+
+    _mock_agent(patch_externals["monkeypatch"], "Baik kak.")
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom"}))
+
+    await handle_message(WA, "ga usah ke admin, tanya kamu aja")
+
+    assert await store.is_takeover_active(WA) is False
+
+
 async def test_tawaran_admin_kedaluwarsa_setelah_beberapa_giliran(patch_externals):
     """Tawaran yang menggantung lama tidak boleh diterima kata "ya" yang
     kebetulan lewat di kalimat lain."""

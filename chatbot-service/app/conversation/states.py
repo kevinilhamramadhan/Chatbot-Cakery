@@ -78,6 +78,25 @@ def text_is_gratitude(text: str) -> bool:
     return any(w in t for w in _TERIMA_KASIH)
 
 
+_MANUSIA = {"admin", "cs", "manusia", "orang", "human", "staff", "staf", "owner"}
+_PENOLAKAN = {"ga", "gak", "nggak", "enggak", "gausah", "tidak", "tak", "jangan",
+              "no", "not", "dont"}
+
+
+def text_asks_for_human(text: str) -> bool:
+    """Minta disambungkan ke orang, dengan kalimat yang terlalu panjang untuk
+    aturan konfirmasi pendek.
+
+    Hanya dipakai saat tawaran sambung ke admin sedang menggantung. Terukur di
+    gladi demo: "iya mau ngobrol sama admin" (5 kata) ditolak text_is_confirm,
+    jadi takeover tidak pernah menyala dan model malah menjawab "aku asisten
+    virtual" dua kali berturut-turut. Kalimat yang menolak ("ga usah admin")
+    tidak ikut.
+    """
+    words = set(_tokens(text))
+    return bool(words & _MANUSIA) and not words & _PENOLAKAN
+
+
 def text_is_cancel(text: str) -> bool:
     t = " ".join(_tokens(text))
     return any(w in t for w in CANCEL_WORDS)

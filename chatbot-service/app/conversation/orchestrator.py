@@ -22,6 +22,7 @@ from app.conversation.states import (
     _PUNCT_RE,
     State,
     mentions_quantity,
+    text_asks_for_human,
     text_is_cancel,
     text_is_confirm,
     text_is_gratitude,
@@ -237,7 +238,7 @@ async def handle_message(wa_number: str, text: str) -> Reply:
             # sehari penuh atas sesuatu yang sudah tidak dibicarakan lagi.
             await store.set_pending_escalation(wa_number, None)
         elif (
-            text_is_confirm(text)
+            (text_is_confirm(text) or text_asks_for_human(text))
             and not text_is_cancel(text)
             and not text_is_gratitude(text)
             # Pesan yang membawa angka adalah jawaban tentang pesanan, bukan izin
