@@ -82,27 +82,38 @@ async def _warmup_models() -> None:
     question). Sending a bare "warmup" string would load the weights but leave
     the first customer waiting a minute.
     """
-    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_core.messages import HumanMessage
 
+    from app.conversation import bahasa
+    from app.llm.agent import pesan_pembuka
     from app.llm.client import get_llm
-    from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER
     from app.rag.embeddings import get_embedding_function
-    from app.tools.registry import TOOLS_UMUM
+    from app.tools.registry import ALL_TOOLS, TOOLS_UMUM
 
-    try:
-        await asyncio.to_thread(get_embedding_function().embed_one, "warmup")
-        # Sengaja TOOLS_UMUM, bukan semuanya: prefix yang dihangatkan harus
-        # persis prefix yang dipakai pelanggan, kalau tidak yang tersimpan di
-        # KV-cache justru bentuk yang jarang dipakai dan pelanggan pertama tetap
-        # menunggu prefill penuh.
-        await get_llm().bind_tools(TOOLS_UMUM).ainvoke([
-            SystemMessage(content=SYSTEM_PROMPT),
-            SystemMessage(content=TOOL_REMINDER),
-            HumanMessage(content="halo"),
-        ])
-        logger.info("Model warm-up complete — models resident + prefix cache primed.")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Model warm-up skipped (will load on first request): %s", exc)
+    # Sesudah VM menyala, chatbot biasanya hidup lebih dulu daripada Ollama
+    # (yang masih memuat model dan menarik GGUF-nya). Dulu satu kegagalan di sini
+    # berarti pemanasan dilewati sama sekali dan pelanggan pertama tiap bahasa
+    # menanggung prefill penuh; sekarang dicoba ulang sampai Ollama siap.
+    for percobaan in range(1, 31):
+        try:
+            await asyncio.to_thread(get_embedding_function().embed_one, "warmup")
+            # Setiap bentuk prefix yang dipakai giliran sungguhan: arahan bahasa
+            # dan daftar tool ikut di dalam prefix, jadi pelanggan Indonesia,
+            # pelanggan Inggris, dan Owner masing-masing punya bentuk sendiri.
+            # Ollama menyimpan beberapa prompt sekaligus, jadi keempatnya tetap
+            # hangat. Pelanggan Indonesia duluan — itu yang paling sering datang.
+            for tools in (TOOLS_UMUM, ALL_TOOLS):
+                for lang in (bahasa.ID, bahasa.EN):
+                    pembuka, pengingat = pesan_pembuka(lang)
+                    await get_llm().bind_tools(tools).ainvoke(
+                        [pembuka, pengingat, HumanMessage(content="halo")])
+            logger.info("Model warm-up complete — models resident + prefix cache primed.")
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Model warm-up attempt %d failed (%s); retrying in 30s",
+                           percobaan, exc)
+            await asyncio.sleep(30)
+    logger.warning("Model warm-up gave up; the first request will load the model.")
 
 
 @asynccontextmanager

@@ -545,6 +545,24 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "another message in a moment \u2014 if it keeps happening, reach us "
              "through our store number from your saved contacts."),
     },
+    "tidak_jadi_kosong": {
+        ID: "Oke kak, nggak jadi ya 😊 Kalau mau pesan yang lain atau tanya sesuatu, tinggal bilang.",
+        EN: "Alright, no problem 😊 Just let me know if you'd like something else.",
+    },
+    "rekomendasi": {
+        ID: "Rekomendasi kami yang bisa dipesan sekarang:\n{daftar}\n\nMau lihat detail salah satunya? Sebutkan namanya ya 😊",
+        EN: "Our recommendations you can order right now:\n{daftar}\n\nWant details on one of them? Just say its name 😊",
+    },
+    "rekomendasi_kosong": {
+        ID: "Maaf kak, saat ini belum ada kue yang bisa dipesan 🙏 Coba cek lagi nanti, atau ketik *menu* untuk lihat daftarnya.",
+        EN: "Sorry, nothing is available to order right now 🙏 Please check back later, or type *menu* to see the list.",
+    },
+    "empati_keluhan": {
+        ID: ("Maaf banget ya kak, kami paham kekecewaannya 🙏 Supaya bisa langsung "
+             "ditindaklanjuti, aku bisa sambungkan ke admin — ketik *ya* kalau mau."),
+        EN: ("We're really sorry, and we understand your disappointment 🙏 So it can be "
+             "followed up directly, I can connect you to our admin — type *yes* if you'd like."),
+    },
     "di_luar_cakupan": {
         ID: ("Maaf, aku hanya bisa membantu seputar {toko} ya — menu, pemesanan, "
              "pembayaran, pengiriman, dan info toko. Ada yang bisa kubantu soal itu? 😊"),

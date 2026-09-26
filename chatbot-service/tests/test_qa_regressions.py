@@ -1881,3 +1881,98 @@ async def test_permintaan_ganti_bahasa_menang_atas_deteksi(patch_externals):
     r = await handle_message(WA, "bahasa indonesia aja deh")
     assert (await store.get_lang(WA)) == bahasa.ID
     assert "Bahasa Indonesia" in r.text
+
+
+# ── Gladi demo 26 Sep 2026 ───────────────────────────────────────────────────
+async def test_jawaban_tidak_tahu_tidak_menular_ke_giliran_berikutnya():
+    """Sesudah "toko dimana?" dijawab "belum punya infonya", "jam buka" ikut
+    dijawab begitu padahal FAQ-nya terambil. Pasangan itu dibuang dari riwayat."""
+    from app.llm.agent import riwayat_bersih
+
+    riwayat = [
+        {"role": "user", "content": "halo"},
+        {"role": "assistant", "content": "Halo kak!"},
+        {"role": "user", "content": "kak toko nya dimana?"},
+        {"role": "assistant", "content": "Untuk yang itu aku belum punya infonya kak 🙏"},
+    ]
+    assert riwayat_bersih(riwayat) == riwayat[:2]
+
+
+async def test_kecewa_sesudah_permintaan_maaf_dijawab_empati(patch_externals):
+    """Terukur: "saya agak kecewa sih" sesudah permintaan maaf dijawab
+    "Senang banget kalau suka". Tawaran admin tetap berlaku sesudahnya."""
+    from app.tools.keluhan import send_apology
+
+    _mock_agent(patch_externals["monkeypatch"], "Hehe, makasih banyak kak! Senang banget kalau suka 😊")
+    set_turn_context(TurnContext(wa_number=WA, user_text="kuenya keras"))
+    await store.log_message(WA, "out", await send_apology.ainvoke({"keluhan": "kue keras"}))
+
+    reply = await handle_message(WA, "saya agak kecewa sih")
+    assert "senang" not in reply.text.lower()
+    assert "maaf" in reply.text.lower()
+
+    await handle_message(WA, "ya")
+    assert await store.is_takeover_active(WA) is True
+
+
+async def test_balasan_ceria_untuk_pesan_kecewa_diganti_permintaan_maaf(monkeypatch):
+    from langchain_core.messages import AIMessage
+
+    from app.llm import agent
+
+    class _LLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            return AIMessage(content="Wah, makasih banyak kak! Senang banget kalau suka 😊")
+
+    class _Hasil:
+        best_similarity, in_scope = 0.2, False
+
+        def context_text(self):
+            return ""
+
+    async def _tanpa_tool(wa):
+        return []
+
+    monkeypatch.setattr(agent, "get_llm", lambda: _LLM())
+    monkeypatch.setattr(agent, "retrieve", lambda q: _Hasil())
+    monkeypatch.setattr(agent, "tools_untuk", _tanpa_tool)
+    set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi, aku kecewa"))
+    jawab = await agent.run_agent(WA, "kuenya basi, aku kecewa", [])
+    assert "senang" not in jawab.lower() and "maaf" in jawab.lower()
+
+
+async def test_tidak_jadi_saat_keranjang_kosong_bukan_keluhan(patch_externals):
+    _mock_agent(patch_externals["monkeypatch"], "Mohon maaf sekali atas ketidaknyamanan")
+    reply = await handle_message(WA, "bolu pandannya ga jadi deh")
+    assert "nggak jadi" in reply.text
+    assert (await store.get_or_create_session(WA)).pending_escalation is None
+
+
+async def test_paling_laris_dijawab_dari_katalog(patch_externals):
+    _mock_agent(patch_externals["monkeypatch"], "Aku nggak bisa jawab soal itu")
+    reply = await handle_message(WA, "yang paling laris apa?")
+    assert "Brownies Coklat" in reply.text and "Bolu Pandan" in reply.text
+
+
+async def test_berlaku_bukan_pertanyaan_rekomendasi():
+    from app.conversation.states import text_asks_recommendation
+
+    assert text_asks_recommendation("yang paling laris apa?")
+    assert text_asks_recommendation("any recommendation?")
+    assert not text_asks_recommendation("promonya berlaku sampai kapan?")
+
+
+async def test_ya_sesudah_permintaan_maaf_menyambungkan_admin(patch_externals):
+    """Tawaran sesudah keluhan menumpang di ujung permintaan maaf; dulu dicari
+    dengan startswith, tidak ketemu, dan langsung dianggap kedaluwarsa."""
+    from app.tools.keluhan import send_apology
+
+    _mock_agent(patch_externals["monkeypatch"], "Baik kak.")
+    set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
+    await store.log_message(WA, "out", await send_apology.ainvoke({"keluhan": "kue basi"}))
+
+    await handle_message(WA, "ya")
+    assert await store.is_takeover_active(WA) is True

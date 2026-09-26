@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.conversation import bahasa
 from app.conversation.context import get_turn_context_or_none
+from app.conversation.states import text_is_negative
 from app.core.config import settings
 from app.llm.client import get_llm
 from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER
@@ -61,6 +62,49 @@ _AWALAN_TAKEOVER = tuple(
 )
 
 
+# Balasan "belum tahu" milik model sendiri. Di riwayat ia jadi contoh terkuat
+# untuk giliran berikutnya: terukur di gladi demo, sesudah "toko dimana?"
+# (memang tak ada FAQ-nya), "jam buka" dan "kirim luar kota" ikut dijawab
+# "belum punya infonya" padahal FAQ yang tepat terambil — di sesi baru keduanya
+# dijawab benar. Giliran seperti ini tidak membawa informasi apa pun untuk
+# percakapan, jadi pasangan tanya-jawabnya dibuang dari riwayat.
+_TIDAK_TAHU_RE = re.compile(
+    r"(belum punya info|belum ada di catatanku|belum punya informasi|"
+    r"don't have that information|do not have that information)",
+    re.IGNORECASE,
+)
+# Balasan ceria untuk pujian. Terukur: "saya agak kecewa sih" sesudah permintaan
+# maaf dijawab "Hehe, makasih banyak kak! Senang banget kalau suka".
+_CERIA_RE = re.compile(
+    r"(senang banget kalau suka|senang kalau suka|makasih banyak kak|glad you (liked|enjoyed))",
+    re.IGNORECASE,
+)
+_AWALAN_MAAF = tuple(bahasa.teks("maaf_keluhan", l)[:30] for l in (bahasa.ID, bahasa.EN))
+
+
+def riwayat_bersih(history: list[dict]) -> list[dict]:
+    """Riwayat tanpa pasangan tanya-jawab yang jawabannya "belum tahu"."""
+    bersih: list[dict] = []
+    for h in history:
+        if h["role"] != "user" and _TIDAK_TAHU_RE.search(h["content"] or ""):
+            if bersih and bersih[-1]["role"] == "user":
+                bersih.pop()
+            continue
+        bersih.append(h)
+    return bersih
+
+
+def pesan_pembuka(lang: str) -> tuple[SystemMessage, SystemMessage]:
+    """Dua blok system yang mengapit riwayat — satu-satunya tempat bentuknya
+    ditulis, supaya pemanasan (main._warmup_models) mengirim prefix yang persis
+    sama dengan giliran sungguhan. Ollama menggabungkan kedua blok ini ke atas,
+    jadi arahan bahasa ikut menjadi bagian prefix KV-cache; pemanasan yang lupa
+    menyertakannya (seperti dulu) menghangatkan bentuk yang tak pernah dipakai,
+    dan pelanggan pertama tiap bahasa menunggu prefill ±55 detik."""
+    return (SystemMessage(content=SYSTEM_PROMPT),
+            SystemMessage(content=TOOL_REMINDER + bahasa.arahan(lang)))
+
+
 def pertanyaan_dengan_konteks(user_text: str, rag_context: str | None) -> str:
     """Pesan pelanggan seperti yang diterima model: FAQ hasil RAG menumpang di depannya.
 
@@ -93,6 +137,9 @@ def _history_view(content: str) -> str:
         # cookies 2" flipped from add_to_cart 3/3 to escalate_to_admin 3/3 once
         # this sentence was in the history.
         return "[Aku sudah meneruskan permintaan itu ke admin via tool escalate_to_admin]"
+    if content.startswith(_AWALAN_MAAF):
+        return ("[Aku sudah minta maaf atas keluhan itu via tool send_apology "
+                "dan menawarkan sambung ke admin]")
     if content.startswith("*") and "Harga:" in content:
         produk = content.split("*")[1] if content.count("*") >= 2 else "produk"
         return (
@@ -129,8 +176,9 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
 
     lang = await store.get_lang(wa_number)
 
-    messages: list = [SystemMessage(content=SYSTEM_PROMPT)]
-    for h in history:
+    pembuka, pengingat = pesan_pembuka(lang)
+    messages: list = [pembuka]
+    for h in riwayat_bersih(history):
         messages.append(
             HumanMessage(content=h["content"])
             if h["role"] == "user"
@@ -145,7 +193,7 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # pesan pendek — "ok" dijawab bahasa Inggris. Prefix KV-cache tetap aman:
     # kalimatnya konstan per bahasa, jadi bentuk prompt bertambah dari dua
     # (peran) jadi empat, bukan berubah tiap giliran.
-    messages.append(SystemMessage(content=TOOL_REMINDER + bahasa.arahan(lang)))
+    messages.append(pengingat)
     messages.append(HumanMessage(content=pertanyaan_dengan_konteks(user_text, rag_context)))
 
     # Tool Owner tidak dimuat untuk pelanggan biasa — bukan cuma ditolak waktu
@@ -197,6 +245,10 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
                 "Boleh diulang maksudnya kak? Aku bisa bantu soal menu, pemesanan, "
                 "pembayaran, dan status pesanan 😊"
             )
+        if answer and _CERIA_RE.search(answer) and text_is_negative(user_text):
+            logger.warning("Cheerful reply to a disappointed message — apologising instead")
+            from app.tools.keluhan import send_apology
+            return await send_apology.ainvoke({"keluhan": user_text})
         # Hard scope guard: out-of-scope and the model didn't use any on-topic
         # tool -> refuse rather than answer from general knowledge.
         if not rag_context and not answer:

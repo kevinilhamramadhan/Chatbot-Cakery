@@ -97,6 +97,36 @@ def text_asks_for_human(text: str) -> bool:
     return bool(words & _MANUSIA) and not words & _PENOLAKAN
 
 
+_NEGATIF = {
+    "kecewa", "kesal", "kesel", "marah", "nyesel", "menyesal", "jelek", "basi",
+    "keras", "bantet", "gosong", "hancur", "rusak", "telat", "parah", "zonk",
+    "disappointed", "disappointing", "upset", "angry", "terrible", "awful",
+    "stale", "burnt", "late", "worst",
+}
+
+
+def text_is_negative(text: str) -> bool:
+    """Nada kecewa/mengeluh. Dipakai hanya untuk MENOLAK balasan yang ceria
+    ("senang kalau suka") dan untuk menanggapi kekecewaan susulan sesudah
+    permintaan maaf — bukan untuk menebak maksud di tempat lain."""
+    return bool(set(_tokens(text)) & _NEGATIF)
+
+
+_REKOMENDASI_KATA = {"laris", "laku", "bestseller", "favorit", "favourite", "favorite",
+                     "rekomendasi", "rekomen", "recommend", "recommendation",
+                     "andalan", "populer", "popular", "signature"}
+_REKOMENDASI_FRASA = ("best seller", "paling enak", "most popular")
+
+
+def text_asks_recommendation(text: str) -> bool:
+    """"yang paling laris apa?" — tidak ada di FAQ dan RAG menilainya di luar
+    cakupan, jadi model menolaknya. Jawabannya diambil dari katalog asli.
+    Dicocokkan per kata: "berlaku" tidak boleh terbaca "laku"."""
+    words = _tokens(text)
+    return bool(set(words) & _REKOMENDASI_KATA) or any(
+        f in " ".join(words) for f in _REKOMENDASI_FRASA)
+
+
 def text_is_cancel(text: str) -> bool:
     t = " ".join(_tokens(text))
     return any(w in t for w in CANCEL_WORDS)

@@ -23,9 +23,11 @@ from app.conversation.states import (
     State,
     mentions_quantity,
     text_asks_for_human,
+    text_asks_recommendation,
     text_is_cancel,
     text_is_confirm,
     text_is_gratitude,
+    text_is_negative,
 )
 from app.core.config import settings
 from app.core.security import mask_phone
@@ -255,6 +257,13 @@ async def handle_message(wa_number: str, text: str) -> Reply:
             return reply
         elif text_is_cancel(text):
             await store.set_pending_escalation(wa_number, None)
+        elif session.pending_escalation.startswith("Keluhan") and text_is_negative(text):
+            # Kekecewaan susulan sesudah permintaan maaf. Terukur di gladi demo:
+            # "saya agak kecewa sih" dijawab model "Senang banget kalau suka".
+            # Tawarannya tetap berlaku, jadi "ya" berikutnya masih menyambungkan.
+            reply = Reply(text=bahasa.teks("empati_keluhan", lang))
+            await store.log_message(wa_number, "out", reply.text)
+            return reply
 
     # One context per inbound message, set here rather than inside the agent
     # branch: the deterministic steps need it too (tools read `user_text`), and
@@ -268,6 +277,16 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         reply = await _handle_confirmation(wa_number, text, lang)
     elif state == State.COLLECTING_IDENTITY:
         reply = await _handle_identity(wa_number, text, lang)
+    elif (text_asks_recommendation(text) and not mentions_quantity(text)
+          and not await _pemilik(wa_number)):
+        # Owner yang bertanya "paling laku" sedang minta analitik penjualan
+        # (tool business_analytics), bukan rekomendasi untuk pelanggan.
+        reply = Reply(text=await _rekomendasi(lang))
+    elif state == State.IDLE and text_is_cancel(text) and await _tak_ada_yang_dibatalkan(wa_number):
+        # "bolu pandannya ga jadi" saat keranjang kosong (kuenya tadi habis,
+        # jadi tidak pernah masuk). Model membacanya sebagai keluhan dan
+        # meminta maaf panjang lebar; tidak ada apa pun yang perlu dibatalkan.
+        reply = Reply(text=bahasa.teks("tidak_jadi_kosong", lang))
     else:
         # IDLE / AWAITING_PAYMENT / ORDER_ACTIVE -> LLM agent (with tools).
         reply = await _run_agent_turn(wa_number, text)
@@ -276,6 +295,37 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     if reply.text:
         await store.log_message(wa_number, "out", reply.text)
     return reply
+
+
+async def _pemilik(wa_number: str) -> bool:
+    from app.conversation import rbac
+
+    try:
+        return await rbac.boleh(wa_number, rbac.OWNER)
+    except Exception:  # noqa: BLE001 - ragu = pelanggan biasa
+        return False
+
+
+async def _tak_ada_yang_dibatalkan(wa_number: str) -> bool:
+    keranjang = await store.get_cart(wa_number)
+    return not keranjang and await store.get_active_pending(wa_number) is None
+
+
+async def _rekomendasi(lang: str) -> str:
+    """Tiga kue yang bisa dipesan sekarang: unggulan dulu, lalu yang paling laku.
+
+    Diambil dari katalog, bukan dikarang: model tidak punya data penjualan dan
+    sebelumnya menolak pertanyaan ini sebagai di luar cakupan."""
+    from app.backend_client import products as products_api
+    from app.tools.formatting import product_label, rupiah, tersedia
+
+    items = [p for p in await products_api.list_products(only_active=True) if tersedia(p)]
+    if not items:
+        return bahasa.teks("rekomendasi_kosong", lang)
+    items.sort(key=lambda p: (not p.get("is_featured"), -(p.get("sold_count") or 0),
+                              -(p.get("rating") or 0), product_label(p).casefold()))
+    daftar = "\n".join(f"• {product_label(p)} — {rupiah(p.get('harga_jual'))}" for p in items[:3])
+    return bahasa.teks("rekomendasi", lang, daftar=daftar)
 
 
 _MAKS_GILIRAN_TAWARAN = 3
@@ -296,7 +346,11 @@ async def _escalation_offer_expired(wa_number: str) -> bool:
     penanda = tuple(bahasa.teks("tawaran_admin", l)[:40] for l in (bahasa.ID, bahasa.EN))
     terakhir = -1
     for i, pesan in enumerate(riwayat):
-        if pesan["role"] == "assistant" and pesan["content"].startswith(penanda):
+        # Dicari DI DALAM pesan, bukan di awalnya: tawaran sesudah keluhan
+        # menumpang di ujung permintaan maaf (send_apology), dan dengan
+        # startswith tawaran itu tak pernah ditemukan — dianggap kedaluwarsa
+        # sejak giliran pertama, jadi "ya" pelanggan yang mengeluh diabaikan.
+        if pesan["role"] == "assistant" and any(p in pesan["content"] for p in penanda):
             terakhir = i
     if terakhir < 0:
         # Tawarannya sudah terlalu jauh ke belakang untuk terlihat di riwayat.
