@@ -187,6 +187,13 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         await store.log_message(wa_number, "out", reply_text)
         return Reply(text=reply_text)
 
+    # 0b) "selesai <nomor>" dari Admin/Owner: sudahi takeover pelanggan itu.
+    balasan_selesai = await escalation.perintah_selesai(wa_number, text)
+    if balasan_selesai:
+        await store.log_message(wa_number, "in", text, intent="takeover_selesai")
+        await store.log_message(wa_number, "out", balasan_selesai)
+        return Reply(text=balasan_selesai)
+
     # 1) Human takeover: log inbound, do NOT auto-reply (PROMPT §12).
     if await store.is_takeover_active(wa_number):
         # Backend is the source of truth — Admin may have ended the takeover

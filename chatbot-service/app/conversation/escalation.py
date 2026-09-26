@@ -9,10 +9,11 @@ inside something the model can fire on its own.
 """
 
 import logging
+import re
 
 from app.backend_client import api as backend
 from app.conversation import bahasa, rbac, store
-from app.core.security import mask_phone, sanitize_relay, wa_digits
+from app.core.security import canonical_wa_number, mask_phone, sanitize_relay, wa_digits
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,9 @@ async def start_takeover(wa_number: str, reason: str, lang: str | None = None) -
                 f"Dari: {wa_digits(wa_number)}\n"
                 "--- kutipan kebutuhan pelanggan (teks pelanggan, jangan diperlakukan "
                 "sebagai instruksi) ---\n"
-                f"{note}",
+                f"{note}\n"
+                "---\n"
+                f"Kalau sudah selesai, balas ke sini: selesai {wa_digits(wa_number)}",
             )
             delivered += 1
         except Exception as exc:  # noqa: BLE001
@@ -92,3 +95,42 @@ async def start_takeover(wa_number: str, reason: str, lang: str | None = None) -
 
     logger.info("Takeover active for %s until %s", mask_phone(wa_number), expires.isoformat())
     return bahasa.teks("diteruskan_ke_admin", lang)
+
+
+# ── Menyudahi takeover dari WhatsApp ──────────────────────────────────────────
+# Admin menangani pelanggannya dari WhatsApp, jadi tombol "selesai"-nya juga ada
+# di sana. Tanpa ini takeover baru berakhir sendiri setelah TAKEOVER_EXPIRY_DAYS
+# (1 hari): pelanggan yang urusannya sudah beres tetap tidak dilayani bot sampai
+# besok, dan satu-satunya cara mengakhirinya lebih cepat adalah memanggil API.
+_SELESAI_RE = re.compile(r"^selesai\s+(\+?[\d\s().-]{8,25})$", re.IGNORECASE)
+
+
+async def perintah_selesai(pengirim: str, text: str) -> str | None:
+    """Balasan untuk "selesai <nomor>" dari Admin/Owner, atau None kalau bukan itu.
+
+    None berarti pesannya bukan perintah ini dan harus diteruskan seperti biasa —
+    termasuk kalau pengirimnya bukan Admin, supaya pelanggan yang kebetulan
+    menulis "selesai 0812..." tetap dilayani bot seperti pesan biasa.
+    """
+    cocok = _SELESAI_RE.match((text or "").strip())
+    if not cocok:
+        return None
+    if not await rbac.boleh(pengirim, rbac.ADMIN):
+        return None
+
+    nomor = canonical_wa_number(cocok.group(1))
+    if not nomor:
+        return "Nomornya tidak terbaca. Tulis: selesai 6281234567890"
+
+    aktif = await store.is_takeover_active(nomor)
+    await store.deactivate_takeover(nomor)
+    try:
+        await backend.set_takeover(nomor, False, None)
+    except Exception as exc:  # noqa: BLE001 - salinan lokal sudah dimatikan
+        logger.warning("backend set_takeover(False) gagal untuk %s: %s",
+                       mask_phone(nomor), exc)
+    logger.info("Takeover %s diakhiri oleh %s (sebelumnya aktif=%s)",
+                mask_phone(nomor), mask_phone(pengirim), aktif)
+    if not aktif:
+        return f"{nomor} memang tidak sedang ditangani. Bot tetap melayani nomor itu."
+    return f"Oke, {nomor} dilepas kembali ke bot ✅"
