@@ -1,4 +1,11 @@
-"""QA percakapan: dorong skenario lewat handle_message asli. Sesi TIDAK pernah di-reset."""
+"""QA percakapan: dorong skenario lewat handle_message asli. Sesi TIDAK pernah di-reset.
+
+    python -m scripts.qa_runner scripts/qa_scenarios.json [hasil.json]
+
+Pengiriman WhatsApp di-stub; LLM, RAG, dan backend sungguhan. Di server,
+jalankan di dalam container chatbot-service dengan nomor uji 62999…, lalu
+bersihkan sesinya dengan reset-percakapan.sh di repo Deploy-Toti-Cakery.
+"""
 import asyncio, json, logging, sys, time, traceback
 
 from app.whatsapp_client import client as wa_client
@@ -34,6 +41,7 @@ lg = logging.getLogger("app.llm.agent"); lg.setLevel(logging.INFO); lg.addHandle
 
 async def main():
     scenarios = json.load(open(sys.argv[1]))
+    keluaran = sys.argv[2] if len(sys.argv) > 2 else "/tmp/qa_hasil.json"
     await init_db()
     out = []
     for sc in scenarios:
@@ -63,7 +71,7 @@ async def main():
                           "seconds": round(dt, 2), "state": str(s.state), "cart": cart,
                           "error": err})
         out.append({**{k: sc[k] for k in ("id", "title", "wa")}, "turns": turns})
-        json.dump(out, open("/work/finetune/qa_live_v5.json", "w"), ensure_ascii=False, indent=1)
-    print("\n=== SELESAI -> finetune/qa_live_v5.json ===")
+        json.dump(out, open(keluaran, "w"), ensure_ascii=False, indent=1)
+    print(f"\n=== SELESAI -> {keluaran} ===")
 
 asyncio.run(main())

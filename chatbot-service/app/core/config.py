@@ -195,7 +195,7 @@ class Settings(BaseSettings):
                 "Refusing to start — these secrets are unset or left at a known "
                 f"placeholder: {', '.join(missing)}. Generate them with "
                 "`openssl rand -hex 24` and put them in .env "
-                "(WEBHOOK_TOKEN must also match BASE_WEBHOOK_URL in docker-compose.yml)."
+                "(WEBHOOK_TOKEN must also match BASE_WEBHOOK_URL in the deploy compose)."
             )
 
 

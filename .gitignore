@@ -44,12 +44,8 @@ finetune/gguf_dl/
 # transient local backups
 *.v1.json
 
-# Modelfile hasil generate bootstrap (path GGUF absolut untuk container)
-finetune/Modelfile.generated
-
 # ── Hasil backup & arsip ─────────────────────────────────────────────────────
-# DEPLOY_VPS.md §11 menyuruh menjalankan pg_dump / tar dari dalam folder repo,
-# jadi berkas hasilnya gampang tidak sengaja ikut ter-commit.
+# Hasil pg_dump / tar yang dijalankan dari folder repo gampang ikut ter-commit.
 *.dump
 *.sql
 *.sql.gz
@@ -93,9 +89,14 @@ desktop.ini
 # memang bagian dari catatan kerja dan ikut di-commit.
 
 
-# Catatan QA lokal — permintaan ke backend, tidak untuk repo
-UNTUK_BACKEND.md
+# Catatan QA lokal — tidak untuk repo
 qa-2026-09-09/
 
 # Berkas kunci LibreOffice saat dokumen catatan dibuka
 .~lock.*#
+
+# ── Dokumentasi: yang masuk repo hanya README.md di akar ─────────────────────
+# Spesifikasi, catatan fine-tune, dan panduan kerja tetap disimpan di laptop,
+# tidak ikut ter-commit.
+*.md
+!/README.md

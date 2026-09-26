@@ -1,0 +1,14 @@
+[
+ {"id":"R1","title":"Alur lengkap sampai tagihan (ambil sendiri, lunas)","wa":"629990002001@c.us",
+  "turns":["halo kak","ada kue apa aja?","yang paling laris apa?","chiffon cake pandan itu kayak gimana?","aku mau pesan 1 chiffon cake pandan ya","sudah sesuai","Budi Santoso","ambil sendiri aja","ya","lunas","qris","sudah bayar belum ya pesanan saya?"]},
+ {"id":"R2","title":"Bahasa Inggris","wa":"629990002002@c.us",
+  "turns":["hi, what do you recommend?","how much is the brownies fudgy almond?","what time do you open?","do you deliver out of town?","ok I'd like 1 brownies fudgy almond","actually never mind, cancel it please","thanks!"]},
+ {"id":"R3","title":"FAQ beruntun, dimulai dari yang tak ada FAQ-nya","wa":"629990002003@c.us",
+  "turns":["kak toko nya dimana?","buka jam berapa aja?","bisa kirim ke luar kota ga?","kuenya pakai pengawet ga?","kuenya tahan berapa lama?","halal ga kak?","bisa bayar pakai kartu kredit?","btw siapa presiden indonesia sekarang?"]},
+ {"id":"R4","title":"Keluhan lalu sambung admin","wa":"629990002004@c.us",
+  "turns":["kak kue yang saya beli kemarin agak keras","saya agak kecewa sih","ya"]},
+ {"id":"R5","title":"Custom -> admin dengan kalimat panjang","wa":"629990002005@c.us",
+  "turns":["kak bisa pesan kue ulang tahun custom? ada tulisan nama anak saya","iya mau ngobrol sama admin","halo? ada orang?"]},
+ {"id":"R6","title":"Produk habis lalu tidak jadi, lalu pesan yang ada + delivery + DP","wa":"629990002006@c.us",
+  "turns":["pesan 1 bolu pandan","bolu pandannya ga jadi deh","kalau lapis legit premium 1 ada?","sudah sesuai","Siti Aminah","diantar aja","Jl. Merpati No. 5, Batam Kota","ya","dp","qris"]}
+]

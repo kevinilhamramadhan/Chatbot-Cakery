@@ -1,299 +1,233 @@
-# Toti Cakery — WhatsApp Chatbot Service
+# Toti Cakery — Chatbot WhatsApp
 
-RAG + tool-calling WhatsApp chatbot for Toti Cakery (a bakery). Built with FastAPI,
-LangChain, Ollama (`toti-qwen-1.7b-v4`), ChromaDB, and the `avoylenko/wwebjs-api` WhatsApp
-gateway. This repo is **only** the chatbot + WhatsApp integration — the main backend
-(deployed at `https://backend-cakery.vercel.app`) and the React frontends are owned by teammates.
+Chatbot WhatsApp untuk toko kue Toti Cakery: menjawab FAQ (RAG), menampilkan
+menu, menerima pesanan sampai tagihan Midtrans terbit, mengabari status
+pembayaran dan "pesanan siap", meneruskan pelanggan ke admin, dan memberi
+laporan ke Owner. Dibangun dengan FastAPI, LangChain, Ollama (model fine-tune
+`toti-qwen-1.7b-v9`), ChromaDB, dan gateway `avoylenko/wwebjs-api`.
 
-> **Deploying to a VPS?** `DEPLOY_VPS.md` is the one to follow — there the whole
-> stack (chatbot + backend + PostgreSQL) runs as containers on your own box.
-> This README covers the laptop setup, where the backend is the Vercel deployment.
+Repo ini hanya berisi chatbot dan fine-tuning modelnya. Backend (FastAPI +
+PostgreSQL) dan frontend adalah repo milik anggota tim lain; deploy seluruh
+stack ada di repo **Deploy-Toti-Cakery**.
 
-> Scope, rules, and the full conversation flow live in
-> `PROMPT_CLAUDE_CODE_TOTI_CAKERY_CHATBOT.md`. Endpoints the backend still owes us
-> are in `BACKEND_TODO.txt`. What the **backend** side has to configure to talk to
-> this service (its `CHATBOT_URL`, the shared service key, the ready-push contract)
-> lives in `BACKEND.md`. See `CLAUDE.md` for an orientation aimed at AI agents.
+## Isi
 
-## Architecture
+- [Arsitektur](#arsitektur)
+- [Struktur repo](#struktur-repo)
+- [Menjalankan di laptop](#menjalankan-di-laptop)
+- [Tes dan QA](#tes-dan-qa)
+- [CI/CD](#cicd)
+- [Kontrak dengan backend](#kontrak-dengan-backend)
+- [Fine-tuning model](#fine-tuning-model)
+- [Keputusan desain yang perlu diketahui](#keputusan-desain-yang-perlu-diketahui)
+
+## Arsitektur
 
 ```
-Customer (WhatsApp)
+Pelanggan (WhatsApp)
    ▼
-wwebjs-api (Docker) ──webhook──▶ chatbot-service /webhook/whatsapp/$WEBHOOK_TOKEN
-                                       │  orchestrator (state machine)
-              ┌────────────────────────┼─────────────────────────┐
-              ▼                         ▼                          ▼
-        rag/ (ChromaDB +          tools/ (LangChain          backend_client/
-        qwen3-embedding)          tool calling)              (real HTTP -> backend:
-              │                         │                     products, orders,
-              ▼                         ▼                     customers, payments,
-        llm/ (Ollama, tool calling)                           takeover, reports)
+wwebjs-api ──webhook──▶ chatbot-service  /webhook/whatsapp/<WEBHOOK_TOKEN>
+                            │  orchestrator (state machine + langkah deterministik)
+             ┌──────────────┼──────────────────┐
+             ▼              ▼                  ▼
+       rag/ (ChromaDB   llm/ (Ollama,     backend_client/ (HTTP ke backend:
+       + embedding)     tool calling)     produk, pesanan, pembayaran,
+                            │             takeover, laporan, verifikasi WA)
+                            ▼
+                        tools/ (LangChain)
 ```
 
-- **Everything is real**: products, orders, customers, payments (Midtrans via the
-  backend), human takeover, ready-push, and Owner reports all hit the main
-  backend (Neon PostgreSQL). No mocks remain.
-- The chatbot keeps its **own SQLite DB** (sessions, conversation log, pending orders).
+- **Langkah deterministik dulu, model kemudian.** Konfirmasi keranjang, data
+  pelanggan, metode kirim, jenis dan kanal bayar, konfirmasi batal, tawaran
+  sambung admin, rekomendasi, dan "nggak jadi" ditangani kode. Sisanya
+  (pertanyaan bebas) dijawab model dengan tool.
+- **Keluaran tool dikirim apa adanya**, tanpa diolah model lagi — harga dan
+  ringkasan pesanan selalu dari data asli. Harga yang diketik model sendiri
+  dibuang.
+- **FAQ** diambil dari backend (dikelola lewat Admin Site) dan disegarkan tiap
+  `FAQ_REFRESH_SECONDS`; `knowledge_base/faq/*.txt` hanya cadangan.
+- **Data milik chatbot** ada di SQLite sendiri: sesi, log percakapan, pelacak
+  pembayaran.
+- **Tool pelanggan:** `get_menu`, `get_product_detail`, `compare_products`,
+  `add_to_cart`, `check_cart`, `get_order_status`, `check_payment_status`,
+  `resend_payment_method`, `cancel_order`, `escalate_to_admin`, `send_apology`.
+  Owner mendapat tambahan `financial_report` dan `business_analytics`; definisi
+  keduanya tidak pernah dikirim ke model untuk pelanggan biasa.
+- **Dua bahasa.** Bahasa sesi ditentukan kode (butuh dua kata pencocok) dan
+  dikunci; model diberi arahan bahasa di blok system.
 
-## Prerequisites
+## Struktur repo
 
-| Need | Why / notes |
-|---|---|
-| **Docker + Docker Compose v2** | The whole stack runs as containers. `docker compose version` should print v2.x |
-| **The fine-tuned GGUF** | `toti-qwen-1.7b-v4` isn't on the Ollama registry. `scripts/bootstrap.sh` builds it into the `ollama_models` Docker volume from `finetune/*.gguf.v4`, or downloads it from the private HF repo when `HF_TOKEN` is set. No host Ollama needed |
-| **~8 GB free RAM** | Measured: the LLM takes **5.2 GB** at the default `LLM_NUM_CTX=32768` (**2.4 GB** at 8192) and embeddings **1.4 GB**, both kept resident by `OLLAMA_KEEP_ALIVE=-1`; the other four containers add ~1.5 GB. CPU-only inference works; a reply takes a few seconds |
-| **A spare WhatsApp number** | Linking scans a QR from *WhatsApp → Linked devices*. Use a number you don't mind having a bot on |
-| **`BACKEND_SERVICE_API_KEY`** | Must equal the backend's `SERVICE_API_KEY` (ask the backend engineer). The chatbot still starts without a reachable backend — product/order tools just reply "sedang tidak bisa diambil" |
+```
+chatbot-service/
+  app/
+    conversation/   orchestrator, state, checkout, bahasa, eskalasi, verifikasi
+    llm/            agent (RAG + tool calling), prompt, klien Ollama
+    rag/            ChromaDB, embedding, sumber FAQ backend
+    tools/          tool LangChain
+    backend_client/ HTTP ke backend
+    webhook/        endpoint WhatsApp + /webhook/internal/*
+  knowledge_base/   FAQ cadangan + ingest.py
+  scripts/          chat_cli, qa_runner (+ skenario), smoke_live
+  tests/            pytest (hermetis, tanpa layanan luar)
+finetune/           generator dataset, audit, eval, notebook Colab, Modelfile v7 & v9
+```
 
-## Setup — step by step
+## Menjalankan di laptop
 
-Every command is run from the repo root unless stated otherwise.
-
-### 1. Build the models into the Ollama volume
-
-Models live in a Docker volume (`ollama_models`), not in a host Ollama install —
-so this step is the same on a laptop and on a VPS. `scripts/bootstrap.sh` (step 3)
-does it for you; run it by hand only if you want the model ready first:
+Butuh Python 3.11+, Ollama berisi model `toti-qwen-1.7b-v9` dan
+`qwen3-embedding:0.6b`, serta backend yang bisa dijangkau (lokal atau server).
 
 ```bash
-docker compose up -d ollama
-docker compose exec ollama ollama pull qwen3-embedding:0.6b   # embeddings for RAG
-docker compose exec ollama ollama list                        # verify
+cp .env.example chatbot-service/.env     # isi WEBHOOK_TOKEN, INTERNAL_API_KEY,
+                                         # WWEBJS_API_KEY, BACKEND_SERVICE_API_KEY
+cd chatbot-service
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python knowledge_base/ingest.py          # isi ChromaDB dari FAQ
+python -m scripts.chat_cli               # ngobrol lewat terminal, tanpa WhatsApp
+uvicorn app.main:app --reload --port 8000   # atau jalankan service-nya
 ```
 
-`LLM_MODEL` defaults to **`toti-qwen-1.7b-v4`** — the fine-tuned model, not the base.
-Do not fall back to v3 (`toti-qwen-1.7b`): tested live against the current catalogue
-it invents product names ("Brownies 10cm Cokelat") and answers menu questions
-without calling `get_menu`. Building it needs the GGUF — put
-`finetune/toti-qwen-1.7b.Q4_K_M.gguf.v4` in place (or set `HF_TOKEN`) and let
-bootstrap run `ollama create`. If you'd rather run the plain base model for now,
-set `LLM_MODEL=qwen3:1.7b` in `.env` (quality on tool-calling will be noticeably worse).
+Service menolak start tanpa `WEBHOOK_TOKEN`, `INTERNAL_API_KEY`, dan
+`WWEBJS_API_KEY`. `BACKEND_SERVICE_API_KEY` harus sama persis dengan
+`SERVICE_API_KEY` backend; kalau beda, semua tool transaksi dijawab 401.
 
-### 2. Create `.env`
+Model fine-tune dibuat dari GGUF di Hugging Face:
 
 ```bash
-cp .env.example .env
+ollama pull hf.co/LasagnaS/toti-qwen-1.7b-v9-gguf:Q4_K_M
+sed 's#^FROM .*#FROM hf.co/LasagnaS/toti-qwen-1.7b-v9-gguf:Q4_K_M#' \
+    finetune/Modelfile.qwen3-1.7b-v9 > /tmp/Modelfile
+ollama create toti-qwen-1.7b-v9 -f /tmp/Modelfile
+ollama pull qwen3-embedding:0.6b
 ```
 
-Then edit the values that are *not* safe to leave at their defaults:
-
-| Var | Set it to |
-|---|---|
-| `BACKEND_SERVICE_API_KEY` | The backend's `SERVICE_API_KEY`, character-for-character. Mismatch ⇒ every transactional tool gets `401` |
-| `WWEBJS_API_KEY` | Any random string; it must match what the gateway container gets (compose reads the same `.env`) |
-| `ADMIN_WA_NUMBER` | The admin's number in `628…` form — receives human-takeover escalations |
-| `OWNER_WA_NUMBERS` | Comma-separated `628…` numbers allowed to ask for financial reports |
-| `STORE_NAME` / `STORE_ADDRESS` | Real store name + address; they're pasted into "your order is ready" messages |
-| `LLM_MODEL` | `toti-qwen-1.7b-v4` (see step 1) |
-
-`OLLAMA_BASE_URL` and `WWEBJS_BASE_URL` are **overridden in `docker-compose.yml`**
-with container names, so their `.env` values only matter when you run the service
-outside Docker (see the last section). `BACKEND_BASE_URL` is **not** overridden —
-the backend is the Vercel deployment, same URL from inside and outside Docker.
-
-### 3. Start the stack
+## Tes dan QA
 
 ```bash
-docker compose up --build -d
-docker compose ps          # all three should be "running"
+cd chatbot-service && pytest -q
 ```
 
-Five containers come up:
+Suite-nya hermetis: semua env dipaksa, SQLite sementara, backend/Ollama/WhatsApp
+di-stub. Setiap bug yang ditemukan di QA langsung diberi tes regresi
+(`tests/test_qa_regressions.py`).
 
-| Container | Port | Notes |
+QA percakapan terhadap model dan backend sungguhan (WhatsApp di-stub):
+
+```bash
+python -m scripts.qa_runner scripts/qa_demo.json /tmp/hasil.json
+```
+
+Di server, jalankan di dalam container `chatbot-service` dengan nomor uji
+`62999…`, lalu bersihkan sesinya dengan `reset-percakapan.sh` dari repo
+Deploy-Toti-Cakery (pesanan uji yang masih pending ikut dibatalkan).
+
+## CI/CD
+
+```
+push ke main ─▶ CI: pytest ─▶ build image ─▶ smoke test ─▶ push GHCR
+                (:latest, :main, :sha-<commit>)
+                                   │
+server ◀── WUD memeriksa digest :latest tiap 5 menit, lalu merekreasi container
+```
+
+- CI (`.github/workflows/ci.yaml`) jalan untuk push dan pull request; image
+  hanya di-push dari `main`. Tag `v*` menambah tag semver.
+- Di server, WUD (What's Up Docker, di repo Deploy-Toti-Cakery) memasang
+  `:latest` yang baru secara otomatis — backend dan frontend juga. Dari push
+  sampai terpasang ±8 menit.
+- Rollback: set `CHATBOT_IMAGE=ghcr.io/kevinilhamramadhan/chatbot-cakery:sha-<commit>`
+  di `.env` server lalu `docker compose up -d chatbot-service`. Selama image
+  tidak menunjuk `:latest`, WUD tidak mengubahnya.
+
+## Kontrak dengan backend
+
+Semua panggilan chatbot → backend membawa `X-Service-Key`. Semua panggilan
+backend → chatbot ke `/webhook/internal/*` membawa `X-Internal-Key`
+(`INTERNAL_API_KEY`); auth yang gagal sengaja dijawab 404.
+
+**Yang dipakai chatbot dari backend** (base URL termasuk `/api`):
+
+| Method | Path | Untuk |
 |---|---|---|
-| `toti-chatbot` | `127.0.0.1:8000` | This service. Localhost-only as defence in depth; `/webhook/*` is authenticated too |
-| `toti-backend` | `127.0.0.1:8001` | The teammate's FastAPI, built from a pinned commit of `Nicholl2/Backend-Cakery` (`BACKEND_REF`). We never edit it — only build it |
-| `toti-postgres` | — | Backend's database. Schema is auto-created on start; **no seed data** — see `DEPLOY_VPS.md` §7 |
-| `toti-wwebjs` | `127.0.0.1:3000` | WhatsApp gateway |
-| `toti-ollama` | — | No published port; only reachable inside the compose network |
+| GET | `/products/`, `/products/{id}` | menu, detail, foto (`image_url` berupa path relatif) |
+| POST | `/customers` | simpan/ambil pelanggan (`nomor_wa`, `nama`, `alamat`) |
+| POST | `/orders` | buat pesanan |
+| GET | `/orders/latest?nomor_wa=` | status pesanan terakhir |
+| POST | `/orders/{id}/cancel` | batalkan (stok kembali) |
+| POST | `/payments`, GET `/payments/{order_id}/status` | charge Midtrans + polling |
+| GET/POST | `/customers/{nomor}/takeover` | status takeover admin |
+| GET | `/admin/takeover-handlers` | nomor admin penerima takeover |
+| GET | `/users/owner-numbers` | nomor Owner |
+| GET | `/reports/financial-summary` | laporan Owner |
+| POST | `/auth/verify/wa/confirm` | verifikasi nomor untuk pendaftaran Buyer Site |
 
-Chroma is **not** a container — it runs embedded inside chatbot-service and persists
-to `chatbot-service/chroma_db/`.
+Chatbot tidak pernah memanggil Midtrans langsung.
 
-First boot is slow: chatbot-service preloads both models (`WARMUP_ON_STARTUP=true`, ~1 min on CPU).
-Watch it finish with:
+**Yang dipanggil backend ke chatbot** (`CHATBOT_URL` = base URL tanpa path):
 
-```bash
-docker compose logs -f chatbot-service
-# wait for: Uvicorn running on http://0.0.0.0:8000
-curl http://localhost:8000/health
-# -> {"status":"ok","service":"Toti Cakery Chatbot Service"}
-```
-
-### 4. Ingest the knowledge base (FAQ → ChromaDB)
-
-The RAG store starts empty — without this step the bot refuses every FAQ question
-via the scope guard.
-
-```bash
-docker compose exec chatbot-service python knowledge_base/ingest.py
-# or outside Docker:  cd chatbot-service && python knowledge_base/ingest.py
-```
-
-Source files are `chatbot-service/knowledge_base/faq/*.txt` (one topic per file).
-Re-run anytime — it's idempotent: changed files are re-embedded and deleted files
-drop their vectors. Re-run it **whenever you edit a FAQ file**.
-
-### 5. Link WhatsApp (one-time, manual)
-
-```bash
-# 1. start the session (session id comes from WWEBJS_SESSION_ID, default "toti")
-curl "http://localhost:3000/session/start/toti" -H "x-api-key: $WWEBJS_API_KEY"
-
-# 2. save the QR and scan it: WhatsApp → Settings → Linked devices → Link a device
-#    (the key MUST go in the header — this gateway rejects ?x-api-key= with 403)
-curl -H "x-api-key: $WWEBJS_API_KEY" "http://localhost:3000/session/qr/toti/image" -o qr.png && xdg-open qr.png
-
-# 3. confirm the pairing worked
-curl "http://localhost:3000/session/status/toti" -H "x-api-key: $WWEBJS_API_KEY"
-# -> {"success":true,"state":"CONNECTED","message":"session_connected"}
-```
-
-The QR expires after ~20 seconds — refresh the image if the scan misses it. If
-scanning is awkward, the gateway also offers a pairing code instead:
-`POST /session/requestPairingCode/{sessionId}`.
-
-Auth persists in `whatsapp-gateway/sessions/`, so restarts don't need a re-scan.
-That folder is a **live account credential**: it's gitignored, keep it that way.
-To recover a stuck session: `/session/restart/toti`, or `/session/terminate/toti`
-followed by step 1 for a clean re-link.
-
-### 6. Smoke-test the whole path
-
-From another phone, message the bot's number:
-
-```
-menu apa aja
-```
-
-A correct reply lists live products and prices — that means WhatsApp → gateway →
-webhook → LLM → `get_menu` tool → backend all worked. Follow the logs while you do it:
-
-```bash
-docker compose logs -f chatbot-service   # "WA in <- …", tool calls, "WA out -> …"
-```
-
-### Day-to-day commands
-
-```bash
-docker compose restart chatbot-service   # after changing .env
-docker compose up -d --build chatbot-service   # after changing chatbot code
-docker compose down                      # stop everything (sessions + data persist)
-docker compose logs -f --tail=100 chatbot-service
-```
-
-### Setup troubleshooting
-
-| Symptom | Cause / fix |
+| Path | Kapan |
 |---|---|
-| `curl localhost:8000/health` refused | Container still warming up (models preloading) — check `docker compose logs chatbot-service` |
-| Bot silent on WhatsApp | Session not `CONNECTED` (step 5), or `WWEBJS_API_KEY` in `.env` ≠ the gateway's |
-| Every FAQ answer is "di luar topik" | Step 4 never ran, or `EMBEDDING_MODEL` ≠ the model used at ingest time — re-ingest after changing it |
-| Product/order tools say "sedang tidak bisa diambil" | Backend down, or `BACKEND_SERVICE_API_KEY` ≠ the backend's `SERVICE_API_KEY` (`401`) |
-| `model "…" not found` in the logs | `LLM_MODEL` isn't in the volume: `docker compose exec ollama ollama list` — re-run `./scripts/bootstrap.sh` |
-| Very slow first reply, then fast | Normal: cold model load. `OLLAMA_KEEP_ALIVE=-1` keeps it resident afterwards |
+| `POST /webhook/internal/orders/{id}/ready` | admin menandai pesanan siap |
+| `POST /webhook/internal/orders/{id}/paid` | pembayaran lunas |
+| `POST /webhook/internal/orders/{id}/refunded` | dana refund sudah ditransfer |
+| `POST /webhook/internal/takeover/{nomor}/deactivate` | admin selesai menangani |
+| `GET /webhook/internal/wa/status`, `/wa/qr`, `POST /wa/ganti-nomor` | halaman WhatsApp Chatbot di Admin Site |
 
-## Testing it
+Semua endpoint kabar bersifat idempoten; `{"status": "not_found"}` berarti
+pesanannya bukan dari WhatsApp, bukan error.
 
-### Fastest: local CLI (no phone/WhatsApp needed)
+**Nomor telepon kanonik** di kedua sisi: buang selain angka, awalan `0` → `62`,
+`620` → `62`, harus diawali `62`, panjang 10–15 digit.
 
-Drives the full brain (RAG + tools + order flow) via the terminal; outbound WA
-sends are stubbed. Needs Ollama running (and the backend, for real product tools):
+## Fine-tuning model
 
-```bash
-cd chatbot-service
-python knowledge_base/ingest.py        # once, to populate ChromaDB
-python -m scripts.chat_cli             # then just chat; /state to inspect, /quit
-```
+Model: Qwen3-1.7B + LoRA (Unsloth, Colab), diekspor ke GGUF Q4_K_M.
 
-### Full stack (real WhatsApp)
-
-- **Smoke test (real tool):** message the bot **"menu apa aja"** → it calls the real
-  `get_menu` and replies with live products + prices.
-- **Order flow:** "mau pesan brownies 2" → confirm ("sudah sesuai") → give name &
-  address → pickup/delivery → confirm phone → choose full/DP → receive VA + QR.
-- **Simulate payment:** Midtrans is real (sandbox) — pay the VA/QRIS in the Midtrans
-  sandbox simulator. The payment only flips to `Success` after Midtrans calls the
-  backend's `POST /payments/notify`; within `PAYMENT_CHECK_INTERVAL_SECONDS` of that,
-  the bot proactively confirms payment.
-- **Mark order ready (proactive pickup/delivery msg):**
-  ```bash
-  curl -X POST http://localhost:8000/webhook/internal/orders/<id>/ready \
-       -H "X-Internal-Key: $INTERNAL_API_KEY"
-  ```
-- **End human takeover (manual):**
-  ```bash
-  curl -X POST http://localhost:8000/webhook/internal/takeover/<phone>/deactivate \
-       -H "X-Internal-Key: $INTERNAL_API_KEY"
-  ```
-
-## Unit tests
-
-```bash
-cd chatbot-service
-pip install -r requirements.txt
-pytest
-```
-
-## Running the service outside Docker (dev loop)
-
-Useful when you're editing chatbot code and don't want a rebuild per change.
-Python **3.11+**:
-
-```bash
-cd chatbot-service
-python -m venv .venv && source .venv/bin/activate   # fish: source .venv/bin/activate.fish
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
-
-⚠️ **The `.env` in this repo is written for Docker**, where hosts are container
-names. Running on the host you must override the three addresses, otherwise the
-service fails in confusing ways (Ollama calls hang / RAG silently returns nothing):
-
-```bash
-OLLAMA_BASE_URL=http://localhost:11434 \
-BACKEND_BASE_URL=http://localhost:8001 \
-WWEBJS_BASE_URL=http://localhost:3000 \
-$(grep -E '^(WEBHOOK_TOKEN|INTERNAL_API_KEY|WWEBJS_API_KEY)=' ../.env | xargs) \
-uvicorn app.main:app --reload --port 8000
-```
-
-The service **refuses to start** without `WEBHOOK_TOKEN`, `INTERNAL_API_KEY` and
-`WWEBJS_API_KEY` (they authenticate the webhook, the internal endpoints, and the
-WhatsApp session) — hence the `grep` line above, which pulls them out of the root
-`.env` that `uvicorn` doesn't read from `chatbot-service/`. The error message on
-startup tells you which one is missing.
-
-Same applies to any script you run on the host (`ingest.py`, `scripts/chat_cli.py`,
-the fine-tune eval harness). If wwebjs-api is still running in Docker, point its
-`BASE_WEBHOOK_URL` at `http://host.docker.internal:8000/webhook/whatsapp/$WEBHOOK_TOKEN` (or just
-use the CLI in *Testing it* and skip WhatsApp entirely).
-
-## Key configuration (`.env`)
-
-| Var | Meaning |
+| | |
 |---|---|
-| `WEBHOOK_TOKEN` | **Required.** Secret path segment that authenticates wwebjs-api's callbacks (`/webhook/whatsapp/<token>`) — the gateway can't send headers. Without it anyone reaching the service can forge a message from any customer's number. `openssl rand -hex 24` |
-| `INTERNAL_API_KEY` | **Required.** `X-Internal-Key` for `/webhook/internal/*` (end takeover, push "pesanan siap"). Backend must send it too — see `BACKEND.md` |
-| `WWEBJS_API_KEY` | **Required.** Protects the logged-in WhatsApp session. No default — the service refuses to start on a placeholder |
-| `LOG_MESSAGE_BODIES` | Log customer message text (default `false`; metadata is logged either way, phone numbers masked) |
-| `DATA_RETENTION_DAYS` | Transcripts older than this are purged and identity snapshots on finished orders cleared (default 90, `0` = off) |
-| `BACKEND_BASE_URL` | Base URL of the main backend (paths resolved defensively) |
-| `BACKEND_SERVICE_API_KEY` | Sent as `X-Service-Key`; must equal the backend's `SERVICE_API_KEY` |
-| `OLLAMA_BASE_URL` | Ollama endpoint (LLM + embeddings) |
-| `LLM_MODEL` | `toti-qwen-1.7b` (the fine-tune) — see `finetune/README.md` |
-| `RAG_SIMILARITY_THRESHOLD` | Below this, the bot refuses out-of-topic questions (tune me) |
-| `ADMIN_WA_NUMBER` | Single admin number for escalation notifications |
-| `ALLOW_DOWN_PAYMENT` / `DOWN_PAYMENT_PERCENTAGE` | Enable DP 50% at checkout |
-| `PAYMENT_TIMEOUT_MINUTES` / `PAYMENT_CHECK_INTERVAL_SECONDS` | Payment timeout + poll cadence |
-| `STORE_NAME` / `STORE_ADDRESS` | Used in pickup/delivery messages |
+| Dataset | `LasagnaS/toti-cakery-toolcall` — 1600 train / 162 val / 166 test, ID ±78% / EN ±22% |
+| Model | `LasagnaS/toti-qwen-1.7b-v9-gguf` (produksi), v7 disimpan untuk rollback |
+| Generator | `finetune/generate_dataset.py` (seed 42, tanpa LLM; templat + slot dari katalog asli) |
+| Audit | `finetune/audit_dataset.py` — 41 pemeriksaan terhadap kode runtime |
+| Eval | `finetune/eval_tool_calling.py`, `scenario_suite.py`; notebook membandingkan base vs fine-tune pada kondisi produksi |
+| Notebook | `finetune/finetune_toti_qwen3.ipynb` (LoRA r/alpha 16, lr 2e-4, 2 epoch, batch efektif 8) |
 
-## Decisions baked in (confirmed with Kevin)
+Baris dataset dibangun dari kode runtime yang sama (`SYSTEM_PROMPT`,
+`TOOL_REMINDER`, skema tool, `_history_view`, `pertanyaan_dengan_konteks`),
+jadi prompt latih identik dengan prompt produksi. Hanya giliran asisten
+terakhir yang dilatih.
 
-- **Checkout phone** auto-fills from the sender's WhatsApp number (overridable).
-- **Payment**: supports full payment **and** DP 50%.
-- **Admin**: single fixed `ADMIN_WA_NUMBER`.
-- **RAG threshold**: a single config var (`RAG_SIMILARITY_THRESHOLD`), not hardcoded.
+Riwayat singkat:
+
+- **v7** — konteks FAQ di posisi produksi (66% baris), FAQ sebagai kemampuan
+  membaca (fakta berbeda tiap baris), semua tool punya contoh.
+- **v8** — arahan bahasa sesi di blok system, giliran pengisi ("ok", "iya")
+  dilatih. Gagal: sesi Indonesia bercampur Inggris 8/25 (v7: 1/25).
+- **v9** — penambahan v8 dikembalikan; tipe baru N14 (pasangan kontras yang
+  hanya berbeda bahasa). Hasil A/B di VM: campur Inggris 0/25, kata karangan
+  0/25, tool palsu 0/12. **Dipakai di produksi.**
+
+## Keputusan desain yang perlu diketahui
+
+- **Prefix KV-cache menentukan latensi.** Blok system + definisi tool ±2.400
+  token; kalau tidak ada di cache Ollama, CPU butuh ±55 detik untuk memprosesnya
+  ulang. Karena itu blok system dijaga konstan per bentuk (bahasa × peran),
+  konteks FAQ menumpang di pesan pelanggan, dan pemanasan saat start mengirim
+  keempat bentuk prompt yang persis sama dengan giliran sungguhan
+  (`llm.agent.pesan_pembuka`). Hasilnya: balasan 5–22 detik, dan setelah VM
+  menyala pemanasan butuh ±3,5 menit.
+- **Riwayat dibersihkan sebelum masuk model.** Menu, detail produk, takeover,
+  dan permintaan maaf diganti penanda singkat; pasangan tanya-jawab yang
+  dijawab "belum punya info" dibuang. Model 1,7B menyalin contoh terkuat di
+  riwayat.
+- **Takeover hanya setelah pelanggan setuju.** Bot menawarkan dulu; takeover
+  membungkam bot sampai `TAKEOVER_EXPIRY_DAYS`, jadi perlu izin eksplisit.
+- **Keluhan dijawab kalimat tetap** (`send_apology`) — model kecil pernah
+  menjawab "kuenya basi" dengan "senang kalau suka".
+- **Nomor `@lid` wajib diterjemahkan** ke nomor telepon sebelum dipakai; angka
+  LID tidak boleh sampai ke backend.
+- **Data pribadi**: isi pesan tidak dicatat di log kecuali
+  `LOG_MESSAGE_BODIES=true`, nomor disamarkan, transkrip dihapus setelah
+  `DATA_RETENTION_DAYS`.
