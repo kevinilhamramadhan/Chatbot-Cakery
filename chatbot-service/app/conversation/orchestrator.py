@@ -521,6 +521,18 @@ async def _handle_identity(wa_number: str, text: str, lang: str) -> Reply:
 
     # Step 2: address
     if "alamat" not in cust:
+        low = text.lower()
+        # Kata kirim sengaja tidak dicek di sini: "send" ada di dalam "sendiri".
+        if any(k in low for k in _KATA_PICKUP) and not _valid_address(text):
+            # "ambil sendiri aja" dijawab di langkah alamat. Gladi demo 26 Sep:
+            # jawaban itu ditolak sebagai "alamat kurang jelas" berulang-ulang,
+            # jadi pelanggan yang mau mengambil sendiri tidak bisa memesan sama
+            # sekali. Pesanan ambil sendiri tidak butuh alamat pelanggan.
+            cust["alamat"] = bahasa.teks("alamat_ambil_sendiri", lang)
+            cust["metode_pengiriman"] = "pickup"
+            cust["nomor_hp"] = _wa_digits(wa_number)
+            await store.set_customer(wa_number, cust)
+            return Reply(text=_payment_type_prompt(lang))
         if _looks_like_question(text):
             return await _answer_then_reask(
                 wa_number, text, bahasa.teks("kembali_minta_alamat", lang))

@@ -1976,3 +1976,18 @@ async def test_ya_sesudah_permintaan_maaf_menyambungkan_admin(patch_externals):
 
     await handle_message(WA, "ya")
     assert await store.is_takeover_active(WA) is True
+
+
+async def test_ambil_sendiri_di_langkah_alamat_langsung_ke_pembayaran(patch_externals):
+    """Gladi demo: "ambil sendiri aja" di langkah alamat ditolak berulang kali
+    sebagai alamat yang kurang jelas; pelanggan pickup tidak bisa memesan."""
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat", "qty": 1,
+                               "harga": 50000}])
+    await store.set_state(WA, State.COLLECTING_IDENTITY)
+    await store.set_customer(WA, {"nama": "Budi Santoso"})
+
+    reply = await handle_message(WA, "ambil sendiri aja")
+
+    cust = await store.get_customer(WA)
+    assert cust["metode_pengiriman"] == "pickup"
+    assert "alamat" not in reply.text.lower()

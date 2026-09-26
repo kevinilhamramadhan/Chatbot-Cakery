@@ -150,6 +150,10 @@ _TEMPLAT: dict[str, dict[str, str]] = {
     # alamat toko. Kalimatnya menyebutkan itu di depan, bukan nanti waktu
     # pesanannya sudah siap — pelanggan yang baru tahu di akhir sudah terlanjur
     # mengira ongkir ditanggung dan kurirnya diurus toko.
+    "alamat_ambil_sendiri": {
+        ID: "Diambil sendiri di toko",
+        EN: "Picked up at the store",
+    },
     "tanya_pengiriman": {
         ID: ("Pesanannya mau *diambil sendiri (pickup)* di toko, atau *dikirim*?\n\n"
              "Catatan: kami belum punya layanan antar sendiri. Kalau pilih *dikirim*, "
