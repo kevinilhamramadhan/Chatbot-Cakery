@@ -285,7 +285,15 @@ async def mark_refunded(order_id: int, x_internal_key: str | None = Header(defau
 # Backend yang memeriksa peran (Admin/Owner boleh lihat, hanya Owner yang boleh
 # ganti); di sini cukup X-Internal-Key, sama seperti endpoint internal lainnya.
 # Gateway sendiri tetap tidak pernah terbuka ke luar jaringan Docker.
-@router.get("/internal/wa/status")
+#
+# Router terpisah karena dipasang di DUA tempat (lihat main.py): di bawah
+# /webhook/internal/wa, dan di akar. Backend memanggil {CHATBOT_URL}/status,
+# /qr, dan /ganti-nomor tanpa prefiks apa pun, jadi tanpa pasangan kedua itu
+# halaman WhatsApp di Admin Site selalu 404.
+wa_router = APIRouter()
+
+
+@wa_router.get("/status")
 async def wa_status(x_internal_key: str | None = Header(default=None)):
     """keadaan: tersambung | menunggu_scan | terputus. Nomor hanya saat tersambung."""
     _require_internal_key(x_internal_key)
@@ -299,7 +307,7 @@ async def wa_status(x_internal_key: str | None = Header(default=None)):
     return {"keadaan": "terputus", "nomor": None, "profile_name": None}
 
 
-@router.get("/internal/wa/qr")
+@wa_router.get("/qr")
 async def wa_qr(x_internal_key: str | None = Header(default=None)):
     """PNG QR yang berlaku sekarang; 404 kalau tidak sedang menunggu scan.
 
@@ -315,7 +323,7 @@ async def wa_qr(x_internal_key: str | None = Header(default=None)):
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
-@router.post("/internal/wa/ganti-nomor")
+@wa_router.post("/ganti-nomor")
 async def wa_ganti_nomor(x_internal_key: str | None = Header(default=None)):
     """Putus nomor lama lalu mulai sesi baru yang menampilkan QR.
 
@@ -330,3 +338,6 @@ async def wa_ganti_nomor(x_internal_key: str | None = Header(default=None)):
         raise HTTPException(status_code=503, detail="gateway WhatsApp tidak terjawab") from exc
     await whatsapp_client.start_session()
     return {"status": "ok"}
+
+
+router.include_router(wa_router, prefix="/internal/wa")

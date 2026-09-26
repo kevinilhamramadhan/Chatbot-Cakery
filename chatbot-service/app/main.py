@@ -11,6 +11,7 @@ from app.conversation import background
 from app.core.config import settings
 from app.core.database import init_db
 from app.webhook.routes import router as webhook_router
+from app.webhook.routes import wa_router
 
 logging.basicConfig(
     level=settings.log_level,
@@ -148,6 +149,9 @@ app = FastAPI(
     openapi_url=None if _is_production else "/openapi.json",
 )
 app.include_router(webhook_router, prefix="/webhook", tags=["webhook"])
+# Alias di akar: backend memanggil {CHATBOT_URL}/status, /qr, /ganti-nomor.
+# Kuncinya tetap X-Internal-Key, dan layanan ini tidak pernah terbuka ke publik.
+app.include_router(wa_router, tags=["webhook"])
 
 
 @app.get("/health")

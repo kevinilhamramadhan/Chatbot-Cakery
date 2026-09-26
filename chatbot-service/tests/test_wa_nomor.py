@@ -35,6 +35,9 @@ def _gateway(monkeypatch, state, qr=None):
     ("get", "/webhook/internal/wa/status"),
     ("get", "/webhook/internal/wa/qr"),
     ("post", "/webhook/internal/wa/ganti-nomor"),
+    ("get", "/status"),
+    ("get", "/qr"),
+    ("post", "/ganti-nomor"),
 ])
 def test_butuh_kunci(client, method, path):
     assert getattr(client, method)(path).status_code == 404
@@ -81,3 +84,11 @@ def test_ganti_nomor_putus_lalu_mulai(client, monkeypatch):
     monkeypatch.setattr(whatsapp_client, "start_session", start_session)
     assert client.post("/webhook/internal/wa/ganti-nomor", headers=KEY).json() == {"status": "ok"}
     assert urutan == ["logout", "start"]
+
+
+def test_alias_di_akar_sama_dengan_jalur_webhook(client, monkeypatch):
+    """Backend memanggil {CHATBOT_URL}/status tanpa prefiks — harus tetap jalan."""
+    _gateway(monkeypatch, "CONNECTED")
+    akar = client.get("/status", headers=KEY)
+    assert akar.status_code == 200
+    assert akar.json() == client.get("/webhook/internal/wa/status", headers=KEY).json()
