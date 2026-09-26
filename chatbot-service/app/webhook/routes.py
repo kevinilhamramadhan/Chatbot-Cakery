@@ -293,10 +293,10 @@ async def wa_status(x_internal_key: str | None = Header(default=None)):
         if await whatsapp_client.session_state() == "CONNECTED":
             return {"keadaan": "tersambung", **await whatsapp_client.akun()}
         if await whatsapp_client.qr_png():
-            return {"keadaan": "menunggu_scan", "nomor": None, "nama_profil": None}
+            return {"keadaan": "menunggu_scan", "nomor": None, "profile_name": None}
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("Status WA gagal dibaca: %s: %s", type(exc).__name__, exc)
-    return {"keadaan": "terputus", "nomor": None, "nama_profil": None}
+    return {"keadaan": "terputus", "nomor": None, "profile_name": None}
 
 
 @router.get("/internal/wa/qr")

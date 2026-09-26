@@ -24,7 +24,7 @@ def _gateway(monkeypatch, state, qr=None):
         return qr
 
     async def akun():
-        return {"nomor": "6287881273160", "nama_profil": "Toti Cakery"}
+        return {"nomor": "6287881273160", "profile_name": "Toti Cakery"}
 
     monkeypatch.setattr(whatsapp_client, "session_state", session_state)
     monkeypatch.setattr(whatsapp_client, "qr_png", qr_png)
@@ -44,7 +44,7 @@ def test_butuh_kunci(client, method, path):
 def test_status_tiga_keadaan(client, monkeypatch):
     _gateway(monkeypatch, "CONNECTED")
     r = client.get("/webhook/internal/wa/status", headers=KEY).json()
-    assert r == {"keadaan": "tersambung", "nomor": "6287881273160", "nama_profil": "Toti Cakery"}
+    assert r == {"keadaan": "tersambung", "nomor": "6287881273160", "profile_name": "Toti Cakery"}
 
     _gateway(monkeypatch, "session_not_connected", qr=b"\x89PNG")
     assert client.get("/webhook/internal/wa/status", headers=KEY).json()["keadaan"] == "menunggu_scan"

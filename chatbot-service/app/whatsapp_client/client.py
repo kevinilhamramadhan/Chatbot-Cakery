@@ -137,10 +137,15 @@ class WhatsAppClient:
                                     headers=self._headers)
 
     async def akun(self) -> dict:
-        """Nomor dan nama profil yang sedang tertaut. Hanya sah saat CONNECTED."""
+        """Nomor dan nama profil yang sedang tertaut. Hanya sah saat CONNECTED.
+
+        Kuncinya `profile_name`, bukan `nama_profil`: backend meneruskan balasan
+        ini apa adanya ke Admin Site, dan halaman WhatsApp di sana membacanya
+        dengan nama itu (src/services/whatsappService.ts).
+        """
         info = (await self._get("/client/getClassInfo/{s}")).json().get("sessionInfo") or {}
         return {"nomor": (info.get("wid") or {}).get("user"),
-                "nama_profil": info.get("pushname")}
+                "profile_name": info.get("pushname")}
 
     async def qr_png(self) -> bytes | None:
         """Gambar QR yang sedang berlaku, atau None kalau tidak sedang menunggu scan.
