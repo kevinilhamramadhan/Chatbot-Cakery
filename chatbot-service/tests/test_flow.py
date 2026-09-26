@@ -757,3 +757,18 @@ def test_periode_laporan_dibaca_dari_kalimat_owner():
     assert periode_dari_teks("laporan bulan lalu", now) == ("2026-08-01", "2026-08-31")
     assert periode_dari_teks("laporan tahun ini", now) == ("2026-01-01", "2026-09-26")
     assert periode_dari_teks("laporan keuangan", now) == ("2026-09-01", "2026-09-26")
+
+
+def test_tautan_qris_ikut_dikirim_hanya_di_sandbox():
+    """Untuk uji bayar di simulator Midtrans, tautan gambar QR ikut di caption —
+    tapi hanya untuk URL sandbox, supaya pelanggan asli cukup menerima gambar."""
+    from app.conversation.checkout import kirim_gambar_qris
+    from app.conversation.context import TurnContext, get_turn_context, set_turn_context
+
+    set_turn_context(TurnContext(wa_number="628111@c.us", user_text="qris"))
+    sandbox = "https://api.sandbox.midtrans.com/v2/qris/abc/qr-code"
+    kirim_gambar_qris(sandbox, "id")
+    kirim_gambar_qris("https://api.midtrans.com/v2/qris/abc/qr-code", "id")
+    media = get_turn_context().media
+    assert sandbox in media[0].caption
+    assert "http" not in media[1].caption

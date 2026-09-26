@@ -268,6 +268,10 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Kode QRIS pembayaranmu — scan pakai GoPay/OVO/Dana/m-banking",
         EN: "Your QRIS payment code — scan with GoPay/OVO/Dana/mobile banking",
     },
+    "tautan_qris_uji": {
+        ID: "Tautan QR (mode uji, untuk simulator Midtrans): {url}",
+        EN: "QR link (test mode, for the Midtrans simulator): {url}",
+    },
     "tagihan_tanpa_cara_bayar": {
         ID: ("Maaf, tagihannya gagal diterbitkan jadi pesanannya belum kubuat. "
              "Coba ulangi sebentar lagi ya 🙏"),

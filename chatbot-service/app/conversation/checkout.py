@@ -83,8 +83,14 @@ def kirim_gambar_qris(qris_url: str, lang: str) -> None:
     ctx = get_turn_context_or_none()
     if ctx is None:
         return
-    ctx.media.append(OutboundMedia(image_url=qris_url,
-                                   caption=bahasa.teks("kapsi_qris", lang)))
+    caption = bahasa.teks("kapsi_qris", lang)
+    # Mode sandbox: tautan gambarnya ikut ditulis supaya bisa ditempel ke
+    # simulator pembayaran Midtrans (simulator menerima URL gambar QR, bukan
+    # foto layar). Tagihan sungguhan tidak memuat "sandbox" di URL-nya, jadi
+    # pelanggan asli tetap hanya menerima gambar.
+    if "sandbox" in qris_url:
+        caption += "\n\n" + bahasa.teks("tautan_qris_uji", lang, url=qris_url)
+    ctx.media.append(OutboundMedia(image_url=qris_url, caption=caption))
 
 
 async def finalize_order(wa_number: str) -> str:
