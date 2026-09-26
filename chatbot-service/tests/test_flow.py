@@ -739,3 +739,21 @@ def test_periode_laporan_mengikuti_wib():
     # 30 Sep 18.00 UTC = 1 Okt 01.00 WIB: laporan sudah masuk bulan Oktober.
     utc = dt.datetime(2026, 9, 30, 18, 0, tzinfo=dt.timezone.utc)
     assert _month_range(utc) == ("2026-10-01", "2026-10-01")
+
+
+def test_periode_laporan_dibaca_dari_kalimat_owner():
+    """"laporan keuangan seminggu ini" dulu dijawab laporan sebulan penuh."""
+    from datetime import datetime, timezone
+
+    from app.tools.reports import periode_dari_teks
+
+    now = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)   # Sabtu, WIB
+    assert periode_dari_teks("laporan keuangan seminggu ini dong", now) == ("2026-09-20", "2026-09-26")
+    assert periode_dari_teks("terlaris minggu ini apa?", now) == ("2026-09-21", "2026-09-26")
+    assert periode_dari_teks("laporan minggu lalu", now) == ("2026-09-14", "2026-09-20")
+    assert periode_dari_teks("omzet hari ini", now) == ("2026-09-26", "2026-09-26")
+    assert periode_dari_teks("kemarin gimana", now) == ("2026-09-25", "2026-09-25")
+    assert periode_dari_teks("laporan 30 hari terakhir", now) == ("2026-08-28", "2026-09-26")
+    assert periode_dari_teks("laporan bulan lalu", now) == ("2026-08-01", "2026-08-31")
+    assert periode_dari_teks("laporan tahun ini", now) == ("2026-01-01", "2026-09-26")
+    assert periode_dari_teks("laporan keuangan", now) == ("2026-09-01", "2026-09-26")
