@@ -998,7 +998,7 @@ async def test_keluhan_dijawab_permintaan_maaf_yang_tetap(patch_externals):
     assert "bahan perbaikan" in out
     # Pelanggan yang sedang kecewa tidak dimintai cerita ulang.
     assert "nomor pesanan" not in out.lower() and "fotonya" not in out.lower()
-    assert await store.is_takeover_active(WA) is False, "keluhan tidak membungkam bot"
+    assert await store.is_takeover_active(WA) is True, "keluhan langsung ditangani admin"
 
 
 async def test_renamed_tools_terdaftar_untuk_model(patch_externals):
@@ -1808,11 +1808,11 @@ async def test_lid_gagal_diterjemahkan_tidak_ditulis_ke_backend(patch_externals)
     assert await store.list_orders_by_status("pending") == []
 
 
-# ── Keluhan menawarkan admin ─────────────────────────────────────────────────
-async def test_keluhan_minta_maaf_lalu_menawarkan_admin(patch_externals):
-    """Keputusan Kevin: keluhan dijawab template maaf DAN ditawari disambungkan
-    ke admin. Ditawarkan, bukan langsung disambungkan — takeover membungkam bot
-    berhari-hari, jadi ia hanya berjalan setelah pelanggan mengiyakan."""
+# ── Keluhan langsung ditangani admin ─────────────────────────────────────────
+async def test_keluhan_minta_maaf_lalu_langsung_ke_admin(patch_externals):
+    """Keputusan Kevin (27 Sep 2026): keluhan dijawab template maaf DAN langsung
+    disambungkan ke admin — tidak lagi menunggu pelanggan menjawab "ya".
+    Admin menyudahinya dengan "selesai <nomor>"."""
     from app.conversation import bahasa
     from app.tools.keluhan import send_apology
 
@@ -1820,11 +1820,12 @@ async def test_keluhan_minta_maaf_lalu_menawarkan_admin(patch_externals):
     hasil = await send_apology.ainvoke({"keluhan": "kue diterima dalam keadaan basi"})
 
     assert "mohon maaf" in hasil.lower(), hasil
-    assert bahasa.teks("tawaran_admin", bahasa.ID)[:30] in hasil, hasil
+    assert bahasa.teks("diteruskan_ke_admin", bahasa.ID)[:30] in hasil, hasil
+    assert await store.is_takeover_active(WA) is True
 
-    # Tawarannya tersimpan, jadi "ya" berikutnya benar-benar memulai takeover.
-    sesi = await store.get_or_create_session(WA)
-    assert sesi.pending_escalation and "Keluhan" in sesi.pending_escalation
+    # Adminnya benar-benar dikabari, lengkap dengan kutipan keluhannya.
+    ke_admin = [t for nomor, t in patch_externals["sent"] if nomor == "628999000111"]
+    assert ke_admin and "basi" in ke_admin[0], patch_externals["sent"]
 
 
 async def test_templat_checkout_lengkap_dua_bahasa():
@@ -1900,19 +1901,23 @@ async def test_jawaban_tidak_tahu_tidak_menular_ke_giliran_berikutnya():
 
 async def test_kecewa_sesudah_permintaan_maaf_dijawab_empati(patch_externals):
     """Terukur: "saya agak kecewa sih" sesudah permintaan maaf dijawab
-    "Senang banget kalau suka". Tawaran admin tetap berlaku sesudahnya."""
+    "Senang banget kalau suka".
+
+    Dijalankan sesudah admin menyudahi takeover-nya ("selesai <nomor>"): selama
+    takeover masih aktif bot memang tidak membalas apa pun, dan justru jalur
+    sesudah itulah yang dulu salah nada.
+    """
     from app.tools.keluhan import send_apology
 
     _mock_agent(patch_externals["monkeypatch"], "Hehe, makasih banyak kak! Senang banget kalau suka 😊")
     set_turn_context(TurnContext(wa_number=WA, user_text="kuenya keras"))
     await store.log_message(WA, "out", await send_apology.ainvoke({"keluhan": "kue keras"}))
+    assert await store.is_takeover_active(WA) is True
 
+    await store.deactivate_takeover(WA)
     reply = await handle_message(WA, "saya agak kecewa sih")
     assert "senang" not in reply.text.lower()
     assert "maaf" in reply.text.lower()
-
-    await handle_message(WA, "ya")
-    assert await store.is_takeover_active(WA) is True
 
 
 async def test_balasan_ceria_untuk_pesan_kecewa_diganti_permintaan_maaf(monkeypatch):

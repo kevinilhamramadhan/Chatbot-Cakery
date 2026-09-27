@@ -6,7 +6,11 @@ aku kecewa banget" dijawab "Wah, makasih banyak kak! Senang banget kalau suka �
 daripada sekadar salah memanggil tool. Yang tetap jadi keputusan model adalah
 KAPAN tool ini dipakai; isinya tidak.
 
-Keluhan tidak menyalakan takeover (itu khusus kue custom), tapi dicatat sebagai
+Keluhan LANGSUNG menyalakan takeover: admin dikabari lewat WhatsApp dan bot
+berhenti membalas pelanggan itu sampai admin mengetik "selesai <nomor>".
+Keputusan Kevin (27 Sep 2026), menggantikan alur lama yang hanya menawarkan dan
+menunggu pelanggan menjawab "ya" — orang yang sedang kecewa tidak perlu diminta
+mengiyakan dulu sebelum dilayani manusia. Keluhannya juga dicatat sebagai
 WARNING supaya terlihat saat log ditengok.
 """
 
@@ -55,10 +59,10 @@ async def send_apology(keluhan: str) -> str:
 
     lang = await store.get_lang(ctx.wa_number)
 
-    # Permintaan maafnya tetap yang utama, lalu pelanggan DITAWARI disambungkan
-    # ke admin — bukan langsung disambungkan. Takeover membungkam bot selama
-    # berhari-hari, jadi ia hanya berjalan setelah pelanggan mengiyakan, sama
-    # seperti alur kue custom. Tawarannya disimpan di sesi; jawaban "ya" pada
-    # giliran berikutnya yang benar-benar memulai takeover (orchestrator).
-    await store.set_pending_escalation(ctx.wa_number, f"Keluhan pelanggan: {ringkas}")
-    return _teks(lang) + "\n\n" + escalation.teks_tawaran(lang)
+    # Permintaan maafnya tetap yang utama, lalu pelanggan LANGSUNG disambungkan
+    # ke admin. start_takeover mengabari admin dulu dan baru membungkam bot;
+    # kalau tidak ada admin yang bisa dihubungi, ia TIDAK membungkam apa pun dan
+    # mengembalikan kalimat "admin tidak tersedia" — pelanggan tidak pernah
+    # dijanjikan manusia yang tidak pernah diberi tahu.
+    return _teks(lang) + "\n\n" + await escalation.start_takeover(
+        ctx.wa_number, f"Keluhan pelanggan: {ringkas}", lang)

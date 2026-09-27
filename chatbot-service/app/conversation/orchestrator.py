@@ -264,13 +264,16 @@ async def handle_message(wa_number: str, text: str) -> Reply:
             return reply
         elif text_is_cancel(text):
             await store.set_pending_escalation(wa_number, None)
-        elif session.pending_escalation.startswith("Keluhan") and text_is_negative(text):
-            # Kekecewaan susulan sesudah permintaan maaf. Terukur di gladi demo:
-            # "saya agak kecewa sih" dijawab model "Senang banget kalau suka".
-            # Tawarannya tetap berlaku, jadi "ya" berikutnya masih menyambungkan.
-            reply = Reply(text=bahasa.teks("empati_keluhan", lang))
-            await store.log_message(wa_number, "out", reply.text)
-            return reply
+
+    # 2b) Kekecewaan susulan sesudah permintaan maaf. Terukur di gladi demo:
+    # "saya agak kecewa sih" dijawab model "Senang banget kalau suka". Dilihat
+    # dari riwayat, bukan dari tawaran yang menggantung — sejak keluhan langsung
+    # disambungkan ke admin, tidak ada lagi tawaran yang bisa dijadikan penanda,
+    # dan jalur ini justru terpakai sesudah admin menyudahi takeover-nya.
+    if text_is_negative(text) and await _baru_saja_minta_maaf(wa_number):
+        reply = Reply(text=bahasa.teks("empati_keluhan", lang))
+        await store.log_message(wa_number, "out", reply.text)
+        return reply
 
     # One context per inbound message, set here rather than inside the agent
     # branch: the deterministic steps need it too (tools read `user_text`), and
@@ -336,6 +339,27 @@ async def _rekomendasi(lang: str) -> str:
 
 
 _MAKS_GILIRAN_TAWARAN = 3
+
+
+_MAKS_GILIRAN_EMPATI = 3
+
+
+async def _baru_saja_minta_maaf(wa_number: str) -> bool:
+    """True kalau bot baru saja mengirim permintaan maaf keluhan.
+
+    Hanya beberapa giliran terakhir yang dihitung: keluhan minggu lalu tidak
+    boleh membuat setiap kalimat bernada negatif dijawab template empati.
+    """
+    riwayat = await store.recent_history(wa_number, limit=8)
+    penanda = tuple(bahasa.teks("maaf_keluhan", l)[:40] for l in (bahasa.ID, bahasa.EN))
+    terakhir = -1
+    for i, pesan in enumerate(riwayat):
+        if pesan["role"] == "assistant" and any(p in pesan["content"] for p in penanda):
+            terakhir = i
+    if terakhir < 0:
+        return False
+    sesudahnya = sum(1 for p in riwayat[terakhir + 1:] if p["role"] == "user")
+    return sesudahnya <= _MAKS_GILIRAN_EMPATI
 
 
 async def _escalation_offer_expired(wa_number: str) -> bool:
