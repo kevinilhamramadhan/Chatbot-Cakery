@@ -179,6 +179,46 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "and address — just copy it into GoSend/GrabExpress to book the "
              "courier 🙏"),
     },
+    # Tanggal ambil/kirim: backend menolak pesanan untuk hari yang sama (H-1),
+    # dan toko menerima pesanan paling lama 30 hari ke depan.
+    "tanya_tanggal": {
+        ID: ("Kuenya mau diambil/dikirim *tanggal berapa*?\n"
+             "Paling cepat *besok*, paling lama *30 hari* dari sekarang. "
+             "Contoh: *besok*, *Sabtu*, *12 Oktober*, atau *12/10 jam 14*.\n"
+             "(Kalau jamnya tidak disebut, kami catat pukul 10.00.)"),
+        EN: ("*What date* would you like to pick it up or have it sent?\n"
+             "The earliest is *tomorrow*, the latest *30 days* from now. "
+             "For example: *tomorrow*, *Saturday*, *12 October*, or *12/10 at 14*.\n"
+             "(If you don't mention a time, we'll note 10:00.)"),
+    },
+    "tanggal_tidak_terbaca": {
+        ID: ("Maaf, tanggalnya belum terbaca. Coba tulis seperti *besok*, *Sabtu*, "
+             "*12 Oktober*, atau *12/10* ya."),
+        EN: ("Sorry, I couldn't read that date. Try something like *tomorrow*, "
+             "*Saturday*, *12 October*, or *12/10*."),
+    },
+    "tanggal_terlalu_cepat": {
+        ID: ("Maaf, pesanan paling cepat untuk *besok* karena kuenya dibuat setelah "
+             "dipesan. Mau untuk tanggal berapa?"),
+        EN: ("Sorry, the earliest we can do is *tomorrow* since each cake is made to "
+             "order. What date would you like?"),
+    },
+    "tanggal_terlalu_jauh": {
+        ID: ("Maaf, pesanan paling lama *30 hari* dari sekarang. Mau untuk tanggal "
+             "berapa?"),
+        EN: ("Sorry, we take orders at most *30 days* ahead. What date would you "
+             "like?"),
+    },
+    "tanggal_jam_tutup": {
+        ID: ("Toko buka pukul 07.00 sampai 17.00. Mau tanggal dan jam berapa di "
+             "antara jam itu?"),
+        EN: ("The store is open from 07:00 to 17:00. What date and time within "
+             "those hours would you like?"),
+    },
+    "tanggal_dicatat": {
+        ID: "Baik, dicatat untuk *{tanggal}*.",
+        EN: "Got it, noted for *{tanggal}*.",
+    },
     "tanya_jenis_bayar": {
         ID: ("Mau bayar *penuh* atau *DP 50%*? Ketik salah satu ya.\n"
              "(DP 50% = bayar separuh dulu sekarang)"),

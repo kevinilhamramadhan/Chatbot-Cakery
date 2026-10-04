@@ -13,7 +13,7 @@ import httpx
 
 from app.backend_client import api as backend
 from app.backend_client import products as products_api
-from app.conversation import bahasa, store
+from app.conversation import bahasa, store, tanggal
 from app.conversation.context import OutboundMedia, get_turn_context_or_none
 from app.conversation.states import State
 from app.core.config import settings
@@ -35,12 +35,19 @@ def _alasan_backend(exc: httpx.HTTPStatusError) -> str:
     pelanggan tidak menerima isi perut sistem.
     """
     res = exc.response
-    if res is None or res.status_code != 400:
+    if res is None or res.status_code not in (400, 422):
         return ""
     try:
         detail = res.json().get("detail")
     except Exception:  # noqa: BLE001
         return ""
+    if res.status_code == 422:
+        # Galat validasi berbentuk daftar; yang layak dibaca pelanggan hanya
+        # pesan aturan bisnis ("Value error, Pemesanan kue minimal H-1 ...").
+        pesan = [str(d.get("msg", "")) for d in detail if isinstance(d, dict)] \
+            if isinstance(detail, list) else []
+        detail = next((p.split("Value error, ", 1)[1] for p in pesan
+                       if p.startswith("Value error, ")), None)
     if not isinstance(detail, str):
         return ""
     detail = detail.strip()
@@ -118,6 +125,17 @@ async def finalize_order(wa_number: str) -> str:
         return bahasa.teks("ada_update_harga", lang, catatan="; ".join(price_notes),
                            total=rupiah(cart_total(cart)))
 
+    # Tanggal ambil/kirim wajib bagi backend dan paling cepat besok. Keranjang
+    # yang dikonfirmasi ulang di hari lain bisa membawa tanggal yang sudah basi.
+    tgl = cust.get("tanggal")
+    if not tgl or tanggal.selisih_hari(tgl) < 1:
+        cust.pop("tanggal", None)
+        for k in ("payment_type", "channel"):
+            cust.pop(k, None)
+        await store.set_customer(wa_number, cust)
+        await store.set_state(wa_number, State.COLLECTING_IDENTITY)
+        return bahasa.teks("tanya_tanggal", lang)
+
     total = cart_total(cart)
     payment_type = cust.get("payment_type", "full")
     if payment_type == "dp" and settings.allow_down_payment:
@@ -140,6 +158,7 @@ async def finalize_order(wa_number: str) -> str:
             items=[{"product_id": c["product_id"], "jumlah": c["qty"]} for c in cart],
             metode_pengiriman=delivery,
             created_via="chatbot",
+            fulfillment_date=tgl,
         )
     except httpx.HTTPStatusError as exc:
         # 409 is a business answer, not a hiccup: the backend refuses a second

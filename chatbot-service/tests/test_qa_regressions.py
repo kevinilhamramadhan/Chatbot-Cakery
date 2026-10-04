@@ -11,7 +11,7 @@ import json
 import httpx
 import pytest
 
-from app.conversation import background, store
+from app.conversation import background, store, tanggal
 from app.conversation.context import TurnContext, set_turn_context
 from app.conversation.orchestrator import handle_message
 from app.conversation.states import State
@@ -360,6 +360,7 @@ async def test_channel_understands_wallet_names(patch_externals, typed, expected
 
     await store.set_customer(WA, {"nama": "Budi", "alamat": "Jl. Anggrek No. 9 Batam",
                                   "metode_pengiriman": "pickup", "nomor_hp": "628123456789",
+                                  "tanggal": tanggal.periksa("lusa")[0],
                                   "payment_type": "full"})
     await store.set_state(WA, State.COLLECTING_IDENTITY)
     await handle_message(WA, typed)
@@ -602,7 +603,8 @@ async def test_checkout_refuses_an_invoice_with_no_way_to_pay(patch_externals):
     async def f_upsert(wa, nama, alamat, phone):
         return {"id": 1, "customer_id": 1}
 
-    async def f_create_order(customer_id, items, metode_pengiriman, created_via="chatbot"):
+    async def f_create_order(customer_id, items, metode_pengiriman, created_via="chatbot",
+                             fulfillment_date=None):
         return {"order_id": 30001, "nomor_invoice": "INV-TEST",
                 "total_harga_pesanan": 50000, "status": "pending"}
 
@@ -614,6 +616,7 @@ async def test_checkout_refuses_an_invoice_with_no_way_to_pay(patch_externals):
                                "harga": 50000.0, "qty": 1}])
     await store.set_customer(WA, {"nama": "Budi", "alamat": "Jl. Test 1",
                                   "metode_pengiriman": "pickup", "nomor_hp": "628123456789",
+                                  "tanggal": tanggal.periksa("lusa")[0],
                                   "payment_type": "full", "channel": "qris"})
 
     out = await checkout.finalize_order(WA)
@@ -630,7 +633,8 @@ async def test_backend_409_tells_the_customer_what_to_do(patch_externals):
     pernah berhasil."""
     from app.conversation import checkout
 
-    async def conflict(customer_id, items, metode_pengiriman, created_via="chatbot"):
+    async def conflict(customer_id, items, metode_pengiriman, created_via="chatbot",
+                       fulfillment_date=None):
         request = httpx.Request("POST", "http://backend/api/orders")
         response = httpx.Response(409, request=request,
                                  json={"detail": "Customer masih memiliki tagihan aktif."})
@@ -648,6 +652,7 @@ async def test_backend_409_tells_the_customer_what_to_do(patch_externals):
                                "harga": 50000.0, "qty": 1}])
     await store.set_customer(WA, {"nama": "Budi", "alamat": "Jl. Test 1",
                                   "metode_pengiriman": "pickup", "nomor_hp": "628123456789",
+                                  "tanggal": tanggal.periksa("lusa")[0],
                                   "payment_type": "full", "channel": "qris"})
 
     out = await checkout.finalize_order(WA)
@@ -1542,6 +1547,7 @@ async def test_penolakan_400_backend_dijelaskan_bukan_disuruh_ulangi(patch_exter
 
     await store.set_customer(WA, {"nama": "Rudi", "alamat": "Jl. Uji",
                                   "metode_pengiriman": "pickup",
+                                  "tanggal": tanggal.periksa("lusa")[0],
                                   "payment_type": "full", "channel": "bank_transfer"})
     await store.set_cart(WA, [{"product_id": 8, "nama": "Bolu Pandan",
                                "harga": 75000, "qty": 1}])

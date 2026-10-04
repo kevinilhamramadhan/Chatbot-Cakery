@@ -61,11 +61,15 @@ async def upsert_customer(wa_number: str, nama: str, alamat: str, phone: str) ->
 
 
 async def create_order(customer_id: int, items: list[dict], metode_pengiriman: str,
-                       created_via: str = "chatbot") -> dict:
+                       created_via: str = "chatbot",
+                       fulfillment_date: str | None = None) -> dict:
+    """`fulfillment_date`: ISO 8601 DENGAN zona waktu (backend menganggap nilai
+    tanpa zona sebagai UTC) dan paling cepat besok, kalau tidak backend menolak."""
     payload = {
         "customer_id": customer_id,
         "metode_pengiriman": metode_pengiriman,
         "created_via": created_via,
+        "fulfillment_date": fulfillment_date,
         "items": [{"product_id": i["product_id"], "jumlah": i.get("jumlah", i.get("qty"))}
                   for i in items],
     }
