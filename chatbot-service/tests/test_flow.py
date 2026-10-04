@@ -59,7 +59,8 @@ def patch_externals(monkeypatch):
     async def f_upsert(wa, nama, alamat, phone):
         return {"id": 1, "customer_id": 1, "nomor_wa": wa, "nama": nama, "alamat": alamat}
 
-    async def f_create_order(customer_id, items, metode_pengiriman, created_via="chatbot"):
+    async def f_create_order(customer_id, items, metode_pengiriman, created_via="chatbot",
+                             fulfillment_date=None):
         return {"order_id": 30001, "nomor_invoice": "INV-TEST",
                 "total_harga_pesanan": 100000, "status": "pending"}
 
@@ -279,7 +280,7 @@ async def test_full_order_flow_with_dp():
     await handle_message(WA, "Budi Santoso")
     await handle_message(WA, "Jl. Mawar No. 10, Batam")
     await handle_message(WA, "delivery")
-    await handle_message(WA, "ya")
+    await handle_message(WA, "lusa")
     r = await handle_message(WA, "dp")
     assert "qris" in r.text.lower()              # channel prompt (VA vs QRIS)
     r = await handle_message(WA, "va")
@@ -299,7 +300,7 @@ async def test_charge_sends_payment_method_and_type(patch_externals):
     qris) vs `payment_type` (full|dp), and now recomputes the expected amount
     from the order — sending the old shape gets a 422, a wrong amount a 400."""
     await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
-    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "dp", "qris"):
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "dp", "qris"):
         await handle_message(WA, msg)
 
     charge = patch_externals["charges"][-1]
@@ -320,7 +321,7 @@ async def test_dp_amount_keeps_cents_on_odd_total(patch_externals, monkeypatch):
                         lambda pid: _async(odd if pid == 5 else None))
 
     await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
-    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "dp", "va"):
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "dp", "va"):
         await handle_message(WA, msg)
     assert patch_externals["charges"][-1]["amount"] == 25000.5
 
@@ -330,7 +331,7 @@ async def test_checkout_reprices_stale_cart_and_reconfirms(patch_externals):
     at add_to_cart time, so a cart parked in the session could be checked out at
     an old price. Checkout must re-read the live price and re-confirm."""
     await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
-    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "full"):
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "full"):
         await handle_message(WA, msg)
 
     FAKE_PRODUCTS[0]["harga_jual"] = 60000          # price went up mid-session
@@ -351,7 +352,7 @@ async def test_checkout_reprices_stale_cart_and_reconfirms(patch_externals):
 
 async def test_checkout_drops_item_that_went_unavailable(patch_externals):
     await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
-    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "full"):
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "full"):
         await handle_message(WA, msg)
 
     FAKE_PRODUCTS[0]["is_available"] = False
@@ -397,7 +398,7 @@ async def test_payment_failure_cancels_backend_order(patch_externals):
     mp.setattr(backend, "cancel_order", f_cancel)
 
     await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
-    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "full"):
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "full"):
         await handle_message(WA, msg)
     r = await handle_message(WA, "va")
     assert "gagal" in r.text.lower()
@@ -407,7 +408,7 @@ async def test_payment_failure_cancels_backend_order(patch_externals):
 
 async def test_full_payment_charges_full_amount():
     await _seed_cart_awaiting_confirmation([{"product": "Bolu Pandan", "qty": 2}])
-    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "full", "va"):
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "full", "va"):
         await handle_message(WA, msg)
     order = await store.get_active_pending(WA)
     assert order.payment_type == "full" and order.amount_due == 150000
@@ -415,7 +416,7 @@ async def test_full_payment_charges_full_amount():
 
 async def test_qris_channel_returns_qr_link():
     await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
-    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "ya", "full"):
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "full"):
         await handle_message(WA, msg)
     r = await handle_message(WA, "qris")
     # QR dikirim sebagai GAMBAR, bukan tautan: pelanggan di WhatsApp tidak bisa
@@ -440,6 +441,8 @@ async def test_identity_validation_rejects_bad_input():
     assert "alamat" in r.text.lower()
     await handle_message(WA, "Jl. Test 1")
     r = await handle_message(WA, "delivery")
+    assert "tanggal berapa" in r.text.lower()
+    r = await handle_message(WA, "lusa")
     # The contact number is no longer asked for: it is the WhatsApp number the
     # message arrived on, and the backend has nowhere to keep a second one.
     assert "penuh" in r.text.lower() and "dp" in r.text.lower()
@@ -654,7 +657,7 @@ async def test_pesan_pesanan_dibuat_ikut_bahasa_pelanggan(patch_externals):
     await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
     await store.set_lang(WA, "en")
 
-    for msg in ("yes", "Rudi Hartono", "Jl. Test 1", "pickup", "yes", "full"):
+    for msg in ("yes", "Rudi Hartono", "Jl. Test 1", "pickup", "lusa", "full"):
         await handle_message(WA, msg)
     r = (await handle_message(WA, "va")).text or ""
 

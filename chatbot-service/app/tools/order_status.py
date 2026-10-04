@@ -11,11 +11,15 @@ _ORDER = {
     bahasa.ID: {"pending": "Menunggu pembayaran", "in_process": "Sedang diproses",
                 "ready": "Siap diambil/dikirim", "delivered": "Dikirim",
                 "picked_up": "Sudah diambil", "cancelled": "Dibatalkan",
-                "refunded": "Dibatalkan, dana sudah dikembalikan"},
+                "refunded": "Dibatalkan, dana sudah dikembalikan",
+                "cancelled_settlement_expired":
+                    "Dibatalkan karena pelunasan melewati batas waktu"},
     bahasa.EN: {"pending": "Awaiting payment", "in_process": "Being prepared",
                 "ready": "Ready for pickup/delivery", "delivered": "Delivered",
                 "picked_up": "Picked up", "cancelled": "Cancelled",
-                "refunded": "Cancelled, money refunded"},
+                "refunded": "Cancelled, money refunded",
+                "cancelled_settlement_expired":
+                    "Cancelled because the balance was not paid in time"},
 }
 _INV = {
     bahasa.ID: {"unpaid": "belum dibayar", "partial": "DP terbayar", "paid": "lunas",

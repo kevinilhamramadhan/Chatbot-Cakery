@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 
 from app.backend_client import api as backend
-from app.conversation import bahasa, checkout, escalation, store, verification
+from app.conversation import bahasa, checkout, escalation, store, tanggal, verification
 from app.conversation.context import (
     OutboundMedia,
     TurnContext,
@@ -563,7 +563,7 @@ async def _handle_identity(wa_number: str, text: str, lang: str) -> Reply:
             cust["metode_pengiriman"] = "pickup"
             cust["nomor_hp"] = _wa_digits(wa_number)
             await store.set_customer(wa_number, cust)
-            return Reply(text=_payment_type_prompt(lang))
+            return Reply(text=bahasa.teks("tanya_tanggal", lang))
         if _looks_like_question(text):
             return await _answer_then_reask(
                 wa_number, text, bahasa.teks("kembali_minta_alamat", lang))
@@ -596,17 +596,32 @@ async def _handle_identity(wa_number: str, text: str, lang: str) -> Reply:
         # sudah terlanjur mengira ongkirnya diurus toko.
         if cust["metode_pengiriman"] == "delivery":
             return Reply(text=bahasa.teks("konfirmasi_kirim_sendiri", lang)
-                         + "\n\n" + _payment_type_prompt(lang))
-        return Reply(text=_payment_type_prompt(lang))
+                         + "\n\n" + bahasa.teks("tanya_tanggal", lang))
+        return Reply(text=bahasa.teks("tanya_tanggal", lang))
+
+    # Step 3b: tanggal ambil/kirim. Backend mewajibkannya (aturan H-1); toko
+    # membatasi paling lama 30 hari ke depan. Dibaca tanpa model.
+    if "tanggal" not in cust:
+        iso, alasan = tanggal.periksa(text)
+        if iso is None:
+            if alasan == "tidak_terbaca" and _looks_like_question(text):
+                return await _answer_then_reask(
+                    wa_number, text, bahasa.teks("tanya_tanggal", lang))
+            return Reply(text=bahasa.teks(f"tanggal_{alasan}", lang))
+        cust["tanggal"] = iso
+        await store.set_customer(wa_number, cust)
+        return Reply(text=bahasa.teks("tanggal_dicatat", lang,
+                                      tanggal=tanggal.tampil(iso, lang))
+                     + "\n\n" + _payment_type_prompt(lang, cust))
 
     # Step 4: payment type (full vs DP 50%)
     if "payment_type" not in cust:
-        if not settings.allow_down_payment or _FULL_RE.search(text):
+        if not _boleh_dp(cust) or _FULL_RE.search(text):
             cust["payment_type"] = "full"
         elif _DP_RE.search(text):
             cust["payment_type"] = "dp"
         else:
-            return Reply(text=_payment_type_prompt(lang))
+            return Reply(text=_payment_type_prompt(lang, cust))
         await store.set_customer(wa_number, cust)
         return Reply(text=_channel_prompt(lang))
 
@@ -633,7 +648,17 @@ def _channel_prompt(lang: str) -> str:
     return bahasa.teks("tanya_metode_bayar", lang)
 
 
-def _payment_type_prompt(lang: str) -> str:
-    if settings.allow_down_payment:
+def _boleh_dp(cust: dict) -> bool:
+    # Backend memasang batas pelunasan DP pada H-1 pukul 18.00 WIB. Pesanan untuk
+    # besok hampir tidak menyisakan waktu pelunasan (atau sudah lewat), jadi DP
+    # hanya ditawarkan mulai H+2.
+    # ponytail: ambang per hari, bukan per jam; perhalus kalau DP untuk besok
+    # ternyata sering diminta sebelum sore.
+    tgl = cust.get("tanggal")
+    return bool(settings.allow_down_payment and tgl and tanggal.selisih_hari(tgl) >= 2)
+
+
+def _payment_type_prompt(lang: str, cust: dict | None = None) -> str:
+    if _boleh_dp(cust or {}):
         return bahasa.teks("tanya_jenis_bayar", lang)
     return bahasa.teks("lanjut_bayar", lang)
