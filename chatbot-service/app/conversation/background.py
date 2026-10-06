@@ -58,31 +58,15 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _teks_transfer_selesai(order) -> str:
-    """Kabar saat admin selesai mentransfer dana refund manual (VA)."""
-    baris = [
-        f"Dana pengembalian pesanan *{_label(order)}* sudah kami transfer ✅",
-        "Mohon dicek di rekening atau aplikasi yang kamu pakai ya.",
-    ]
+async def _teks_kabar_refund(order, kunci: str) -> str:
+    """Kabar refund dalam bahasa sesi pelanggan. `kunci`: refund_ditransfer (admin
+    selesai mentransfer manual) atau refund_otomatis (di-refund lewat backend)."""
+    lang = await store.get_lang(order.wa_number)
+    teks = bahasa.teks(kunci, lang, invoice=_label(order))
     email = settings.store_support_email.strip()
     if email:
-        baris.append(f"Kalau belum masuk juga, kabari kami di {email}.")
-    baris.append("Terima kasih sudah menunggu 😊")
-    return "\n\n".join(baris)
-
-
-def _teks_refund(order) -> str:
-    """Kabar untuk pelanggan saat pesanannya di-refund admin."""
-    baris = [
-        f"Pesanan *{_label(order)}* dibatalkan dan pembayaranmu dikembalikan ✅",
-        "Dananya kembali lewat metode pembayaran yang kamu pakai. Prosesnya bisa "
-        "beberapa hari kerja tergantung bank atau e-wallet-nya ya 🙏",
-    ]
-    email = settings.store_support_email.strip()
-    if email:
-        baris.append(f"Kalau lewat dari itu belum masuk, kabari kami di {email}.")
-    baris.append("Terima kasih sudah menunggu 😊")
-    return "\n\n".join(baris)
+        teks += bahasa.teks(kunci + "_email", lang, email=email)
+    return teks + bahasa.teks("terima_kasih_menunggu", lang)
 
 
 async def tutup_karena_refund(order) -> bool:
@@ -95,7 +79,7 @@ async def tutup_karena_refund(order) -> bool:
     """
     if order.status in ("cancelled", "refunded"):
         return False
-    if not await _notify(order.wa_number, _teks_refund(order)):
+    if not await _notify(order.wa_number, await _teks_kabar_refund(order, "refund_otomatis")):
         logger.warning("Kabar refund %s gagal terkirim — dicoba lagi siklus berikutnya",
                        order.order_ref)
         return False
@@ -127,7 +111,7 @@ async def notify_refunded(order_id: int) -> bool:
                                                    store.KABAR_TRANSFER_TERTUNDA):
         if str(order.order_ref) != str(order_id):
             continue
-        if not await _notify(order.wa_number, _teks_transfer_selesai(order)):
+        if not await _notify(order.wa_number, await _teks_kabar_refund(order, "refund_ditransfer")):
             await store.update_pending_order(
                 order.id, status=store.KABAR_TRANSFER_TERTUNDA)
             logger.warning("Kabar transfer refund %s gagal — dicoba lagi siklus "
@@ -187,7 +171,7 @@ async def _kabari_transfer_tertunda() -> None:
     pesanan yang di-refund terlihat sama sebelum dan sesudah uangnya dikirim.
     """
     for order in await store.list_orders_by_status(store.KABAR_TRANSFER_TERTUNDA):
-        if not await _notify(order.wa_number, _teks_transfer_selesai(order)):
+        if not await _notify(order.wa_number, await _teks_kabar_refund(order, "refund_ditransfer")):
             continue
         await store.update_pending_order(order.id, status="refunded")
         logger.info("Refund manual %s selesai — pelanggan sudah dikabari (ulangan)",
@@ -254,17 +238,14 @@ async def _check_once() -> None:
                                order.order_ref, exc)
             await store.update_pending_order(order.id, status="expired")
             await store.set_state(order.wa_number, State.IDLE)
+            lang = await store.get_lang(order.wa_number)
             if cancelled:
-                text = (f"Pesanan *{_label(order)}* dibatalkan otomatis karena "
-                        "melewati batas waktu pembayaran. Silakan pesan lagi "
-                        "kapan saja ya 🙏")
+                text = bahasa.teks("batal_otomatis", lang, invoice=_label(order))
             else:
                 surel = settings.store_support_email.strip()
-                lanjut = (f"kirim bukti transfernya ke {surel} ya" if surel
-                          else "sampaikan bukti transfernya ke kontak resmi kami ya")
-                text = (f"Batas waktu pembayaran pesanan *{_label(order)}* sudah "
-                        "lewat, jadi pesanannya tidak kami proses. Kalau kamu "
-                        f"terlanjur membayar, {lanjut} 🙏")
+                lanjut = (bahasa.teks("batas_lewat_bukti_email", lang, email=surel) if surel
+                          else bahasa.teks("batas_lewat_bukti_kontak", lang))
+                text = bahasa.teks("batas_lewat", lang, invoice=_label(order), lanjut=lanjut)
             await _notify(order.wa_number, text)
             continue
 
@@ -295,9 +276,8 @@ async def tandai_lunas(order) -> bool:
         return False
     terkirim = await _notify(
         order.wa_number,
-        "Pembayaran sudah kami terima ✅\n"
-        f"Jumlah: {rupiah(order.amount_due)}. Pesananmu akan segera kami proses. "
-        "Terima kasih! 🎂",
+        bahasa.teks("bayar_diterima", await store.get_lang(order.wa_number),
+                    jumlah=rupiah(order.amount_due)),
     )
     if not terkirim:
         await store.update_pending_order(order.id, notified_paid=False)  # lepas klaim

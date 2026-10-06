@@ -524,6 +524,267 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("\n\nIs that everything, or would you like to add more? "
              "Type *confirm* to continue \U0001F60A"),
     },
+    # ── Keluaran tool lain (dua bahasa sejak 6 Okt 2026) ──────────────────────
+    "detail_pilihan": {
+        ID: "Untuk '{produk}' ada beberapa pilihan: {pilihan}. Yang mana yang mau kamu lihat? 😊",
+        EN: "There are a few options for '{produk}': {pilihan}. Which one would you like to see? 😊",
+    },
+    "detail_tak_tertangkap": {
+        ID: "Maaf, aku belum menangkap kue mana yang kamu maksud dengan '{produk}'.",
+        EN: "Sorry, I couldn't tell which cake you mean by '{produk}'.",
+    },
+    "detail_tanpa_deskripsi": {
+        ID: "Belum ada deskripsi untuk produk ini.",
+        EN: "There's no description for this product yet.",
+    },
+    "detail_produk": {
+        ID: "*{nama}*\n{deskripsi}\nHarga: {harga}\n\nMau pesan ini? Bilang aja jumlahnya ya 😊",
+        EN: "*{nama}*\n{deskripsi}\nPrice: {harga}\n\nWould you like to order this? Just tell me how many 😊",
+    },
+    "menu_fallback_kosong": {
+        ID: "{lead} Coba cek menu dulu ya.",
+        EN: "{lead} Please check the menu first.",
+    },
+    "menu_fallback": {
+        ID: ("{lead} Ini menu Toti Cakery ya:\n{daftar}\n\n"
+             "Sebutkan nama kuenya, dan jumlahnya kalau mau langsung pesan 😊"),
+        EN: ("{lead} Here's the Toti Cakery menu:\n{daftar}\n\n"
+             "Tell me the cake's name, and the quantity if you'd like to order right away 😊"),
+    },
+    "banding_minimal": {
+        ID: "Sebutkan minimal 2 produk yang ingin dibandingkan ya.",
+        EN: "Please name at least 2 products to compare.",
+    },
+    "banding_ambigu": {
+        ID: "{q} (ambigu — maksudnya: {pilihan}?)",
+        EN: "{q} (ambiguous — did you mean: {pilihan}?)",
+    },
+    "tidak_menemukan": {
+        ID: "Maaf, aku tidak menemukan: {nama}.",
+        EN: "Sorry, I couldn't find: {nama}.",
+    },
+    "banding_judul": {ID: "Perbandingan produk:", EN: "Product comparison:"},
+    "banding_baris": {
+        ID: "\n*{nama}*\n  Harga: {harga}\n  {deskripsi}",
+        EN: "\n*{nama}*\n  Price: {harga}\n  {deskripsi}",
+    },
+    "catatan_tidak_ditemukan": {
+        ID: "\n\n(Tidak ditemukan: {nama})",
+        EN: "\n\n(Not found: {nama})",
+    },
+    "tak_ada_tagihan_menunggu": {
+        ID: "Saat ini kamu belum punya tagihan yang menunggu pembayaran 😊",
+        EN: "You don't have an invoice waiting for payment right now 😊",
+    },
+    "tagihan_sudah_dibayar": {
+        ID: "Pesanan *{invoice}* sudah dibayar — tidak ada tagihan yang perlu dibayar lagi 🙏",
+        EN: "Order *{invoice}* is already paid — there's nothing left to pay 🙏",
+    },
+    "info_bayar_tak_terambil": {
+        ID: ("Maaf, aku tidak bisa mengambil ulang info pembayaran untuk *{invoice}*. "
+             "Ketik *batal* lalu pesan ulang ya, nanti tagihannya kuterbitkan lagi 🙏"),
+        EN: ("Sorry, I can't retrieve the payment details for *{invoice}*. "
+             "Type *cancel* and order again, and I'll issue a new invoice 🙏"),
+    },
+    "kirim_ulang_bayar": {
+        ID: ("Ini lagi ya untuk pesanan *{invoice}*:\n\n"
+             "{label} yang harus dibayar: *{jumlah}*\n\n{cara_bayar}\n\n"
+             "Batas waktu pembayaran {menit} menit sejak pesanan dibuat. "
+             "Ketik *batal* kalau ingin membatalkan."),
+        EN: ("Here it is again for order *{invoice}*:\n\n"
+             "{label} to pay: *{jumlah}*\n\n{cara_bayar}\n\n"
+             "The payment deadline is {menit} minutes from when the order was made. "
+             "Type *cancel* if you'd like to cancel."),
+    },
+    "bayar_diterima_singkat": {
+        ID: "Pembayaran sudah kami terima ✅\nPesananmu akan segera kami proses. Terima kasih! 🎂",
+        EN: "We've received your payment ✅\nWe'll start on your order right away. Thank you! 🎂",
+    },
+    "bayar_diterima": {
+        ID: ("Pembayaran sudah kami terima ✅\n"
+             "Jumlah: {jumlah}. Pesananmu akan segera kami proses. Terima kasih! 🎂"),
+        EN: ("We've received your payment ✅\n"
+             "Amount: {jumlah}. We'll start on your order right away. Thank you! 🎂"),
+    },
+    "bayar_belum_terdeteksi": {
+        ID: ("Pembayaranmu belum terdeteksi di sistem kami. Biasanya butuh 1-2 menit "
+             "setelah transfer atau scan berhasil — nanti aku kabari otomatis begitu "
+             "masuk ya 🙏"),
+        EN: ("Your payment hasn't shown up in our system yet. It usually takes 1-2 minutes "
+             "after a successful transfer or scan — I'll let you know automatically as soon "
+             "as it arrives 🙏"),
+    },
+    "keranjang_tak_tertangkap": {
+        ID: "Maaf, aku belum menangkap kue mana yang kamu maksud.",
+        EN: "Sorry, I couldn't tell which cake you mean.",
+    },
+    "masih_ada_pesanan_aktif": {
+        ID: ("Kamu masih punya pesanan yang sedang diproses/belum dibayar. "
+             "Untuk pesanan baru, silakan selesaikan dulu yang ini atau pesan lewat "
+             "website Toti Cakery ya 🙏"),
+        EN: ("You still have an order in progress or unpaid. For a new order, please "
+             "finish this one first, or order through the Toti Cakery website 🙏"),
+    },
+    "jumlah_besar_admin": {
+        ID: ("Jumlah sebanyak itu ({daftar}) aku teruskan ke admin ya — "
+             "pesanan besar perlu dijadwalkan minimal H-2. Mau kusambungkan ke admin, "
+             "atau mau kuubah jumlahnya?"),
+        EN: ("A quantity that large ({daftar}) needs to go through our admin — big orders "
+             "have to be scheduled at least 2 days ahead. Shall I connect you to our admin, "
+             "or would you like to change the quantity?"),
+    },
+    "jumlah_belum_jelas": {
+        ID: "Jumlahnya belum jelas untuk {nama}. Boleh sebutkan jumlahnya dalam angka utuh, mis. 2? 😊",
+        EN: "The quantity for {nama} isn't clear. Could you give it as a whole number, e.g. 2? 😊",
+    },
+    "minimum_item": {ID: "{nama} minimal {minimum} pcs", EN: "{nama} minimum {minimum} pcs"},
+    "minimum_pemesanan": {
+        ID: "Untuk produk ini ada jumlah minimum pemesanan: {daftar}. Mau kunaikkan jumlahnya?",
+        EN: "This product has a minimum order quantity: {daftar}. Shall I raise the quantity?",
+    },
+    "ada_beberapa_pilihan": {
+        ID: "Ada beberapa pilihan untuk {daftar}. Sebutkan yang mana ya? 😊",
+        EN: "There are a few options for {daftar}. Which one would you like? 😊",
+    },
+    "tidak_tersedia": {
+        ID: "Maaf, {nama} sedang tidak tersedia. Mau pesan menu yang lain?",
+        EN: "Sorry, {nama} is currently unavailable. Would you like to order something else?",
+    },
+    "item_yang_diminta": {ID: "item yang diminta", EN: "the item you asked for"},
+    "tak_ada_di_menu": {
+        ID: "Maaf, aku tidak menemukan {nama} di menu.",
+        EN: "Sorry, I couldn't find {nama} on the menu.",
+    },
+    "catatan_pilihan": {
+        ID: "\n\n(Belum kumasukkan karena ada beberapa pilihan — {isi})",
+        EN: "\n\n(Not added yet because there are several options — {isi})",
+    },
+    "catatan_tidak_tersedia": {
+        ID: "\n\n(Sedang tidak tersedia: {isi})",
+        EN: "\n\n(Currently unavailable: {isi})",
+    },
+    "catatan_minimum": {
+        ID: "\n\n(Belum masuk karena minimum pemesanan: {isi})",
+        EN: "\n\n(Not added because of the minimum order: {isi})",
+    },
+    "catatan_besar": {
+        ID: "\n\n(Belum masuk karena jumlahnya besar: {isi} — pesanan sebanyak itu lewat admin ya)",
+        EN: "\n\n(Not added because the quantity is large: {isi} — orders that big go through our admin)",
+    },
+    "catatan_jumlah": {
+        ID: "\n\n(Jumlahnya belum jelas: {isi})",
+        EN: "\n\n(Quantity unclear: {isi})",
+    },
+    # ── Penjaga balasan model ────────────────────────────────────────────────
+    "gangguan_llm": {
+        ID: "Maaf, lagi ada gangguan di sistem kami. Coba beberapa saat lagi ya 🙏",
+        EN: "Sorry, our system is having trouble right now. Please try again in a moment 🙏",
+    },
+    "harga_dari_sistem": {
+        ID: ("Biar aku nggak salah sebut angka, harga selalu kuambil dari sistem ya. "
+             "Boleh sebutkan kuenya, atau ketik *menu* untuk daftar lengkapnya 😊"),
+        EN: ("So I don't quote a wrong number, I always take prices from our system. "
+             "Tell me the cake's name, or type *menu* for the full list 😊"),
+    },
+    "laporan_dari_sistem": {
+        ID: ("Angka laporan selalu kuambil dari sistem, jadi aku nggak bisa "
+             "menyebutkannya sendiri. Coba minta lagi ya — nanti kuambilkan "
+             "dari data yang sebenarnya 🙏"),
+        EN: ("Report figures always come from our system, so I can't state them myself. "
+             "Please ask again and I'll pull the real data 🙏"),
+    },
+    "ulangi_maksud": {
+        ID: ("Boleh diulang maksudnya kak? Aku bisa bantu soal menu, pemesanan, "
+             "pembayaran, dan status pesanan 😊"),
+        EN: ("Could you say that again? I can help with the menu, ordering, payment, "
+             "and order status 😊"),
+    },
+    "tool_gagal": {
+        ID: "Maaf, ada kendala saat memproses permintaanmu. Coba lagi ya 🙏",
+        EN: "Sorry, something went wrong while processing your request. Please try again 🙏",
+    },
+    # ── Kabar dari proses latar ──────────────────────────────────────────────
+    "refund_ditransfer": {
+        ID: ("Dana pengembalian pesanan *{invoice}* sudah kami transfer ✅\n\n"
+             "Mohon dicek di rekening atau aplikasi yang kamu pakai ya."),
+        EN: ("We've transferred the refund for order *{invoice}* ✅\n\n"
+             "Please check your bank account or the app you used."),
+    },
+    "refund_ditransfer_email": {
+        ID: "\n\nKalau belum masuk juga, kabari kami di {email}.",
+        EN: "\n\nIf it still hasn't arrived, let us know at {email}.",
+    },
+    "refund_otomatis": {
+        ID: ("Pesanan *{invoice}* dibatalkan dan pembayaranmu dikembalikan ✅\n\n"
+             "Dananya kembali lewat metode pembayaran yang kamu pakai. Prosesnya bisa "
+             "beberapa hari kerja tergantung bank atau e-wallet-nya ya 🙏"),
+        EN: ("Order *{invoice}* was cancelled and your payment is being refunded ✅\n\n"
+             "The money returns through the payment method you used. It can take a few "
+             "business days depending on your bank or e-wallet 🙏"),
+    },
+    "refund_otomatis_email": {
+        ID: "\n\nKalau lewat dari itu belum masuk, kabari kami di {email}.",
+        EN: "\n\nIf it hasn't arrived after that, let us know at {email}.",
+    },
+    "terima_kasih_menunggu": {
+        ID: "\n\nTerima kasih sudah menunggu 😊",
+        EN: "\n\nThank you for waiting 😊",
+    },
+    "batal_otomatis": {
+        ID: ("Pesanan *{invoice}* dibatalkan otomatis karena melewati batas waktu "
+             "pembayaran. Silakan pesan lagi kapan saja ya 🙏"),
+        EN: ("Order *{invoice}* was cancelled automatically because the payment deadline "
+             "passed. Feel free to order again any time 🙏"),
+    },
+    "batas_lewat_bukti_email": {
+        ID: "kirim bukti transfernya ke {email} ya",
+        EN: "please send the proof of transfer to {email}",
+    },
+    "batas_lewat_bukti_kontak": {
+        ID: "sampaikan bukti transfernya ke kontak resmi kami ya",
+        EN: "please send the proof of transfer to our official contact",
+    },
+    "batas_lewat": {
+        ID: ("Batas waktu pembayaran pesanan *{invoice}* sudah lewat, jadi pesanannya "
+             "tidak kami proses. Kalau kamu terlanjur membayar, {lanjut} 🙏"),
+        EN: ("The payment deadline for order *{invoice}* has passed, so we are not "
+             "processing it. If you have already paid, {lanjut} 🙏"),
+    },
+    # ── Laporan Owner ────────────────────────────────────────────────────────
+    "laporan_ditolak": {
+        ID: ("Maaf, laporan ini hanya untuk Owner Toti Cakery dan nomormu belum terdaftar "
+             "sebagai Owner."),
+        EN: ("Sorry, this report is only for the Owner of Toti Cakery, and your number is "
+             "not registered as an Owner."),
+    },
+    "laporan_tak_tersedia": {
+        ID: ("Laporan belum bisa diambil — endpoint laporan di backend belum tersedia "
+             "atau sedang gangguan. Coba lagi nanti ya."),
+        EN: ("The report can't be retrieved — the backend report endpoint is unavailable "
+             "or having trouble. Please try again later."),
+    },
+    "laporan_keuangan": {
+        ID: ("📊 *Laporan Keuangan* ({awal} s/d {akhir})\n"
+             "Omzet (pembayaran masuk): {omzet}\nPengeluaran: {pengeluaran}\n"
+             "Laba kotor: {laba}\nJumlah pesanan: {pesanan}"),
+        EN: ("📊 *Financial Report* ({awal} to {akhir})\n"
+             "Revenue (payments received): {omzet}\nExpenses: {pengeluaran}\n"
+             "Gross profit: {laba}\nNumber of orders: {pesanan}"),
+    },
+    "analitik_judul": {
+        ID: "📈 *Analitik Bisnis* ({awal} s/d {akhir})",
+        EN: "📈 *Business Analytics* ({awal} to {akhir})",
+    },
+    "analitik_terlaris": {ID: "Produk terlaris:", EN: "Best-selling products:"},
+    "analitik_kosong": {
+        ID: "Belum ada penjualan di periode ini.",
+        EN: "No sales in this period yet.",
+    },
+    "analitik_jumlah": {ID: "Jumlah pesanan: {n}", EN: "Number of orders: {n}"},
+    "analitik_rata": {
+        ID: "Rata-rata nilai pesanan: {nilai}",
+        EN: "Average order value: {nilai}",
+    },
     "status_pesanan_gagal": {
         ID: "Maaf, status pesanan lagi tidak bisa diambil. Coba lagi sebentar ya \U0001F64F",
         EN: "Sorry, I can't fetch your order status right now. Please try again shortly \U0001F64F",

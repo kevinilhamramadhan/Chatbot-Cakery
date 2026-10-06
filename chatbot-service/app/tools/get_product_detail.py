@@ -5,6 +5,7 @@ import logging
 import httpx
 from langchain_core.tools import tool
 
+from app.conversation import bahasa, store
 from app.conversation.context import OutboundMedia, get_turn_context
 from app.core.config import settings
 from app.tools.formatting import (
@@ -49,18 +50,17 @@ async def get_product_detail(product: str) -> str:
     `product` bisa berupa nama kue atau id produk. Gunakan saat pelanggan
     menanyakan detail/penjelasan satu produk tertentu.
     """
+    lang = await store.get_lang(get_turn_context().wa_number)
     p, options = await resolve_product(product)
     if p is None:
         if options:
-            return (
-                f"Untuk '{product}' ada beberapa pilihan: {options_line(options)}. "
-                "Yang mana yang mau kamu lihat? 😊"
-            )
+            return bahasa.teks("detail_pilihan", lang, produk=product,
+                               pilihan=options_line(options))
         return await menu_fallback(
-            f"Maaf, aku belum menangkap kue mana yang kamu maksud dengan '{product}'.")
+            bahasa.teks("detail_tak_tertangkap", lang, produk=product), lang)
 
     name = product_label(p)
-    desc = p.get("deskripsi") or "Belum ada deskripsi untuk produk ini."
+    desc = p.get("deskripsi") or bahasa.teks("detail_tanpa_deskripsi", lang)
     harga = rupiah(p.get("harga_jual"))
 
     # Queue the image to be sent via wwebjs-api (PROMPT §10.2).
@@ -76,7 +76,4 @@ async def get_product_detail(product: str) -> str:
                 OutboundMedia(image_url=image_url, caption=caption)
             )
 
-    return (
-        f"*{name}*\n{desc}\nHarga: {harga}\n\n"
-        "Mau pesan ini? Bilang aja jumlahnya ya 😊"
-    )
+    return bahasa.teks("detail_produk", lang, nama=name, deskripsi=desc, harga=harga)

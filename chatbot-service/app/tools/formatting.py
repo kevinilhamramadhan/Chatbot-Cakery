@@ -114,7 +114,7 @@ def options_line(candidates: list[dict], limit: int = 6) -> str:
     )
 
 
-async def menu_fallback(lead: str) -> str:
+async def menu_fallback(lead: str, lang: str | None = None) -> str:
     """`lead` followed by the catalogue itself, for a product we couldn't resolve.
 
     "Coba cek menu dulu ya" asked the customer to do work the bot could just do.
@@ -126,10 +126,11 @@ async def menu_fallback(lead: str) -> str:
         items = await products_api.list_products(only_active=True)
     except Exception:  # noqa: BLE001 - the caller still has something to say
         items = []
+    from app.conversation import bahasa
+
     if not items:
-        return f"{lead} Coba cek menu dulu ya."
+        return bahasa.teks("menu_fallback_kosong", lang, lead=lead)
     lines = "\n".join(
         f"• {product_label(p)} — {rupiah(p.get('harga_jual'))}" for p in items
     )
-    return (f"{lead} Ini menu Toti Cakery ya:\n{lines}\n\n"
-            "Sebutkan nama kuenya, dan jumlahnya kalau mau langsung pesan 😊")
+    return bahasa.teks("menu_fallback", lang, lead=lead, daftar=lines)

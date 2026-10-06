@@ -140,7 +140,7 @@ def _history_view(content: str) -> str:
     if content.startswith(_AWALAN_MAAF):
         return ("[Aku sudah minta maaf atas keluhan itu via tool send_apology "
                 "dan menawarkan sambung ke admin]")
-    if content.startswith("*") and "Harga:" in content:
+    if content.startswith("*") and ("Harga:" in content or "Price:" in content):
         produk = content.split("*")[1] if content.count("*") >= 2 else "produk"
         return (
             f"[Aku sudah menampilkan detail {produk} + fotonya via tool "
@@ -207,7 +207,7 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         ai: AIMessage = await llm.ainvoke(messages)
     except Exception as exc:  # noqa: BLE001
         logger.exception("LLM invocation failed: %s", exc)
-        return "Maaf, lagi ada gangguan di sistem kami. Coba beberapa saat lagi ya 🙏"
+        return bahasa.teks("gangguan_llm", lang)
 
     # 2) No tool call -> direct answer (FAQ / greeting / refusal).
     if not getattr(ai, "tool_calls", None):
@@ -226,25 +226,15 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
             # with the entire price list. Say nothing we cannot ground, and let
             # the customer's next message route normally through the model.
             logger.warning("Ungrounded price in a tool-less reply — dropping it")
-            return (
-                "Biar aku nggak salah sebut angka, harga selalu kuambil dari sistem ya. "
-                "Boleh sebutkan kuenya, atau ketik *menu* untuk daftar lengkapnya 😊"
-            )
+            return bahasa.teks("harga_dari_sistem", lang)
         # Same rule, other shapes: a report with no tool behind it is invented,
         # and the internal tool names are not something a customer should read.
         if answer and _REPORT_RE.search(answer):
             logger.warning("Ungrounded report in a tool-less reply — dropping it")
-            return (
-                "Angka laporan selalu kuambil dari sistem, jadi aku nggak bisa "
-                "menyebutkannya sendiri. Coba minta lagi ya — nanti kuambilkan "
-                "dari data yang sebenarnya 🙏"
-            )
+            return bahasa.teks("laporan_dari_sistem", lang)
         if answer and _TOOLNAME_RE.search(answer):
             logger.warning("Reply mentioned an internal tool name — dropping it")
-            return (
-                "Boleh diulang maksudnya kak? Aku bisa bantu soal menu, pemesanan, "
-                "pembayaran, dan status pesanan 😊"
-            )
+            return bahasa.teks("ulangi_maksud", lang)
         if answer and _CERIA_RE.search(answer) and text_is_negative(user_text):
             logger.warning("Cheerful reply to a disappointed message — apologising instead")
             from app.tools.keluhan import send_apology
@@ -275,7 +265,7 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
             outputs.append(str(result))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Tool %s failed: %s", tc["name"], exc)
-            outputs.append("Maaf, ada kendala saat memproses permintaanmu. Coba lagi ya 🙏")
+            outputs.append(bahasa.teks("tool_gagal", lang))
 
     if not outputs:
         return _clean(ai.content) or _di_luar_cakupan(lang)

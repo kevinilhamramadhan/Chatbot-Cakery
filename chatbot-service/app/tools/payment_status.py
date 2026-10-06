@@ -49,8 +49,5 @@ async def check_payment_status() -> str:
     if inv in ("paid", "partial"):
         await store.update_pending_order(order.id, status="paid", notified_paid=True)
         ctx.next_state = State.ORDER_ACTIVE
-        return ("Pembayaran sudah kami terima ✅\n"
-                "Pesananmu akan segera kami proses. Terima kasih! 🎂")
-    return ("Pembayaranmu belum terdeteksi di sistem kami. Biasanya butuh 1-2 menit "
-            "setelah transfer atau scan berhasil — nanti aku kabari otomatis begitu "
-            "masuk ya 🙏")
+        return bahasa.teks("bayar_diterima_singkat", lang)
+    return bahasa.teks("bayar_belum_terdeteksi", lang)

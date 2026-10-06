@@ -829,3 +829,27 @@ async def test_checkout_di_konfirmasi_keranjang_berarti_setuju():
     r = await handle_message(WA, "checkout")
     assert (await store.get_or_create_session(WA)).state == State.COLLECTING_IDENTITY
     assert "nama" in r.text.lower()
+
+
+async def test_keluaran_tool_ikut_bahasa_inggris(monkeypatch):
+    """Sesi Inggris tidak boleh menerima kalimat Indonesia dari tool (selain nama
+    dan deskripsi produk, yang memang data katalog)."""
+    from app.conversation import bahasa
+    from app.tools.add_to_cart import add_to_cart
+    from app.tools.compare_products import compare_products
+    from app.tools.get_product_detail import get_product_detail
+    from app.tools.payment_info import resend_payment_method
+
+    await store.set_lang(WA, "en")
+    set_turn_context(TurnContext(wa_number=WA, user_text="one donut please"))
+    assert "couldn't find" in await add_to_cart.ainvoke({"items": [{"product": "donat", "qty": 1}]})
+    detail = await get_product_detail.ainvoke({"product": "Bolu Pandan"})
+    assert "Price:" in detail and "Harga:" not in detail
+    assert "Product comparison:" in await compare_products.ainvoke(
+        {"products": ["Bolu Pandan", "Brownies Coklat"]})
+    assert "invoice waiting" in await resend_payment_method.ainvoke({})
+    # Detail berbahasa Inggris tetap diringkas jadi penanda di riwayat.
+    from app.llm.agent import _history_view
+    assert _history_view(detail).startswith("[Aku sudah menampilkan detail")
+    # Setiap templat punya versi Inggris.
+    assert not [k for k, v in bahasa._TEMPLAT.items() if bahasa.EN not in v]
