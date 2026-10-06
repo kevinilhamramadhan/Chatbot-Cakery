@@ -609,10 +609,16 @@ async def _handle_identity(wa_number: str, text: str, lang: str) -> Reply:
                     wa_number, text, bahasa.teks("tanya_tanggal", lang))
             return Reply(text=bahasa.teks(f"tanggal_{alasan}", lang))
         cust["tanggal"] = iso
+        # Tanpa pilihan DP tidak ada yang perlu ditanyakan di langkah 4: langsung
+        # ke metode bayar, jangan berhenti menunggu pesan yang tidak diminta.
+        if not _boleh_dp(cust):
+            cust["payment_type"] = "full"
         await store.set_customer(wa_number, cust)
+        lanjut = (_payment_type_prompt(lang) if _boleh_dp(cust)
+                  else _channel_prompt(lang))
         return Reply(text=bahasa.teks("tanggal_dicatat", lang,
                                       tanggal=tanggal.tampil(iso, lang))
-                     + "\n\n" + _payment_type_prompt(lang, cust))
+                     + "\n\n" + lanjut)
 
     # Step 4: payment type (full vs DP 50%)
     if "payment_type" not in cust:
@@ -621,27 +627,25 @@ async def _handle_identity(wa_number: str, text: str, lang: str) -> Reply:
         elif _DP_RE.search(text):
             cust["payment_type"] = "dp"
         else:
-            return Reply(text=_payment_type_prompt(lang, cust))
+            return Reply(text=_payment_type_prompt(lang))
         await store.set_customer(wa_number, cust)
         return Reply(text=_channel_prompt(lang))
 
-    # Step 5: payment channel (VA vs QRIS) -> finalize.
-    if "channel" not in cust:
-        # QRIS first: our own prompt advertises GoPay/OVO/Dana as QRIS, and a
-        # customer who typed "gopay" used to get the same prompt back forever.
-        if _QRIS_RE.search(text):
-            cust["channel"] = "qris"
-        elif _VA_RE.search(text):
-            cust["channel"] = "bank_transfer"
-        else:
-            return Reply(text=_channel_prompt(lang))
-        await store.set_customer(wa_number, cust)
-        reply_text = await checkout.finalize_order(wa_number)
-        return Reply(text=reply_text, media=_media_giliran())
-
-    # Shouldn't reach here; reset to be safe.
-    await store.set_state(wa_number, State.IDLE)
-    return Reply(text=bahasa.teks("ada_lagi", lang))
+    # Step 5: payment channel (VA vs QRIS) -> finalize. Dibaca ulang walau
+    # "channel" sudah terisi: sampai di sini dengan channel terisi berarti
+    # finalize_order sebelumnya gagal (tagihan/pesanan), dan memilih metode lagi
+    # adalah cara pelanggan mengulanginya.
+    # QRIS first: our own prompt advertises GoPay/OVO/Dana as QRIS, and a
+    # customer who typed "gopay" used to get the same prompt back forever.
+    if _QRIS_RE.search(text):
+        cust["channel"] = "qris"
+    elif _VA_RE.search(text):
+        cust["channel"] = "bank_transfer"
+    else:
+        return Reply(text=_channel_prompt(lang))
+    await store.set_customer(wa_number, cust)
+    reply_text = await checkout.finalize_order(wa_number)
+    return Reply(text=reply_text, media=_media_giliran())
 
 
 def _channel_prompt(lang: str) -> str:
@@ -658,7 +662,5 @@ def _boleh_dp(cust: dict) -> bool:
     return bool(settings.allow_down_payment and tgl and tanggal.selisih_hari(tgl) >= 2)
 
 
-def _payment_type_prompt(lang: str, cust: dict | None = None) -> str:
-    if _boleh_dp(cust or {}):
-        return bahasa.teks("tanya_jenis_bayar", lang)
-    return bahasa.teks("lanjut_bayar", lang)
+def _payment_type_prompt(lang: str) -> str:
+    return bahasa.teks("tanya_jenis_bayar", lang)

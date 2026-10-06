@@ -67,3 +67,11 @@ def test_context_drops_chunks_below_threshold():
     # di-cache, jadi setiap potongan tambahan diprefill ulang setiap giliran.
     r2 = RetrievalResult(["a", "b"], [{}, {}], [0.7, 0.55])
     assert r2.relevant_documents == ["a"]
+
+
+def test_konfirmasi_bahasa_inggris_dikenali():
+    from app.conversation.states import text_is_confirm
+    for t in ("that is all", "That's all", "that's it, thanks", "looks good", "yep"):
+        assert text_is_confirm(t), t
+    assert not text_is_confirm("is that all you have?")
+    assert not text_is_confirm("not sure")

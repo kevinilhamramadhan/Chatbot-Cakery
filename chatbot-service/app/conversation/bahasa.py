@@ -225,10 +225,6 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Would you like to pay in *full* or a *50% deposit*? Type one.\n"
              "(50% deposit = pay half now)"),
     },
-    "lanjut_bayar": {
-        ID: "Lanjut ke pembayaran ya...",
-        EN: "Moving on to payment...",
-    },
     "tanya_metode_bayar": {
         ID: ("Metode pembayarannya mau lewat apa?\n"
              "• Ketik *VA* — transfer bank via Virtual Account\n"

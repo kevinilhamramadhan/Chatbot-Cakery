@@ -775,3 +775,40 @@ def test_tautan_qris_ikut_dikirim_hanya_di_sandbox():
     media = get_turn_context().media
     assert sandbox in media[0].caption
     assert "http" not in media[1].caption
+
+
+async def test_pesanan_besok_langsung_ditanya_metode_bayar():
+    """DP tidak ditawarkan untuk pesanan besok. Dulu balasannya berhenti di
+    "Lanjut ke pembayaran ya..." dan baru menanyakan VA/QRIS sesudah pelanggan
+    mengetik sesuatu lagi -- pelanggan mengira bot macet."""
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup"):
+        await handle_message(WA, msg)
+    r = await handle_message(WA, "besok")
+    assert "qris" in r.text.lower() and "va" in r.text.lower()
+    r = await handle_message(WA, "va")
+    assert "8808123456789012" in r.text
+    assert (await store.get_active_pending(WA)).payment_type == "full"
+
+
+async def test_tagihan_gagal_bisa_diulang_dengan_memilih_metode_lagi(patch_externals):
+    """Sesudah tagihan gagal, memilih metode bayar lagi harus mengulang
+    pembuatan tagihan. Dulu jawabannya "Ada lagi yang bisa kubantu?" dan
+    pelanggan terdampar dengan keranjang yang tidak bisa dilanjutkan."""
+    mp, backend = patch_externals["monkeypatch"], patch_externals["backend"]
+    asli = backend.create_payment
+
+    async def boom(*a, **k):
+        raise RuntimeError("midtrans timeout")
+
+    mp.setattr(backend, "create_payment", boom)
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "full"):
+        await handle_message(WA, msg)
+    r = await handle_message(WA, "qris")
+    assert "gagal" in r.text.lower()
+
+    mp.setattr(backend, "create_payment", asli)
+    r = await handle_message(WA, "va")
+    assert "8808123456789012" in r.text
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_PAYMENT
