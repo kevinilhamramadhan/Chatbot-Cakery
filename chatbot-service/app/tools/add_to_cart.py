@@ -79,19 +79,16 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
     Gunakan saat pelanggan menyatakan ingin memesan kue tertentu dengan jumlahnya.
     """
     items = _as_items(items, product=product, qty=qty)
-    if not items:
-        return await menu_fallback("Maaf, aku belum menangkap kue mana yang kamu maksud.")
     ctx = get_turn_context()
     wa = ctx.wa_number
+    lang = await store.get_lang(wa)
+    if not items:
+        return await menu_fallback(bahasa.teks("keranjang_tak_tertangkap", lang), lang)
 
     # PROMPT §10.11 — one active transaction per WA number.
     active = await store.get_active_pending(wa)
     if active is not None:
-        return (
-            "Kamu masih punya pesanan yang sedang diproses/belum dibayar. "
-            "Untuk pesanan baru, silakan selesaikan dulu yang ini atau pesan lewat "
-            "website Toti Cakery ya 🙏"
-        )
+        return bahasa.teks("masih_ada_pesanan_aktif", lang)
 
     cart = await store.get_cart(wa)
     added, not_found, unavailable, ambiguous, below_min = [], [], [], [], []
@@ -144,7 +141,8 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
             (c["qty"] for c in cart if c.get("product_id") == p.get("id")), 0
         )
         if existing_qty + qty < min_order:
-            below_min.append(f"{product_label(p)} minimal {min_order} pcs")
+            below_min.append(bahasa.teks("minimum_item", lang, nama=product_label(p),
+                                         minimum=min_order))
             continue
         # Merge with existing line if same product.
         existing = next((c for c in cart if c.get("product_id") == p.get("id")), None)
@@ -174,52 +172,33 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
 
     if not added:
         if bulk and not (not_found or unavailable or ambiguous or below_min or unclear_qty):
-            return (
-                "Jumlah sebanyak itu (" + "; ".join(bulk) + ") aku teruskan ke admin ya — "
-                "pesanan besar perlu dijadwalkan minimal H-2. Mau kusambungkan ke admin, "
-                "atau mau kuubah jumlahnya?"
-            )
+            return bahasa.teks("jumlah_besar_admin", lang, daftar="; ".join(bulk))
         if unclear_qty and not (not_found or unavailable or ambiguous or below_min):
-            return (
-                "Jumlahnya belum jelas untuk " + ", ".join(unclear_qty)
-                + ". Boleh sebutkan jumlahnya dalam angka utuh, mis. 2? 😊"
-            )
+            return bahasa.teks("jumlah_belum_jelas", lang, nama=", ".join(unclear_qty))
         if below_min and not not_found and not unavailable and not ambiguous:
-            return (
-                "Untuk produk ini ada jumlah minimum pemesanan: "
-                + "; ".join(below_min)
-                + ". Mau kunaikkan jumlahnya?"
-            )
+            return bahasa.teks("minimum_pemesanan", lang, daftar="; ".join(below_min))
         if ambiguous and not not_found and not unavailable:
-            return (
-                "Ada beberapa pilihan untuk " + "; ".join(ambiguous)
-                + ". Sebutkan yang mana ya? 😊"
-            )
+            return bahasa.teks("ada_beberapa_pilihan", lang, daftar="; ".join(ambiguous))
         if unavailable and not not_found:
-            return (
-                f"Maaf, {', '.join(unavailable)} sedang tidak tersedia. "
-                "Mau pesan menu yang lain?"
-            )
-        nf = ", ".join(not_found) if not_found else "item yang diminta"
-        return await menu_fallback(f"Maaf, aku tidak menemukan {nf} di menu.")
+            return bahasa.teks("tidak_tersedia", lang, nama=", ".join(unavailable))
+        nf = ", ".join(not_found) if not_found else bahasa.teks("item_yang_diminta", lang)
+        return await menu_fallback(bahasa.teks("tak_ada_di_menu", lang, nama=nf), lang)
 
     # Hand control to the confirmation step.
     ctx.next_state = State.AWAITING_CART_CONFIRMATION
 
-    lang = await store.get_lang(wa)
     msg = cart_summary(cart, lang)
     if ambiguous:
-        msg += "\n\n(Belum kumasukkan karena ada beberapa pilihan — " + "; ".join(ambiguous) + ")"
+        msg += bahasa.teks("catatan_pilihan", lang, isi="; ".join(ambiguous))
     if not_found:
-        msg += f"\n\n(Tidak ditemukan: {', '.join(not_found)})"
+        msg += bahasa.teks("catatan_tidak_ditemukan", lang, nama=", ".join(not_found))
     if unavailable:
-        msg += f"\n\n(Sedang tidak tersedia: {', '.join(unavailable)})"
+        msg += bahasa.teks("catatan_tidak_tersedia", lang, isi=", ".join(unavailable))
     if below_min:
-        msg += f"\n\n(Belum masuk karena minimum pemesanan: {'; '.join(below_min)})"
+        msg += bahasa.teks("catatan_minimum", lang, isi="; ".join(below_min))
     if bulk:
-        msg += (f"\n\n(Belum masuk karena jumlahnya besar: {'; '.join(bulk)} — "
-                "pesanan sebanyak itu lewat admin ya)")
+        msg += bahasa.teks("catatan_besar", lang, isi="; ".join(bulk))
     if unclear_qty:
-        msg += f"\n\n(Jumlahnya belum jelas: {', '.join(unclear_qty)})"
+        msg += bahasa.teks("catatan_jumlah", lang, isi=", ".join(unclear_qty))
     msg += bahasa.teks("keranjang_tanya_tambah", lang)
     return msg

@@ -34,6 +34,8 @@ class FaqDoc:
 
     source: str
     text: str
+    pertanyaan: str = ""
+    jawaban: str = ""
 
 
 def _doc_id(source: str, idx: int) -> str:
@@ -74,8 +76,18 @@ async def fetch_backend_faq() -> list[FaqDoc]:
         a = str(row.get("jawaban") or "").strip()
         if not q or not a:
             continue
-        docs.append(FaqDoc(source=f"backend-faq-{row.get('id')}", text=f"Q: {q}\nA: {a}"))
+        docs.append(FaqDoc(source=f"backend-faq-{row.get('id')}", text=f"Q: {q}\nA: {a}",
+                           pertanyaan=q, jawaban=a))
     return docs
+
+
+def _pisah_tanya_jawab(text: str) -> tuple[str, str]:
+    """("pertanyaan", "jawaban") dari berkas berbentuk "Q: ...\\nA: ..."; ("", "")
+    kalau bentuknya lain — berkas itu tetap diindeks utuh seperti dulu."""
+    if text.startswith("Q:") and "\nA:" in text:
+        q, a = text[2:].split("\nA:", 1)
+        return q.strip(), a.strip()
+    return "", ""
 
 
 def local_faq_docs() -> list[FaqDoc]:
@@ -87,7 +99,8 @@ def local_faq_docs() -> list[FaqDoc]:
     for path in sorted(kb_dir.glob("*.txt")):
         text = path.read_text(encoding="utf-8").strip()
         if text:
-            docs.append(FaqDoc(source=path.name, text=text))
+            q, a = _pisah_tanya_jawab(text)
+            docs.append(FaqDoc(source=path.name, text=text, pertanyaan=q, jawaban=a))
     return docs
 
 
@@ -140,6 +153,9 @@ def fingerprint(docs: list[FaqDoc]) -> str:
                 "chunk_size": settings.rag_chunk_size,
                 "chunk_overlap": settings.rag_chunk_overlap,
                 "collection": settings.chroma_collection,
+                # Naikkan kalau bentuk chunk berubah, supaya indeks lama dibangun
+                # ulang. 2 = satu chunk pertanyaan + satu chunk tanya-jawab.
+                "skema": 2,
             },
             sort_keys=True,
         ).encode()
@@ -177,11 +193,20 @@ def ingest_documents(docs: list[FaqDoc]) -> int:
     total = 0
     for d in docs:
         collection.delete(where={"source": d.source})  # idempotent re-ingest
-        chunks = splitter.split_text(d.text)
+        if d.pertanyaan and d.jawaban:
+            # Pertanyaan pelanggan yang pendek paling mirip dengan PERTANYAAN
+            # FAQ; yang panjang kadang lebih mirip dengan isi jawabannya. Dua
+            # chunk, skor FAQ = yang tertinggi (lihat store.retrieve).
+            chunks = [d.pertanyaan, d.text]
+            metas = [{"source": d.source, "chunk": i, "pertanyaan": d.pertanyaan,
+                      "jawaban": d.jawaban, "dokumen": d.text} for i in range(2)]
+        else:
+            chunks = splitter.split_text(d.text)
+            metas = [{"source": d.source, "chunk": i} for i in range(len(chunks))]
         collection.upsert(
             ids=[_doc_id(d.source, i) for i in range(len(chunks))],
             documents=chunks,
-            metadatas=[{"source": d.source, "chunk": i} for i in range(len(chunks))],
+            metadatas=metas,
         )
         total += len(chunks)
         logger.info("Ingested %s -> %d chunk(s)", d.source, len(chunks))

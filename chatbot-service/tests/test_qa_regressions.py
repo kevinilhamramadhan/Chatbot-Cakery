@@ -2020,3 +2020,62 @@ async def test_ambil_sendiri_di_langkah_alamat_langsung_ke_pembayaran(patch_exte
     cust = await store.get_customer(WA)
     assert cust["metode_pengiriman"] == "pickup"
     assert "alamat" not in reply.text.lower()
+
+
+# ── Jawaban FAQ baku (6 Okt 2026) ─────────────────────────────────────────────
+def _faq(q, a, skor):
+    return {"pertanyaan": q, "jawaban": a, "skor": skor}
+
+
+def test_faq_baku_skor_tinggi_mengirim_teks_faq_apa_adanya():
+    """ "toko buka hari minggu?" dijawab model "Hari ini kami buka" padahal FAQ
+    yang terambil berbunyi "Hari Minggu kami libur". Kalau FAQ-nya jelas, yang
+    dikirim teks FAQ itu, bukan tulisan ulang model."""
+    from app.rag import faq_baku
+
+    jam = _faq("Jam berapa Toti Cakery buka?", "Senin-Sabtu 09.00-19.00. Minggu libur.", 0.66)
+    lain = _faq("Apakah kue Toti Cakery halal?", "Ya, halal.", 0.41)
+    assert faq_baku.pilih([jam, lain], "Hari ini kami buka ya kak", "id") == (jam["jawaban"], "skor")
+    # Selisih ke FAQ berikutnya terlalu tipis -> aturan skor tidak dipakai.
+    assert faq_baku.pilih([jam, dict(lain, skor=0.64)], "", "id") is None
+
+
+def test_faq_baku_skor_sedang_mengikuti_faq_yang_dipilih_model(monkeypatch):
+    from app.rag import faq_baku
+
+    vek = {"model": [1.0, 0.0, 0.0], "A": [0.9, 0.1, 0.0], "B": [0.0, 1.0, 0.0]}
+
+    class _Ef:
+        def embed_one(self, teks, sebagai_pertanyaan=False):
+            return vek[teks]
+
+    monkeypatch.setattr(faq_baku, "get_embedding_function", lambda: _Ef())
+    a, b = _faq("qa", "A", 0.52), _faq("qb", "B", 0.50)
+    assert faq_baku.pilih([b, a], "model", "id")[0] == "A"      # bukan FAQ teratas
+    vek["model"] = [0.0, 0.0, 1.0]                               # tidak mirip siapa pun
+    assert faq_baku.pilih([b, a], "model", "id") is None
+
+
+def test_faq_baku_inggris_hanya_kalau_terjemahannya_masih_cocok(monkeypatch):
+    """Terjemahan dikunci ke sidik jawaban Indonesianya: jawaban yang disunting
+    admin tidak boleh dikirim bersama terjemahan versi lama."""
+    from app.rag import faq_baku
+
+    faq = _faq("Jam berapa buka?", "09.00-19.00", 0.9)
+    monkeypatch.setattr(faq_baku, "_paket_en", lambda: {
+        faq["pertanyaan"]: {"jawaban_en": "Open 09.00-19.00",
+                            "sidik_jawaban": faq_baku._sidik("09.00-19.00")}})
+    assert faq_baku.pilih([faq], "", "en") == ("Open 09.00-19.00", "skor")
+    assert faq_baku.pilih([dict(faq, jawaban="10.00-20.00")], "", "en") is None
+    assert faq_baku.pilih([dict(faq, jawaban="10.00-20.00")], "", "id")[0] == "10.00-20.00"
+
+
+def test_paket_faq_inggris_di_repo_terbaca_dan_lengkap():
+    from app.rag import faq_baku, faq_source
+
+    faq_baku._paket_en.cache_clear()
+    paket = faq_baku._paket_en()
+    assert len(paket) >= 16 and all(v["jawaban_en"] and len(v["sidik_jawaban"]) == 16
+                                    for v in paket.values())
+    assert faq_source._pisah_tanya_jawab("Q: Buka?\nA: Ya.\nSetiap hari.") == ("Buka?", "Ya.\nSetiap hari.")
+    assert faq_source._pisah_tanya_jawab("catatan bebas") == ("", "")

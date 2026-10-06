@@ -24,4 +24,10 @@ async def check_cart() -> str:
     cart = await store.get_cart(wa)
     if not cart:
         return bahasa.teks("keranjang_kosong_tool", lang)
+    # Balasan di bawah mengajak "ketik sudah sesuai". Tanpa pindah ke langkah
+    # konfirmasi, jawaban itu jatuh ke model lagi — terukur 6 Okt 2026: sesudah
+    # tagihan gagal, "sudah sesuai" dijawab get_order_status.
+    from app.conversation.states import State
+
+    get_turn_context().next_state = State.AWAITING_CART_CONFIRMATION
     return cart_summary(cart, lang) + bahasa.teks("keranjang_ajak_konfirmasi", lang)

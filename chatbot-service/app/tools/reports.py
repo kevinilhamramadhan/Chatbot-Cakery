@@ -15,17 +15,10 @@ from langchain_core.tools import tool
 
 from app.backend_client import api as backend
 from app.conversation import rbac
+from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.tools.formatting import rupiah
 
-_DENIED = (
-    "Maaf, laporan ini hanya untuk Owner Toti Cakery dan nomormu belum terdaftar "
-    "sebagai Owner."
-)
-_UNAVAILABLE = (
-    "Laporan belum bisa diambil — endpoint laporan di backend belum tersedia "
-    "atau sedang gangguan. Coba lagi nanti ya."
-)
 
 
 async def _is_owner(wa: str) -> bool:
@@ -97,20 +90,19 @@ async def financial_report() -> str:
     """Laporan keuangan bulan berjalan (khusus Owner): omzet, pengeluaran, laba.
     Gunakan hanya jika pelanggan adalah Owner dan meminta laporan keuangan.
     """
-    if not await _is_owner(get_turn_context().wa_number):
-        return _DENIED
+    wa = get_turn_context().wa_number
+    lang = await store.get_lang(wa)
+    if not await _is_owner(wa):
+        return bahasa.teks("laporan_ditolak", lang)
     data, start, end = await _summary()
     if data is None:
-        return _UNAVAILABLE
+        return bahasa.teks("laporan_tak_tersedia", lang)
     revenue = float(data.get("revenue") or 0)
     expenses = float(data.get("expenses") or 0)
-    return (
-        f"📊 *Laporan Keuangan* ({start} s/d {end})\n"
-        f"Omzet (pembayaran masuk): {rupiah(revenue)}\n"
-        f"Pengeluaran: {rupiah(expenses)}\n"
-        f"Laba kotor: {rupiah(revenue - expenses)}\n"
-        f"Jumlah pesanan: {data.get('order_count', '-')}"
-    )
+    return bahasa.teks(
+        "laporan_keuangan", lang, awal=start, akhir=end, omzet=rupiah(revenue),
+        pengeluaran=rupiah(expenses), laba=rupiah(revenue - expenses),
+        pesanan=data.get("order_count", "-"))
 
 
 @tool
@@ -118,21 +110,23 @@ async def business_analytics() -> str:
     """Analitik bisnis bulan berjalan (khusus Owner): produk terlaris, rata-rata
     nilai pesanan. Gunakan hanya jika pelanggan adalah Owner.
     """
-    if not await _is_owner(get_turn_context().wa_number):
-        return _DENIED
+    wa = get_turn_context().wa_number
+    lang = await store.get_lang(wa)
+    if not await _is_owner(wa):
+        return bahasa.teks("laporan_ditolak", lang)
     data, start, end = await _summary()
     if data is None:
-        return _UNAVAILABLE
+        return bahasa.teks("laporan_tak_tersedia", lang)
     # Backend tidak mengurutkan top_products; "terlaris" berarti jumlah terjual.
     top = sorted(data.get("top_products") or [], key=lambda p: -(p.get("qty") or 0))
-    lines = [f"📈 *Analitik Bisnis* ({start} s/d {end})"]
+    lines = [bahasa.teks("analitik_judul", lang, awal=start, akhir=end)]
     if top:
-        lines.append("Produk terlaris:")
+        lines.append(bahasa.teks("analitik_terlaris", lang))
         for i, p in enumerate(top[:5], 1):
             lines.append(f"{i}) {p.get('nama_produk')} — {p.get('qty')} pcs"
                          f" ({rupiah(p.get('revenue', 0))})")
     else:
-        lines.append("Belum ada penjualan di periode ini.")
-    lines.append(f"Jumlah pesanan: {data.get('order_count', '-')}")
-    lines.append(f"Rata-rata nilai pesanan: {rupiah(data.get('avg_order_value') or 0)}")
+        lines.append(bahasa.teks("analitik_kosong", lang))
+    lines.append(bahasa.teks("analitik_jumlah", lang, n=data.get("order_count", "-")))
+    lines.append(bahasa.teks("analitik_rata", lang, nilai=rupiah(data.get("avg_order_value") or 0)))
     return "\n".join(lines)
