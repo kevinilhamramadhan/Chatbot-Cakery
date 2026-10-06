@@ -851,6 +851,67 @@ T15_ID = ["{greet}keranjangku isinya apa aja{part}?", "{greet}tadi aku udah masu
 T15_EN = ["{greet}what's in my cart?", "{greet}what's my total so far?",
           "{greet}can you show my cart?", "{greet}what did I add so far?"]
 
+# v10 (uji PC lab 6 Okt 2026): "checkout"/"lanjut bayar" saat keranjang belum
+# dikonfirmasi dijawab get_order_status ("belum punya pesanan"). Yang benar:
+# tampilkan keranjangnya dan ajak konfirmasi.
+T15_ID = T15_ID[:6] + ["{greet}checkout{part}", "{greet}lanjut ke pembayaran{part}",
+                       "{greet}udah itu aja, lanjut bayar{part}", "{greet}oke checkout sekarang{part}",
+                       "{greet}mau bayar pesanan yang tadi{part}", "{greet}lanjut bayar{part}"] + T15_ID[6:]
+T15_EN = T15_EN[:3] + ["{greet}checkout please", "{greet}I'm ready to pay",
+                       "{greet}let's proceed to payment"] + T15_EN[3:]
+
+# ── v10: mengubah isi keranjang (tool update_cart) ───────────────────────────
+# Terukur 6 Okt 2026 di v9: "brownies nya jadi 3" -> add_to_cart produk LAIN di
+# katalog; "hapus lapis legitnya" -> cancel_order. Tidak ada tool yang bisa
+# mengurangi isi keranjang. Keempat tipe di bawah SELALU didahului ringkasan
+# keranjang di history, dan dibuat sebagai kontras satu sama lain:
+#   T17 jumlah AKHIR disebut      -> update_cart(qty=jumlah itu)
+#   T18 satu kue dibuang           -> update_cart(qty=0)   (BUKAN cancel_order)
+#   T19 "tambah N lagi"            -> add_to_cart(qty=N)   (selisih, BUKAN update_cart)
+#   N15 "kurangi" tanpa angka      -> tanya jumlah akhirnya (BUKAN menebak)
+T17_ID = ["{prod} nya jadi {qty}{unit} aja{part}", "ganti {prod} jadi {qty}{unit}{part}",
+          "ubah {prod} jadi {qty}{unit}{part}", "eh {prod} nya {qty}{unit} aja deh, bukan segitu",
+          "{prod} kebanyakan, jadiin {qty}{unit}{part}", "kurangi {prod} jadi {qty}{unit}{part}",
+          "{prod} cukup {qty}{unit} aja{part}", "revisi ya, {prod} jadi {qty}{unit}{part}",
+          "jumlah {prod} diganti {qty}{unit}{part}", "naikin {prod} jadi {qty}{unit}{part}",
+          "{prod} nya dibikin {qty}{unit} aja{part}", "salah jumlah, {prod} harusnya {qty}{unit}{part}",
+          "{greet}{prod} dijadiin {qty}{unit} bisa{part}?", "koreksi: {prod} {qty}{unit} saja{part}"]
+T17_EN = ["make the {prod} {qty} instead", "change the {prod} to {qty}{part}",
+          "can you change {prod} to {qty}?", "reduce the {prod} to {qty}{part}",
+          "update {prod} to {qty}{part}", "actually make it {qty} {prod}",
+          "I meant {qty} {prod}, not that many", "set the {prod} to {qty}{part}"]
+T18_ID = ["hapus {prod}{part}", "{prod} nya ga jadi{part}", "buang {prod} dari keranjang{part}",
+          "{prod} batal aja, yang lain tetap{part}", "coret {prod}{part}", "ga usah {prod} nya{part}",
+          "{prod} nya dihapus aja{part}", "yang {prod} dicancel aja, sisanya lanjut",
+          "{prod} ga jadi deh, yang lain tetap{part}", "tolong keluarin {prod} dari pesanan{part}",
+          "{prod} nya skip aja{part}", "hilangkan {prod} ya{part}",
+          "{prod} dibatalin aja, lainnya tetap{part}", "minus {prod} ya, sisanya tetap{part}"]
+T18_EN = ["remove the {prod}{part}", "take the {prod} off my order", "drop the {prod}{part}",
+          "I don't want the {prod} anymore, keep the rest", "delete {prod} from my cart",
+          "cancel just the {prod}, keep everything else", "no {prod} after all, the rest stays",
+          "scratch the {prod}{part}"]
+T19_ID = ["tambah {prod} {qty}{unit} lagi{part}", "{prod} nya tambah {qty}{unit} lagi{part}",
+          "tambahin {qty}{unit} lagi {prod} nya{part}", "nambah {prod} {qty}{unit} lagi ya{part}",
+          "mau tambah lagi {prod} {qty}{unit}{part}", "plus {qty}{unit} {prod} lagi{part}",
+          "{prod} kurang, tambah {qty}{unit} lagi{part}"]
+T19_EN = ["add {qty} more {prod}", "{qty} more {prod} please", "another {qty} {prod}",
+          "add {qty} more of the {prod}"]
+N15_ID = ["kurangi {prod} nya{part}", "{prod} kebanyakan deh{part}", "kurangin {prod} dong",
+          "{prod} nya dikurangin ya{part}", "jangan segitu {prod} nya, kurangi{part}",
+          "{prod} nya kebanyakan, kurangi ya", "ubah jumlah {prod}{part}",
+          "ganti jumlah {prod} nya{part}"]
+N15_EN = ["fewer {prod} please", "that's too many {prod}", "can you reduce the {prod}?",
+          "change the quantity of {prod}"]
+N15_REPLY = {
+    "id": ["Siap kak, jadinya mau berapa? Sebutkan jumlah akhirnya ya 😊",
+           "Boleh kak — mau diubah jadi berapa?",
+           "Oke, jumlah akhirnya mau berapa kak?"],
+    "en": ["Sure — how many would you like it to be?",
+           "No problem! What should the final quantity be?"],
+}
+# Jumlah Inggris yang wajar sesudah "to"/"more" ("change it to a couple of" tidak).
+QTY_EN_POLOS = [q for q in QTY_EN if " " not in q[0]]
+
 # T16 — kirim ulang cara bayar. resend_payment_method juga nol baris sampai v6.
 # Selalu sesudah tagihan terbit (history "payment").
 T16_ID = ["{greet}kode qr nya kirim ulang dong{part}", "{greet}nomor VA nya mana ya{part}?",
@@ -957,12 +1018,15 @@ N2_TOPIK_TERLARANG = {"jam", "kemasan", "lokasi", "samedy"}
 # dari train per tipe, dari potongan template/produk/topik FAQ khusus test.
 TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 115, "T4": 40, "T5": 180, "T6": 35, "T7": 55,
                 "T8": 55, "T9": 30, "T10": 30, "T11": 30, "T12": 30, "T13": 40,
-                "T14": 45, "T15": 35, "T16": 40,
+                # v10: T15 35->50 (checkout saat keranjang belum dikonfirmasi).
+                "T14": 45, "T15": 50, "T16": 40,
                 "N1": 150, "N1x": 40, "N2": 25, "N3": 50, "N4": 60, "N5": 70, "N6": 80,
                 "N7": 45, "N8": 35, "N9": 35, "N10": 25, "N11": 20, "N12": 30, "N13": 15,
                 # v9: pengisi berpasangan kontras — teks pelanggan sama, bahasa
                 # sesi beda. Separuh id separuh en, SELALU ber-history.
-                "N14": 60}
+                "N14": 60,
+                # v10: update_cart dan kontrasnya — lihat komentar di T17_ID.
+                "T17": 70, "T18": 50, "T19": 25, "N15": 20}
 VAL_COUNTS = {k: max(2, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 TEST_COUNTS = {k: max(3, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
@@ -970,7 +1034,7 @@ EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2
             "T14": .2, "T15": .2, "T16": .2,
             "N1": .25, "N1x": .2, "N2": .2, "N3": .25, "N4": .25, "N5": .2, "N6": .2,
             "N7": .2, "N8": .2, "N9": .2, "N10": .2, "N11": .2, "N12": .2, "N13": .6,
-            "N14": .5}
+            "N14": .5, "T17": .2, "T18": .2, "T19": .2, "N15": .2}
 # v5: T5/T6/T8 multi-turn up — that is where the "escalate" history kind lives.
 # v7: T16/N11 selalu ber-history (tagihan harus sudah terbit) — diatur di _build.
 MT_SHARE = {"T1": .35, "T2": .2, "T3": .45, "T4": .25, "T5": .45, "T6": .35, "T7": 1.0,
@@ -978,7 +1042,7 @@ MT_SHARE = {"T1": .35, "T2": .2, "T3": .45, "T4": .25, "T5": .45, "T6": .35, "T7
             "T14": .45, "T15": .7, "T16": 1.0,
             "N1": .3, "N1x": .3, "N2": .2, "N3": .3, "N4": .25, "N5": .3, "N6": .4,
             "N7": .2, "N8": .35, "N9": .3, "N10": .2, "N11": 1.0, "N12": .3, "N13": .2,
-            "N14": 1.0}
+            "N14": 1.0, "T17": 1.0, "T18": 1.0, "T19": 1.0, "N15": 1.0}
 assert set(TRAIN_COUNTS) == set(EN_SHARE) == set(MT_SHARE)
 
 # Seberapa sering baris membawa KONTEKS FAQ di pesan pelanggan. Runtime (QA 19
@@ -1105,8 +1169,15 @@ class Gen:
                                 f"tell me about the {product_full.lower()}"])
         return [user, text]
 
-    def h_cart(self, items):
+    def h_cart(self, items, lang=None):
         cart = [{"nama": n, "qty": q, "harga": float(self.fic_price(n))} for n, q in items]
+        if lang == "en":
+            # v10: sesi Inggris menerima ringkasan keranjang berbahasa Inggris di
+            # runtime (cart_summary(cart, lang)) — history-nya harus sama.
+            text = cart_summary(cart, bahasa.EN) + bahasa.teks("keranjang_tanya_tambah", bahasa.EN)
+            user = self.rng.choice([f"I'd like {items[0][1]} {items[0][0].lower()}",
+                                    f"order {items[0][1]} {items[0][0].lower()} please"])
+            return [user, text]
         text = (cart_summary(cart)
                 + "\n\nSudah sesuai semua, atau mau nambah lagi? Ketik *sudah sesuai* untuk lanjut ya 😊")
         user = self.rng.choice([f"mau pesan {items[0][0].lower()} {items[0][1]}",
@@ -1335,13 +1406,16 @@ class Gen:
         # v5 incident B: "escalate" is seeded into the pools of the types that
         # follow a handover in real conversations — the customer is told an admin
         # is coming, then simply carries on ordering.
-        kind_pool = {"T9": ["status", "chat"], "N6": ["menu", "chat"],
+        kind_pool = {"N6": ["menu", "chat"],
                      "N1": ["chat"], "N3": ["chat"], "N4": ["chat"], "N2": ["chat"],
                      "T1": ["menu", "menu", "chat", "status", "escalate"],
                      "T3": ["menu", "detail", "detail", "chat", "escalate"],
                      "T5": ["menu", "detail", "chat", "escalate", "escalate"],
                      "T6": ["menu", "chat", "escalate"],
                      "T8": ["status", "chat", "escalate", "payment"],
+                     # v10: pembatalan SELURUH pesanan tetap cancel_order walau
+                     # ada keranjang di history (kontras dengan T18).
+                     "T9": ["status", "chat", "cart"],
                      "T15": ["cart", "cart", "chat"],
                      "N10": ["chat", "status"], "N12": ["chat"], "N13": ["chat"],
                      "N1x": ["chat"],
@@ -1355,7 +1429,8 @@ class Gen:
     def _build(self, rtype, split, lang, mt, noise, P, total_count):
         sel = P["sel"]
         rng = self.rng
-        history = self._hist_for(rtype, lang) if (mt and rtype != "T7") else []
+        history = (self._hist_for(rtype, lang)
+                   if (mt and rtype not in ("T7", "T17", "T18", "T19", "N15")) else [])
         if rtype in ("T16", "N11"):
             # Tagihan harus sudah terbit: balasan checkout ada di history, kadang
             # didahului obrolan lain.
@@ -1547,6 +1622,48 @@ class Gen:
             (text,) = uniq(build)
             return self.make_row(split, rtype, lang, hist, text,
                                  self.tool_turn("add_to_cart", {"items": items}), noised=noise)
+
+        if rtype in ("T17", "T18", "T19", "N15"):
+            pools = {"T17": (T17_EN, T17_ID), "T18": (T18_EN, T18_ID),
+                     "T19": (T19_EN, T19_ID), "N15": (N15_EN, N15_ID)}
+            en_pool, id_pool = pools[rtype]
+            pool = sel(en_pool if lang == "en" else id_pool)
+            p = self.pick_product(split)
+            fl = self.pick_flavour(p, split)
+            canon = self.canonical(p, fl)
+            lama = rng.choice([1, 2, 3])
+            isi = [(canon, lama)]
+            # Keranjang dua item: yang diubah HANYA yang disebut pelanggan.
+            if rng.random() < (0.75 if rtype == "T18" else 0.3):
+                p2 = self.pick_product(split, exclude=(p,))
+                isi.append((self.canonical(p2, self.pick_flavour(p2, split)), rng.choice([1, 2])))
+            u, a = self.h_cart(isi, lang)
+            hist = self.history(["chat"], rng.choice([0, 0, 1])) + [
+                {"role": "user", "content": u}, {"role": "assistant", "content": a}]
+
+            def build():
+                tpl = self.pick_tpl(f"{rtype}u{lang}", pool, P["regime"], total_count)
+                surf = self.surface(p, fl, lang)  # v4 §3.3: argumen = kata pelanggan
+                sl = dict(self.slots(lang))
+                sl["prod"] = surf
+                q = None
+                if "{qty}" in tpl:
+                    for _ in range(20):
+                        qs, q = rng.choice(QTY_EN_POLOS) if lang == "en" else self.qty(lang)
+                        if rtype != "T17" or q != lama:  # jumlah akhir harus BERUBAH
+                            break
+                    sl["qty"] = qs
+                    sl["unit"] = rng.choice(UNITS_ID) if lang == "id" else ""
+                return self.maybe_noise(render(tpl, **sl), lang, noise), surf, q
+            text, surf, q = uniq(build)
+            if rtype == "N15":
+                final = self.text_turn(rng.choice(N15_REPLY[lang]))
+            elif rtype == "T19":
+                final = self.tool_turn("add_to_cart", {"items": [{"product": surf, "qty": q}]})
+            else:
+                final = self.tool_turn("update_cart", {"items": [
+                    {"product": surf, "qty": q if rtype == "T17" else 0}]})
+            return self.make_row(split, rtype, lang, hist, text, final, noised=noise)
 
         if rtype == "T8":
             pool = sel(T8_EN if lang == "en" else T8_ID)
@@ -1843,6 +1960,10 @@ def _validate_args(name: str, obj: dict) -> None:
         assert set(obj) == {"items"} and obj["items"], obj
         for it in obj["items"]:
             assert set(it) == {"product", "qty"} and isinstance(it["qty"], int) and it["qty"] >= 1, it
+    elif name == "update_cart":
+        assert set(obj) == {"items"} and len(obj["items"]) == 1, obj
+        for it in obj["items"]:
+            assert set(it) == {"product", "qty"} and isinstance(it["qty"], int) and it["qty"] >= 0, it
     elif name == "escalate_to_admin":
         assert set(obj) == {"reason"} and 5 <= len(obj["reason"].split()) <= 15, obj
     elif name == "send_apology":

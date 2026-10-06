@@ -32,7 +32,7 @@ _REPORT_RE = re.compile(r"(📊|📈|laporan keuangan|analitik bisnis)", re.IGNO
 _TOOLNAME_RE = re.compile(
     r"\b(get_menu|get_product_detail|add_to_cart|compare_products|get_order_status|"
     r"check_payment_status|cancel_order|escalate_to_admin|financial_report|"
-    r"business_analytics|check_cart|resend_payment_method|send_apology)\b",
+    r"business_analytics|check_cart|resend_payment_method|send_apology|update_cart)\b",
     re.IGNORECASE,
 )
 

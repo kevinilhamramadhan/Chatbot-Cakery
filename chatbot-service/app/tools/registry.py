@@ -13,6 +13,7 @@ from app.tools.order_status import get_order_status
 from app.tools.payment_info import resend_payment_method
 from app.tools.payment_status import check_payment_status
 from app.tools.reports import business_analytics, financial_report
+from app.tools.update_cart import update_cart
 from app.tools.view_cart import check_cart
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ TOOLS_UMUM = [
     get_product_detail,
     compare_products,
     add_to_cart,
+    update_cart,
     check_cart,
     get_order_status,
     check_payment_status,

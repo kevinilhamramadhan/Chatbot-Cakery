@@ -492,7 +492,11 @@ def _menolak(text: str) -> bool:
 
 # ── Cart confirmation step (PROMPT §10.4-5) ───────────────────────────────────
 async def _handle_confirmation(wa_number: str, text: str, lang: str) -> Reply:
-    if text_is_cancel(text):
+    # "lapis legitnya ga jadi" saat keranjang berisi dua kue membatalkan SATU
+    # kue, bukan semuanya. Dilihat dari datanya (nama kue di keranjang disebut
+    # dan masih ada kue lain), bukan dari tebakan maksud; modelnya yang lalu
+    # memanggil update_cart.
+    if text_is_cancel(text) and not await _batal_sebagian(wa_number, text):
         await store.set_cart(wa_number, [])
         await store.set_state(wa_number, State.IDLE)
         return Reply(text=bahasa.teks("pesanan_dibatalkan", lang))
@@ -520,6 +524,16 @@ async def _handle_confirmation(wa_number: str, text: str, lang: str) -> Reply:
         reask = bahasa.teks("ulangi_konfirmasi_keranjang", lang)
         return Reply(text=f"{body}\n\n{reask}" if body else reask, media=reply.media)
     return reply
+
+
+async def _batal_sebagian(wa_number: str, text: str) -> bool:
+    from app.tools.update_cart import _cocok_di_keranjang
+
+    cart = await store.get_cart(wa_number)
+    if len(cart) < 2:
+        return False
+    item, seri = _cocok_di_keranjang(text, cart)
+    return item is not None or bool(seri)
 
 
 # ── Identity + payment-type collection (PROMPT §10.6-8) ───────────────────────

@@ -137,7 +137,7 @@ def args_match(name: str, pred: dict, gold: dict) -> bool:
     output ("cupcakes yang isi 6 cokelat") both count as correct."""
     pred, gold = pred or {}, gold or {}
     try:
-        if name == "add_to_cart":
+        if name in ("add_to_cart", "update_cart"):
             p_items, g_items = pred.get("items") or [], gold.get("items") or []
             if set(pred) != {"items"} or len(p_items) != len(g_items):
                 return False

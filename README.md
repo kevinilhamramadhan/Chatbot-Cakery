@@ -49,7 +49,7 @@ wwebjs-api ──webhook──▶ chatbot-service  /webhook/whatsapp/<WEBHOOK_TO
 - **Data milik chatbot** ada di SQLite sendiri: sesi, log percakapan, pelacak
   pembayaran.
 - **Tool pelanggan:** `get_menu`, `get_product_detail`, `compare_products`,
-  `add_to_cart`, `check_cart`, `get_order_status`, `check_payment_status`,
+  `add_to_cart`, `update_cart`, `check_cart`, `get_order_status`, `check_payment_status`,
   `resend_payment_method`, `cancel_order`, `escalate_to_admin`, `send_apology`.
   Owner mendapat tambahan `financial_report` dan `business_analytics`; definisi
   keduanya tidak pernah dikirim ke model untuk pelanggan biasa.
@@ -70,7 +70,7 @@ chatbot-service/
   knowledge_base/   FAQ cadangan + ingest.py
   scripts/          chat_cli, qa_runner (+ skenario), smoke_live
   tests/            pytest (hermetis, tanpa layanan luar)
-finetune/           generator dataset, audit, eval, notebook Colab, Modelfile v7 & v9
+finetune/           generator dataset, audit, eval, notebook Colab, Modelfile v7, v9 & v10
 ```
 
 ## Menjalankan di laptop
@@ -187,10 +187,10 @@ Model: Qwen3-1.7B + LoRA (Unsloth, Colab), diekspor ke GGUF Q4_K_M.
 
 | | |
 |---|---|
-| Dataset | `LasagnaS/toti-cakery-toolcall` — 1600 train / 162 val / 166 test, ID ±78% / EN ±22% |
+| Dataset | `finetune/data/` — v10: 1780 train / 179 val / 185 test, ID ±78% / EN ±22% (v9 di `LasagnaS/toti-cakery-toolcall`) |
 | Model | `LasagnaS/toti-qwen-1.7b-v9-gguf` (produksi), v7 disimpan untuk rollback |
 | Generator | `finetune/generate_dataset.py` (seed 42, tanpa LLM; templat + slot dari katalog asli) |
-| Audit | `finetune/audit_dataset.py` — 41 pemeriksaan terhadap kode runtime |
+| Audit | `finetune/audit_dataset.py` — 50 pemeriksaan terhadap kode runtime |
 | Eval | `finetune/eval_tool_calling.py`, `scenario_suite.py`; notebook membandingkan base vs fine-tune pada kondisi produksi |
 | Notebook | `finetune/finetune_toti_qwen3.ipynb` (LoRA r/alpha 16, lr 2e-4, 2 epoch, batch efektif 8) |
 
@@ -208,6 +208,12 @@ Riwayat singkat:
 - **v9** — penambahan v8 dikembalikan; tipe baru N14 (pasangan kontras yang
   hanya berbeda bahasa). Hasil A/B di VM: campur Inggris 0/25, kata karangan
   0/25, tool palsu 0/12. **Dipakai di produksi.**
+- **v10** (belum dilatih) — tool baru `update_cart` untuk mengubah jumlah atau
+  membuang satu kue dari keranjang (di v9 "brownies nya jadi 3" menambah produk
+  lain dan "hapus lapis legitnya" memanggil `cancel_order`). Empat tipe baris
+  baru yang saling kontras: jumlah akhir, buang satu kue, "tambah N lagi"
+  (tetap `add_to_cart`), dan "kurangi" tanpa angka (bertanya). "checkout" saat
+  keranjang belum dikonfirmasi diarahkan ke `check_cart`. Resep tidak diubah.
 
 ## Keputusan desain yang perlu diketahui
 

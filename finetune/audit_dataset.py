@@ -1,4 +1,4 @@
-"""Audit dataset v7: isinya benar, dan bentuknya sama dengan yang dilihat model di produksi?
+"""Audit dataset (v7-v10): isinya benar, dan bentuknya sama dengan yang dilihat model di produksi?
 
 Diperiksa terhadap KODE RUNTIME (bukan terhadap generator), supaya generator yang
 salah tidak bisa lolos dengan meluluskan dirinya sendiri:
@@ -117,7 +117,8 @@ for split in rows:
     salah = [i for i, r in enumerate(rows[split])
              if {t["function"]["name"] for t in json.loads(r["tools_json"])}
              != (TOOL_RUNTIME if r["meta"]["type"] in ("T11", "T12") else TOOL_UMUM)]
-    cek(f"tools_json {split} sesuai peran (11 umum / 13 Owner)", not salah, f"{len(salah)} baris")
+    cek(f"tools_json {split} sesuai peran ({len(TOOL_UMUM)} umum / {len(TOOL_RUNTIME)} Owner)",
+        not salah, f"{len(salah)} baris")
 
 # 5. Argumen sesuai SKEMA runtime (nama, parameter wajib, tidak ada parameter karangan)
 rusak = []
@@ -137,6 +138,11 @@ for s in rows:
                 if not (set(a) == {"items"} and a["items"]
                         and all(set(i) == {"product", "qty"} and isinstance(i["qty"], int)
                                 and i["qty"] >= 1 for i in a["items"])):
+                    rusak.append((s, n, a))
+            if n == "update_cart":
+                if not (set(a) == {"items"} and len(a["items"]) == 1
+                        and all(set(i) == {"product", "qty"} and isinstance(i["qty"], int)
+                                and i["qty"] >= 0 for i in a["items"])):
                     rusak.append((s, n, a))
 cek("argumen tool cocok dengan skema runtime", not rusak, str(rusak[:3]))
 
@@ -264,6 +270,59 @@ salah_arah = [r["messages"][-1]["content"][:40] for r in n14
               and any(f in r["messages"][-1]["content"].lower() for f in _EN_FRASA)]
 cek("balasan N14 berbahasa Indonesia bebas frasa pembuka Inggris",
     not salah_arah, str(salah_arah[:2]))
+
+# 12. v10 — update_cart dan kontrasnya (uji PC lab 6 Okt 2026)
+_RINGKASAN = tuple(bahasa.teks("ringkasan_keranjang_judul", l) for l in (bahasa.ID, bahasa.EN))
+
+
+def ada_keranjang(r):
+    return any(m["role"] == "assistant" and (m.get("content") or "").startswith(_RINGKASAN)
+               for m in r["messages"][1:-1])
+
+
+def tipe(t):
+    return [r for s in rows for r in rows[s] if r["meta"]["type"] == t]
+
+
+def panggil(r):
+    a = args_of(r)
+    return a[0] if a else (None, {})
+
+
+cek("T17 -> update_cart dengan jumlah akhir >= 1",
+    bool(tipe("T17")) and all(panggil(r)[0] == "update_cart"
+                              and panggil(r)[1]["items"][0]["qty"] >= 1 for r in tipe("T17")),
+    str(len(tipe("T17"))))
+cek("T18 (buang satu kue) -> update_cart qty 0, BUKAN cancel_order",
+    bool(tipe("T18")) and all(panggil(r)[0] == "update_cart"
+                              and panggil(r)[1]["items"][0]["qty"] == 0 for r in tipe("T18")),
+    str(len(tipe("T18"))))
+cek("T19 ('tambah N lagi') -> add_to_cart, BUKAN update_cart",
+    bool(tipe("T19")) and all(panggil(r)[0] == "add_to_cart" for r in tipe("T19")),
+    str(len(tipe("T19"))))
+cek("N15 ('kurangi' tanpa jumlah akhir) -> bertanya, tanpa tool",
+    bool(tipe("N15")) and all(not args_of(r) and r["messages"][-1]["content"].count("?") == 1
+                              for r in tipe("N15")), str(len(tipe("N15"))))
+tanpa = [r["meta"]["type"] for t in ("T17", "T18", "T19", "N15") for r in tipe(t)
+         if not ada_keranjang(r)]
+cek("T17/T18/T19/N15 selalu didahului ringkasan keranjang", not tanpa, str(Counter(tanpa)))
+salah_bhs = [r["meta"]["type"] for t in ("T17", "T18", "T19", "N15") for r in tipe(t)
+             if not any((m.get("content") or "").startswith(
+                 bahasa.teks("ringkasan_keranjang_judul", bahasa.normalkan(r["meta"]["lang"])))
+                 for m in r["messages"][1:-1] if m["role"] == "assistant")]
+cek("ringkasan keranjang di history tipe v10 berbahasa sesi", not salah_bhs, str(Counter(salah_bhs)))
+ubah_tanpa_angka = [pisah_konteks(user_akhir(r))[1] for r in tipe("T17")
+                    if not r["meta"]["noised"] and not re.search(
+                        r"\d|satu|dua|tiga|empat|lima|sepuluh|sepasang|lusin|one|two|three|four|five",
+                        pisah_konteks(user_akhir(r))[1].lower())]
+cek("T17: jumlah akhir benar-benar ditulis pelanggan", not ubah_tanpa_angka, str(ubah_tanpa_angka[:2]))
+batal_semua = [r for r in tipe("T9") if ada_keranjang(r)]
+cek("T9: batal SELURUH pesanan tetap cancel_order walau ada keranjang di history",
+    len(batal_semua) >= 3 and all(panggil(r)[0] == "cancel_order" for r in tipe("T9")),
+    str(len(batal_semua)))
+lanjut = [r for r in tipe("T15") if re.search(r"checkout|lanjut|bayar|pay", pisah_konteks(user_akhir(r))[1].lower())]
+cek("T15: 'checkout'/'lanjut bayar' -> check_cart, bukan get_order_status",
+    len(lanjut) >= 10 and all(panggil(r)[0] == "check_cart" for r in lanjut), str(len(lanjut)))
 
 print("\n".join(catat))
 print()

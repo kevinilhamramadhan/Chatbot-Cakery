@@ -524,6 +524,42 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("\n\nIs that everything, or would you like to add more? "
              "Type *confirm* to continue \U0001F60A"),
     },
+    "ubah_keranjang_sudah_ditagih": {
+        ID: ("Tagihan pesanan ini sudah terbit, jadi isinya tidak bisa kuubah lagi. "
+             "Kalau mau ganti, ketik *batal* dulu lalu pesan ulang ya \U0001F64F"),
+        EN: ("The invoice for this order is already out, so I can't change its items. "
+             "To change it, type *cancel* first and then order again \U0001F64F"),
+    },
+    "ubah_keranjang_item_mana": {
+        ID: "Kue yang mana yang mau diubah, dan jadinya berapa?",
+        EN: "Which cake would you like to change, and to how many?",
+    },
+    "keranjang_jadi_kosong": {
+        ID: ("Oke, sudah kuhapus. Keranjangmu sekarang kosong — ketik *menu* kalau "
+             "mau pilih kue lain ya \U0001F60A"),
+        EN: ("Done, I've removed it. Your cart is now empty — type *menu* if you'd "
+             "like to pick something else \U0001F60A"),
+    },
+    "ubah_keranjang_tak_ada": {
+        ID: "{nama} tidak ada di keranjangmu.",
+        EN: "{nama} isn't in your cart.",
+    },
+    "ubah_keranjang_seri": {
+        ID: "Ada lebih dari satu kue yang cocok dengan {nama} — sebutkan nama lengkapnya ya.",
+        EN: "More than one cake matches {nama} — please give the full name.",
+    },
+    "ubah_keranjang_jumlah": {
+        ID: "Jumlah akhir untuk {nama} belum jelas — sebutkan angkanya ya, mis. 2.",
+        EN: "The final quantity for {nama} isn't clear — please give a number, e.g. 2.",
+    },
+    "ubah_keranjang_minimum_item": {
+        ID: "{nama} minimal {minimum} pcs",
+        EN: "{nama} has a minimum of {minimum} pcs",
+    },
+    "ubah_keranjang_besar": {
+        ID: "Jumlah sebanyak itu ({nama}) lewat admin ya.",
+        EN: "A quantity that large ({nama}) needs to go through our admin.",
+    },
     "status_pesanan_gagal": {
         ID: "Maaf, status pesanan lagi tidak bisa diambil. Coba lagi sebentar ya \U0001F64F",
         EN: "Sorry, I can't fetch your order status right now. Please try again shortly \U0001F64F",

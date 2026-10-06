@@ -812,3 +812,61 @@ async def test_tagihan_gagal_bisa_diulang_dengan_memilih_metode_lagi(patch_exter
     r = await handle_message(WA, "va")
     assert "8808123456789012" in r.text
     assert (await store.get_or_create_session(WA)).state == State.AWAITING_PAYMENT
+
+
+# ── update_cart (v10) ─────────────────────────────────────────────────────────
+async def _ubah(items, teks):
+    from app.tools.update_cart import update_cart
+    set_turn_context(TurnContext(wa_number=WA, user_text=teks))
+    return await update_cart.ainvoke({"items": items})
+
+
+async def test_update_cart_mengganti_jumlah_dan_menghapus():
+    await _seed_cart_awaiting_confirmation(
+        [{"product": "Brownies Coklat", "qty": 2}, {"product": "Bolu Pandan", "qty": 1}])
+    # Nama dicocokkan ke isi keranjang, bukan katalog: "brownies" = Brownies Coklat.
+    out = await _ubah([{"product": "brownies", "qty": 3}], "brownies nya jadi 3")
+    cart = {c["nama"]: c["qty"] for c in await store.get_cart(WA)}
+    assert cart == {"Brownies Coklat": 3, "Bolu Pandan": 1} and "Rp225.000" in out
+
+    out = await _ubah([{"product": "bolu pandan", "qty": 0}], "hapus bolu pandannya")
+    cart = {c["nama"]: c["qty"] for c in await store.get_cart(WA)}
+    assert cart == {"Brownies Coklat": 3} and "Bolu Pandan" not in out
+
+
+async def test_update_cart_tidak_mengarang_jumlah_dan_tidak_menambah_item_baru():
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
+    # Model menebak angka padahal pelanggan tidak menulisnya -> tanya, jangan ubah.
+    out = await _ubah([{"product": "brownies coklat", "qty": 1}], "kurangi browniesnya")
+    assert (await store.get_cart(WA))[0]["qty"] == 2 and "belum jelas" in out
+    # Produk yang tidak ada di keranjang tidak ikut masuk lewat tool ini.
+    out = await _ubah([{"product": "bolu pandan", "qty": 2}], "bolu pandan jadi 2")
+    assert len(await store.get_cart(WA)) == 1 and "tidak ada di keranjang" in out
+
+
+async def test_update_cart_item_terakhir_dihapus_keranjang_kosong():
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
+    from app.conversation.context import get_turn_context
+    out = await _ubah([{"product": "brownies coklat", "qty": 0}], "browniesnya ga jadi")
+    assert await store.get_cart(WA) == [] and "kosong" in out
+    assert get_turn_context().next_state == State.IDLE
+
+
+async def test_batal_satu_kue_tidak_mengosongkan_keranjang(monkeypatch):
+    """ "bolu pandannya ga jadi" dengan dua kue di keranjang dulu menghapus
+    SEMUANYA lewat jalur kata batal. Sekarang diteruskan ke model (update_cart)."""
+    import app.conversation.orchestrator as orch
+    await _seed_cart_awaiting_confirmation(
+        [{"product": "Brownies Coklat", "qty": 2}, {"product": "Bolu Pandan", "qty": 1}])
+    dipanggil = []
+
+    async def fake_agent(wa, text):
+        dipanggil.append(text)
+        return orch.Reply(text="ok")
+
+    monkeypatch.setattr(orch, "_run_agent_turn", fake_agent)
+    await handle_message(WA, "bolu pandannya ga jadi")
+    assert dipanggil == ["bolu pandannya ga jadi"] and len(await store.get_cart(WA)) == 2
+    # Tanpa menyebut kue apa pun, "ga jadi" tetap membatalkan seluruh keranjang.
+    await handle_message(WA, "ga jadi deh")
+    assert await store.get_cart(WA) == [] and len(dipanggil) == 1

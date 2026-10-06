@@ -1,6 +1,6 @@
 {
   "train": {
-    "total": 1600,
+    "total": 1780,
     "per_type": {
       "N1": 150,
       "N10": 25,
@@ -8,6 +8,7 @@
       "N12": 30,
       "N13": 15,
       "N14": 60,
+      "N15": 20,
       "N1x": 40,
       "N2": 25,
       "N3": 50,
@@ -23,8 +24,11 @@
       "T12": 30,
       "T13": 40,
       "T14": 45,
-      "T15": 35,
+      "T15": 50,
       "T16": 40,
+      "T17": 70,
+      "T18": 50,
+      "T19": 25,
       "T2": 30,
       "T3": 115,
       "T4": 40,
@@ -34,15 +38,15 @@
       "T8": 55,
       "T9": 30
     },
-    "tool_rows": 860,
-    "non_tool_rows": 740,
-    "en_share": 0.226,
-    "multi_turn_share": 0.429,
-    "noised_share": 0.216,
-    "konteks_share": 0.616
+    "tool_rows": 1020,
+    "non_tool_rows": 760,
+    "en_share": 0.223,
+    "multi_turn_share": 0.487,
+    "noised_share": 0.218,
+    "konteks_share": 0.637
   },
   "validation": {
-    "total": 162,
+    "total": 179,
     "per_type": {
       "N1": 15,
       "N10": 2,
@@ -50,6 +54,7 @@
       "N12": 3,
       "N13": 2,
       "N14": 6,
+      "N15": 2,
       "N1x": 4,
       "N2": 2,
       "N3": 5,
@@ -65,8 +70,11 @@
       "T12": 3,
       "T13": 4,
       "T14": 4,
-      "T15": 4,
+      "T15": 5,
       "T16": 4,
+      "T17": 7,
+      "T18": 5,
+      "T19": 2,
       "T2": 3,
       "T3": 12,
       "T4": 4,
@@ -76,15 +84,15 @@
       "T8": 6,
       "T9": 3
     },
-    "tool_rows": 88,
-    "non_tool_rows": 74,
-    "en_share": 0.241,
-    "multi_turn_share": 0.414,
-    "noised_share": 0.191,
-    "konteks_share": 0.642
+    "tool_rows": 103,
+    "non_tool_rows": 76,
+    "en_share": 0.229,
+    "multi_turn_share": 0.464,
+    "noised_share": 0.19,
+    "konteks_share": 0.659
   },
   "test": {
-    "total": 166,
+    "total": 185,
     "per_type": {
       "N1": 15,
       "N10": 3,
@@ -92,6 +100,7 @@
       "N12": 3,
       "N13": 3,
       "N14": 6,
+      "N15": 3,
       "N1x": 4,
       "N2": 3,
       "N3": 5,
@@ -107,8 +116,11 @@
       "T12": 3,
       "T13": 4,
       "T14": 4,
-      "T15": 4,
+      "T15": 5,
       "T16": 4,
+      "T17": 7,
+      "T18": 5,
+      "T19": 3,
       "T2": 3,
       "T3": 12,
       "T4": 4,
@@ -118,11 +130,11 @@
       "T8": 6,
       "T9": 3
     },
-    "tool_rows": 88,
-    "non_tool_rows": 78,
-    "en_share": 0.259,
-    "multi_turn_share": 0.422,
-    "noised_share": 0.187,
-    "konteks_share": 0.59
+    "tool_rows": 104,
+    "non_tool_rows": 81,
+    "en_share": 0.254,
+    "multi_turn_share": 0.481,
+    "noised_share": 0.184,
+    "konteks_share": 0.584
   }
 }
