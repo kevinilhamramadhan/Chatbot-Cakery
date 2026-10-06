@@ -53,15 +53,12 @@ def _jumlah_akhir(raw) -> int | None:
 @tool
 async def update_cart(items: list[dict] | None = None, product: str | None = None,
                       qty: int | None = None) -> str:
-    """Ubah jumlah atau hapus item yang SUDAH ada di keranjang pelanggan.
+    """Ubah jumlah atau hapus kue yang SUDAH ada di keranjang.
 
-    `items` adalah list objek berisi `product` (nama kue di keranjang) dan `qty`
-    (jumlah AKHIR yang diinginkan; 0 = hapus item itu dari keranjang).
-    Contoh: [{"product": "Brownies Coklat", "qty": 3}] atau
-    [{"product": "Bolu Pandan", "qty": 0}].
-    Gunakan saat pelanggan mengganti jumlah ("jadi 3", "ganti jadi 1") atau
-    membuang satu kue dari keranjang ("hapus", "ga jadi yang itu"). Untuk
-    MENAMBAH kue ke keranjang pakai `add_to_cart`.
+    `items`: list objek `product` (nama kue di keranjang) dan `qty` (jumlah AKHIR;
+    0 = hapus). Contoh: [{"product": "Brownies Coklat", "qty": 3}].
+    Gunakan saat pelanggan mengganti jumlah ("jadi 3") atau membuang satu kue
+    ("hapus", "yang itu ga jadi"). Menambah kue: pakai `add_to_cart`.
     """
     items = _as_items(items, product=product, qty=qty)
     ctx = get_turn_context()

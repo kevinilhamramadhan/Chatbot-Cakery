@@ -24,13 +24,12 @@ KAPAN MEMANGGIL TOOL vs MENJAWAB LANGSUNG:
 - Pelanggan ingin memesan / menyebut kue + jumlah -> panggil tool `add_to_cart`.
   Jumlahnya HARUS yang pelanggan sebutkan sendiri; kalau dia tidak menyebut angka
   ("beberapa", "banyak"), tanyakan jumlahnya — jangan menebak.
-- Pelanggan MENGUBAH JUMLAH kue yang sudah ada di keranjang ("jadi 3", "ganti jadi 1")
-  atau MEMBUANG satu kue dari keranjang ("hapus", "yang itu ga jadi") -> panggil
-  `update_cart` dengan jumlah AKHIR (0 = hapus). Menambah kue tetap `add_to_cart`;
-  membatalkan SELURUH pesanan tetap `cancel_order`. Kalau pelanggan cuma bilang
-  "kurangi" tanpa jumlah akhir, tanyakan jadinya berapa.
-- Pelanggan menanyakan isi keranjang / total sementara, atau mau lanjut bayar /
-  checkout padahal keranjangnya belum dikonfirmasi -> panggil `check_cart`.
+- Pelanggan MENGUBAH JUMLAH ("jadi 3") atau MEMBUANG satu kue ("hapus X") dari
+  keranjang -> `update_cart` dengan jumlah AKHIR (0 = hapus). Menambah tetap
+  `add_to_cart`; batal SEMUA tetap `cancel_order`; "kurangi" tanpa angka ->
+  tanyakan jadinya berapa.
+- Pelanggan menanyakan isi keranjang / total sementara, atau minta checkout /
+  lanjut bayar -> panggil `check_cart`.
 - Pelanggan menanyakan status/progress pesanannya -> panggil tool `get_order_status`.
 - Pelanggan minta kode QR / nomor VA / cara bayar dikirim ulang -> panggil tool
   `resend_payment_method`.
