@@ -46,6 +46,13 @@ wwebjs-api ──webhook──▶ chatbot-service  /webhook/whatsapp/<WEBHOOK_TO
   dibuang.
 - **FAQ** diambil dari backend (dikelola lewat Admin Site) dan disegarkan tiap
   `FAQ_REFRESH_SECONDS`; `knowledge_base/faq/*.txt` hanya cadangan.
+- **Jawaban FAQ dikirim apa adanya** kalau FAQ yang dimaksud jelas (skor
+  kemiripan tinggi, atau balasan model sendiri mengikuti FAQ itu) — model kecil
+  sering salah menyalin FAQ yang sudah benar terambil. Diukur pada 116
+  pertanyaan bergaya chat: 94 menerima teks FAQ yang benar; sisanya tetap
+  dijawab model. Versi Inggrisnya ada di `knowledge_base/faq_en.json`, dikunci
+  ke sidik jawaban Indonesianya: FAQ yang disunting admin dijawab model untuk
+  sesi Inggris sampai berkas itu diperbarui (`app/rag/faq_baku.py`).
 - **Data milik chatbot** ada di SQLite sendiri: sesi, log percakapan, pelacak
   pembayaran.
 - **Tool pelanggan:** `get_menu`, `get_product_detail`, `compare_products`,
@@ -54,7 +61,11 @@ wwebjs-api ──webhook──▶ chatbot-service  /webhook/whatsapp/<WEBHOOK_TO
   Owner mendapat tambahan `financial_report` dan `business_analytics`; definisi
   keduanya tidak pernah dikirim ke model untuk pelanggan biasa.
 - **Dua bahasa.** Bahasa sesi ditentukan kode (butuh dua kata pencocok) dan
-  dikunci; model diberi arahan bahasa di blok system.
+  dikunci; model diberi arahan bahasa di blok system. Semua balasan tetap
+  (form, keluaran tool, kabar pembayaran/refund) lewat templat dua bahasa di
+  `app/conversation/bahasa.py`; yang tetap Indonesia hanya data katalog (nama
+  dan deskripsi produk), pesan verifikasi pendaftaran website, dan pesan untuk
+  admin.
 
 ## Struktur repo
 
