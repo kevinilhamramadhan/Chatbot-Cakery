@@ -212,6 +212,20 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # 2) No tool call -> direct answer (FAQ / greeting / refusal).
     if not getattr(ai, "tool_calls", None):
         answer = _clean(ai.content)
+        # FAQ yang jelas dimaksud dijawab dengan teks FAQ-nya sendiri, bukan
+        # tulisan ulang model (lihat app/rag/faq_baku.py).
+        if rag_context:
+            from app.rag import faq_baku
+
+            try:
+                baku = await asyncio.to_thread(
+                    faq_baku.pilih, getattr(retrieval, "kandidat", []), answer, lang)
+            except Exception as exc:  # noqa: BLE001 - jangan menjatuhkan giliran
+                logger.warning("pemilihan jawaban FAQ baku gagal: %s", exc)
+                baku = None
+            if baku:
+                logger.info("FAQ dijawab dengan teks baku (%s)", baku[1])
+                return baku[0]
         # A price the model typed itself is a made-up price. Observed live, even
         # on v4: "menu apa aja yang ada?" sometimes skips get_menu and answers
         # "• Cupcakes isi 9 Vanilla — Rp120.000" — products and prices that do

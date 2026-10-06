@@ -1,0 +1,66 @@
+{
+ "Berapa lama daya tahan kue Toti Cakery?": {
+  "jawaban_en": "Our cakes keep for 3-4 days at room temperature, and up to 10-14 days in the fridge or chiller in a tightly closed container. They taste best on the same day. Avoid keeping them at room temperature for too long, especially cakes made with fresh cream.",
+  "sidik_jawaban": "4842bbc929c49b68"
+ },
+ "Bagaimana metode pengiriman di Toti Cakery? Apakah bisa kirim ke luar kota?": {
+  "jawaban_en": "Toti Cakery offers two options: pickup at our outlet, or instant/same-day delivery within the city. For delivery, you book the courier yourself through a ride-hailing app such as GoSend or GrabExpress from our store address — when your order is ready we send you the store name and full address so booking is easy. We don't serve out-of-town delivery yet.",
+  "sidik_jawaban": "c56a0f3485e4ed13"
+ },
+ "Jam berapa Toti Cakery buka?": {
+  "jawaban_en": "Toti Cakery is open Monday to Saturday, 09.00 - 19.00 WIB. We are closed on Sundays. For large orders, please order at least 2 days ahead (H-2).",
+  "sidik_jawaban": "1a11024f85daf3fd"
+ },
+ "Apakah Toti Cakery menerima pesanan kue custom?": {
+  "jawaban_en": "Yes, we take custom cake orders, such as birthday cakes with a special design, lettering, or a particular theme. Custom cakes need a detailed discussion, so we pass those orders to our admin. Tell us what you need and our admin will help you from there.",
+  "sidik_jawaban": "36522a3fa720f5c6"
+ },
+ "Metode pembayaran apa saja yang tersedia?": {
+  "jawaban_en": "Payment is cashless, by QRIS or BCA Virtual Account (VA) transfer, both processed automatically through Midtrans. Once you confirm your order, we send the QR code or VA number with the amount and the deadline. You can pay in full or a 50% deposit (DP). We start on your order after the payment is received.",
+  "sidik_jawaban": "577b3415567ef367"
+ },
+ "Bagaimana cara memesan lewat WhatsApp?": {
+  "jawaban_en": "Just tell us the cake and the quantity, for example \"I want 2 brownies fudgy almond\". We'll show an order summary with the total. If it looks right, type \"confirm\"; then we ask for your name and address, whether you'll pick it up or have it delivered, and finally how you'd like to pay. To see the cake list first, type \"menu\".",
+  "sidik_jawaban": "946191e6fc0205f1"
+ },
+ "Berapa lama batas waktu pembayaran setelah pesanan dibuat?": {
+  "jawaban_en": "The deadline is 30 minutes from when the invoice is issued. After that the system cancels the order automatically and we let you know in this chat. No problem — you can order again any time.",
+  "sidik_jawaban": "5f04af25a0f77c4e"
+ },
+ "Bagaimana cara mengecek status pesanan saya?": {
+  "jawaban_en": "Type \"order status\" in this chat and we'll show your invoice number, payment status, and total. Once your payment comes in, the system detects it automatically and we notify you — no need to send proof of transfer.",
+  "sidik_jawaban": "28a4936a1f8aeee9"
+ },
+ "Bagaimana kalau saya ingin membatalkan pesanan?": {
+  "jawaban_en": "Type \"cancel\" in this chat. Unpaid orders can be cancelled at any time. For orders that are already paid and in production, tell us in this chat so we can pass it to our admin.",
+  "sidik_jawaban": "cb76973c3e2af118"
+ },
+ "Kode QR atau nomor VA saya hilang, bisa dikirim ulang?": {
+  "jawaban_en": "Yes. Type \"resend the payment code\" in this chat and we'll send the QR code or VA number for your open invoice again, together with the amount to pay.",
+  "sidik_jawaban": "45c262cdc36be504"
+ },
+ "Bisa pesan lagi padahal pesanan sebelumnya belum dibayar?": {
+  "jawaban_en": "Not yet. Each customer can only have one active order at a time, so orders don't get mixed up. Finish the current payment first, or type \"cancel\" to cancel it, and then we can make a new order.",
+  "sidik_jawaban": "5ef57b53afb5cd33"
+ },
+ "Apakah bisa melihat foto kuenya dulu?": {
+  "jawaban_en": "Yes. Just name the cake, for example \"what is the brownies fudgy almond like?\", and we'll send its photo with the description and price.",
+  "sidik_jawaban": "3679f287015adf55"
+ },
+ "Apakah saya sedang chat dengan bot atau manusia?": {
+  "jawaban_en": "You're chatting with Toti Cakery's virtual assistant. If something is better discussed with a person, just say so in this chat — we'll connect you to our admin, who will reply in this same chat.",
+  "sidik_jawaban": "72ec45a2b05d8dab"
+ },
+ "Apakah bisa memesan lewat website, bukan lewat WhatsApp?": {
+  "jawaban_en": "Yes. You can also order through the Toti Cakery website, and you can still ask about the order status in this chat.",
+  "sidik_jawaban": "02ff05555ca5197a"
+ },
+ "Apa itu DP 50% dan bagaimana sisanya dibayar?": {
+  "jawaban_en": "A 50% deposit (DP) means you pay half of the order total first so we can start on it, and the rest is paid later. When choosing how to pay, type \"DP\" for this option, or \"full\" to pay everything at once.",
+  "sidik_jawaban": "7e02b747819267b5"
+ },
+ "Apakah kue Toti Cakery halal?": {
+  "jawaban_en": "Yes, all Toti Cakery products are made with halal ingredients.",
+  "sidik_jawaban": "6819aa56ee0eda31"
+ }
+}

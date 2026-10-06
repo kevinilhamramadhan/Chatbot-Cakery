@@ -56,6 +56,17 @@ class RetrievalResult:
             doc for doc, sim in zip(self.documents, self.similarities) if sim >= threshold
         ][:1]
 
+    @property
+    def kandidat(self) -> list[dict]:
+        """FAQ yang lolos ambang, terbaik dulu: {pertanyaan, jawaban, skor}.
+        Kosong untuk dokumen tanpa pasangan tanya-jawab (berkas lokal bebas)."""
+        threshold = settings.rag_similarity_threshold
+        return [
+            {"pertanyaan": m["pertanyaan"], "jawaban": m["jawaban"], "skor": sim}
+            for m, sim in zip(self.metadatas, self.similarities)
+            if sim >= threshold and (m or {}).get("jawaban")
+        ]
+
     def context_text(self) -> str:
         return "\n\n---\n\n".join(self.relevant_documents)
 
@@ -98,11 +109,26 @@ def retrieve(query: str, top_k: int | None = None) -> RetrievalResult:
 
     # Embed the query ourselves and pass query_embeddings so we don't depend on
     # ChromaDB's internal query-embedding dispatch (which differs across versions).
-    query_vec = get_embedding_function().embed_one(query)
-    res = collection.query(query_embeddings=[query_vec], n_results=top_k)
+    query_vec = get_embedding_function().embed_one(query, sebagai_pertanyaan=True)
+    # Tiap FAQ punya beberapa chunk; ambil cukup banyak supaya top_k FAQ yang
+    # BERBEDA tetap terisi sesudah chunk-chunknya digabung.
+    res = collection.query(query_embeddings=[query_vec],
+                           n_results=min(collection.count(), top_k * 4))
     docs = res.get("documents", [[]])[0]
     metas = res.get("metadatas", [[]])[0]
     distances = res.get("distances", [[]])[0]
-    # cosine distance -> similarity
-    sims = [1.0 - float(d) for d in distances]
-    return RetrievalResult(documents=docs, metadatas=metas, similarities=sims)
+    # cosine distance -> similarity; hasil Chroma sudah terurut dari yang
+    # termirip, jadi kemunculan pertama tiap sumber adalah skor terbaiknya.
+    terlihat: set[str] = set()
+    out_docs, out_metas, out_sims = [], [], []
+    for doc, meta, dist in zip(docs, metas, distances):
+        meta = meta or {}
+        sumber = meta.get("source") or doc
+        if sumber in terlihat:
+            continue
+        terlihat.add(sumber)
+        out_docs.append(meta.get("dokumen") or doc)
+        out_metas.append(meta)
+        out_sims.append(1.0 - float(dist))
+    return RetrievalResult(documents=out_docs[:top_k], metadatas=out_metas[:top_k],
+                           similarities=out_sims[:top_k])
