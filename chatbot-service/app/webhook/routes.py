@@ -84,6 +84,22 @@ def _extract_message(payload: dict) -> tuple[str, str] | None:
     return sender, body
 
 
+# Yang benar-benar dikirim orangnya tapi tidak bisa kita baca. Tipe lain adalah
+# event sistem WhatsApp (e2e_notification saat chat baru dibuka, ciphertext,
+# protocol, ...) -- membalasnya dengan "aku cuma bisa membaca pesan teks"
+# membuat tiap kontak baru ditegur padahal ia mengetik teks.
+_TIPE_KIRIMAN_ORANG = frozenset({
+    "image", "video", "audio", "ptt", "sticker", "document", "location",
+    "live_location", "vcard", "multi_vcard", "poll_creation",
+})
+
+
+def _kiriman_tak_terbaca(payload: dict) -> bool:
+    data = payload.get("data") or {}
+    msg = data.get("message") or data
+    return msg.get("type") in _TIPE_KIRIMAN_ORANG
+
+
 def _should_send_text_only_notice(sender: str) -> bool:
     # `None` rather than a 0.0 default: time.monotonic() is the machine's uptime,
     # so on a freshly booted host every first message looked like it had already
@@ -192,7 +208,8 @@ async def _handle_callback(request: Request, bg: BackgroundTasks) -> dict:
         # A real person sent something we cannot read (voice note, sticker,
         # photo, location). Say so once instead of leaving them hanging.
         sender = _direct_sender(payload)
-        if sender and _should_send_text_only_notice(sender):
+        if (sender and _kiriman_tak_terbaca(payload)
+                and _should_send_text_only_notice(sender)):
             logger.info("Non-text message from %s — replying with the text-only notice",
                         mask_phone(sender))
             bg.add_task(_send_text_only_notice, sender)

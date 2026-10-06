@@ -583,6 +583,24 @@ def test_voice_note_gets_a_template_reply_not_silence():
     assert routes._should_send_text_only_notice("628123999888@c.us") is False
 
 
+def test_notifikasi_sistem_whatsapp_tidak_dibalas_hanya_teks():
+    """Live 1 Okt 2026: tiap kontak baru mendapat "aku cuma bisa membaca pesan
+    teks" sebagai balasan pertama, padahal ia mengetik teks. Pemicunya event
+    sistem WhatsApp (pemberitahuan enkripsi dsb.) yang ikut datang dari chat
+    yang sama -- bukan sesuatu yang dikirim orangnya."""
+    from app.webhook import routes
+
+    def ev(tipe):
+        return {"dataType": "message",
+                "data": {"message": {"from": "12345678901234@lid", "type": tipe, "body": ""}}}
+
+    for tipe in ("e2e_notification", "notification_template", "ciphertext",
+                 "protocol", "gp2", "revoked", "call_log"):
+        assert not routes._kiriman_tak_terbaca(ev(tipe)), tipe
+    for tipe in ("ptt", "audio", "image", "video", "sticker", "document", "location"):
+        assert routes._kiriman_tak_terbaca(ev(tipe)), tipe
+
+
 # ── Checkout ──────────────────────────────────────────────────────────────────
 async def test_checkout_refuses_an_invoice_with_no_way_to_pay(patch_externals):
     """Backend menjawab 201 walau Midtrans menolak (406): pg_transaction_id dan
