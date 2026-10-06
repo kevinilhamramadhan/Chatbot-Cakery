@@ -20,6 +20,7 @@ CONFIRM_WORDS = {
     "sudah", "sudah sesuai", "sesuai", "betul", "benar", "bener", "ya", "yes",
     "ok", "oke", "okay", "lanjut", "lanjutkan", "fix", "gas", "iya", "setuju",
     "confirm", "boleh", "siap", "sip", "yup", "deal", "yep", "yeah",
+    "checkout",
 }
 CANCEL_WORDS = {
     "batal", "batalkan", "cancel", "gajadi", "gak jadi", "ga jadi", "tidak jadi",
@@ -34,7 +35,7 @@ _CONFIRM_PHRASES = (
     "udah pas", "sudah fix", "udah fix", "sudah cocok", "udah cocok",
     # Tanda petik sudah jadi spasi di _tokens: "that's all" -> "that s all".
     "that s all", "that is all", "that s it", "that is it", "looks good",
-    "all good",
+    "all good", "lanjut ke pembayaran", "proceed to payment", "ready to pay",
 )
 
 

@@ -812,3 +812,20 @@ async def test_tagihan_gagal_bisa_diulang_dengan_memilih_metode_lagi(patch_exter
     r = await handle_message(WA, "va")
     assert "8808123456789012" in r.text
     assert (await store.get_or_create_session(WA)).state == State.AWAITING_PAYMENT
+
+
+async def test_check_cart_membawa_ke_langkah_konfirmasi():
+    from app.conversation.context import get_turn_context
+    from app.tools.view_cart import check_cart
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    await store.set_state(WA, State.IDLE)        # mis. sesudah tagihan gagal dibuat
+    set_turn_context(TurnContext(wa_number=WA))
+    await check_cart.ainvoke({})
+    assert get_turn_context().next_state == State.AWAITING_CART_CONFIRMATION
+
+
+async def test_checkout_di_konfirmasi_keranjang_berarti_setuju():
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    r = await handle_message(WA, "checkout")
+    assert (await store.get_or_create_session(WA)).state == State.COLLECTING_IDENTITY
+    assert "nama" in r.text.lower()
