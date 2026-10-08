@@ -12,8 +12,8 @@
   "sidik_jawaban": "1a11024f85daf3fd"
  },
  "Apakah Toti Cakery menerima pesanan kue custom?": {
-  "jawaban_en": "Yes, we take custom cake orders, such as birthday cakes with a special design, lettering, or a particular theme. Custom cakes need a detailed discussion, so we pass those orders to our admin. Tell us what you need and our admin will help you from there.",
-  "sidik_jawaban": "36522a3fa720f5c6"
+  "jawaban_en": "Yes, we take custom cake orders, such as birthday cakes with a special design, lettering, or a particular theme. Custom cakes need a detailed discussion, so those orders are handled directly by our admin.",
+  "sidik_jawaban": "683a7d029554aaea"
  },
  "Metode pembayaran apa saja yang tersedia?": {
   "jawaban_en": "Payment is cashless, by QRIS or BCA Virtual Account (VA) transfer, both processed automatically through Midtrans. Once you confirm your order, we send the QR code or VA number with the amount and the deadline. You can pay in full or a 50% deposit (DP). We start on your order after the payment is received.",

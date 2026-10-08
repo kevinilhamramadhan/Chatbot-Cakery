@@ -46,6 +46,9 @@ wwebjs-api ──webhook──▶ chatbot-service  /webhook/whatsapp/<WEBHOOK_TO
   dibuang.
 - **FAQ** diambil dari backend (dikelola lewat Admin Site) dan disegarkan tiap
   `FAQ_REFRESH_SECONDS`; `knowledge_base/faq/*.txt` hanya cadangan.
+- **FAQ yang jawabannya menyebut admin ikut menawarkan sambung ke admin.**
+  Topik mana yang perlu ditangani orang (kue custom, dsb.) diatur dari isi FAQ
+  di Admin Site: cukup tulis "ditangani admin kami" di jawabannya.
 - **Jawaban FAQ dikirim apa adanya** kalau FAQ yang dimaksud jelas (skor
   kemiripan tinggi, atau balasan model sendiri mengikuti FAQ itu) — model kecil
   sering salah menyalin FAQ yang sudah benar terambil. Diukur pada 116

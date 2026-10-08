@@ -80,6 +80,13 @@ _CERIA_RE = re.compile(
     re.IGNORECASE,
 )
 _AWALAN_MAAF = tuple(bahasa.teks("maaf_keluhan", l)[:30] for l in (bahasa.ID, bahasa.EN))
+# Jawaban FAQ yang menyebut admin adalah janji: "pesanan custom ditangani admin
+# kami" tanpa ada yang dikabari membuat pelanggan menunggu orang yang tidak
+# pernah datang (terukur 8 Okt 2026). Jadi tawaran sambungnya ikut dikirim.
+# Penandanya isi jawaban itu sendiri, bukan kata kunci di pesan pelanggan: topik
+# mana yang butuh admin diatur dari Admin Site, tanpa deploy dan tanpa melatih
+# ulang model.
+_JANJI_ADMIN_RE = re.compile(r"\badmin\b", re.IGNORECASE)
 
 
 def riwayat_bersih(history: list[dict]) -> list[dict]:
@@ -230,6 +237,11 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
                 baku = None
             if baku:
                 logger.info("FAQ dijawab dengan teks baku (%s)", baku[1])
+                if _JANJI_ADMIN_RE.search(baku[0]):
+                    from app.conversation import escalation
+
+                    await store.set_pending_escalation(wa_number, user_text)
+                    return baku[0] + "\n\n" + escalation.teks_tawaran(lang)
                 return baku[0]
         # A price the model typed itself is a made-up price. Observed live, even
         # on v4: "menu apa aja yang ada?" sometimes skips get_menu and answers

@@ -174,3 +174,27 @@ async def test_pesan_satu_kata_tidak_membawa_konteks_faq(monkeypatch):
     await agent_mod.run_agent("628111", "yes", [])
     await agent_mod.run_agent("628111", "halal?", [])
     assert "KONTEKS FAQ" not in terlihat[0] and "KONTEKS FAQ" in terlihat[1]
+
+
+async def test_faq_yang_menyebut_admin_ikut_menawarkan_sambungan(monkeypatch):
+    """Terukur 8 Okt 2026: "mau pesen kue custom" dijawab FAQ "diteruskan ke admin
+    kami" tanpa tawaran apa pun, jadi "ya" pelanggan tidak menyambungkan siapa-siapa."""
+    from app.conversation import escalation, store
+
+    def fake_retrieve(query, top_k=None):
+        faq = {"pertanyaan": "jam buka?" if "jam" in query else "kue custom?",
+               "jawaban": "09.00-19.00" if "jam" in query else "Kue custom ditangani admin kami."}
+        return RetrievalResult(documents=["dok"], metadatas=[faq], similarities=[0.9])
+    monkeypatch.setattr(agent_mod, "retrieve", fake_retrieve)
+    _mock_llm(monkeypatch, AIMessage(content="belum punya infonya"))
+    dicatat = []
+
+    async def fake_set(wa, reason):
+        dicatat.append(reason)
+    monkeypatch.setattr(store, "set_pending_escalation", fake_set)
+
+    out = await agent_mod.run_agent(WA, "mau pesen kue custom dong", history=[])
+    assert out.startswith("Kue custom ditangani admin kami.") and escalation.OFFER_TEXT in out
+    assert dicatat == ["mau pesen kue custom dong"]
+    assert await agent_mod.run_agent(WA, "jam buka?", history=[]) == "09.00-19.00"
+    assert len(dicatat) == 1
