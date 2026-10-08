@@ -154,3 +154,23 @@ async def test_tool_owner_tidak_dijalankan_untuk_pelanggan(monkeypatch):
     assert dimuat and not (dimuat[0] & registry.NAMA_TOOL_OWNER), dimuat
     assert "Omzet" not in jawab and "Laporan Keuangan" not in jawab, jawab
 
+
+
+async def test_pesan_satu_kata_tidak_membawa_konteks_faq(monkeypatch):
+    """ "yes" lolos ambang kemiripan dan dijawab dengan isi FAQ. Pesan satu kata
+    tanpa tanda tanya tidak diberi konteks, jadi tidak ada yang bisa disalin."""
+    terlihat = []
+
+    class _LLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            terlihat.append(messages[-1].content)
+            return AIMessage(content="Siap kak 😊")
+
+    monkeypatch.setattr(agent_mod, "get_llm", lambda: _LLM())
+    _mock_retrieval(monkeypatch, 0.9)
+    await agent_mod.run_agent("628111", "yes", [])
+    await agent_mod.run_agent("628111", "halal?", [])
+    assert "KONTEKS FAQ" not in terlihat[0] and "KONTEKS FAQ" in terlihat[1]

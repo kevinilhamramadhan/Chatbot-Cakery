@@ -909,3 +909,20 @@ async def test_keluaran_tool_ikut_bahasa_inggris(monkeypatch):
     assert _history_view(detail).startswith("[Aku sudah menampilkan detail")
     # Setiap templat punya versi Inggris.
     assert not [k for k, v in bahasa._TEMPLAT.items() if bahasa.EN not in v]
+
+
+async def test_kata_batal_saat_menunggu_bayar_tidak_lewat_model(monkeypatch):
+    """ "cancel" sesudah tagihan terbit dulu bergantung pada model memanggil
+    cancel_order; saat model menjawab teks, pelanggan tidak bisa membatalkan."""
+    import app.conversation.orchestrator as orch
+
+    async def model_tidak_boleh_dipanggil(wa, text):
+        raise AssertionError("kata batal tidak boleh diteruskan ke model")
+
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "full", "va"):
+        await handle_message(WA, msg)
+    monkeypatch.setattr(orch, "_run_agent_turn", model_tidak_boleh_dipanggil)
+    r = await handle_message(WA, "cancel")
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_CANCEL_CONFIRMATION
+    assert "ya" in r.text.lower()

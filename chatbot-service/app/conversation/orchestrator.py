@@ -287,6 +287,20 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         reply = await _handle_confirmation(wa_number, text, lang)
     elif state == State.COLLECTING_IDENTITY:
         reply = await _handle_identity(wa_number, text, lang)
+    elif (state == State.AWAITING_PAYMENT and text_is_cancel(text)
+          and len(text.split()) <= 3):
+        # Tagihan kita sendiri berbunyi "Ketik *batal* kalau ingin membatalkan".
+        # Kata yang kita suruh ketik tidak boleh bergantung pada model: terukur
+        # 8 Okt 2026, "cancel" di sesi Inggris dijawab teks, bukan cancel_order,
+        # dan pelanggan tidak bisa membatalkan. Tool-nya tetap meminta
+        # konfirmasi, jadi tidak ada yang batal tanpa "ya".
+        from app.tools.cancel_order import cancel_order
+
+        ctx = get_turn_context_or_none()
+        jawab = await cancel_order.ainvoke({})
+        if ctx is not None and ctx.next_state:
+            await store.set_state(wa_number, ctx.next_state)
+        reply = Reply(text=jawab, media=ctx.media if ctx else [])
     elif (text_asks_recommendation(text) and not mentions_quantity(text)
           and not await _pemilik(wa_number)):
         # Owner yang bertanya "paling laku" sedang minta analitik penjualan

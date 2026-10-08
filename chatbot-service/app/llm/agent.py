@@ -155,7 +155,12 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
     # 1) Retrieval + scope guard (PROMPT §7). retrieve() does blocking I/O
     # (Ollama embed + Chroma query) — keep it off the event loop.
     retrieval = await asyncio.to_thread(retrieve, user_text)
-    rag_context = retrieval.context_text() if retrieval.in_scope else None
+    # Satu kata tanpa tanda tanya ("ok", "yes", "batal") bukan pertanyaan FAQ.
+    # Sejak pertanyaan FAQ diindeks tersendiri, pesan sependek itu ikut lolos
+    # ambang kemiripan: terukur 8 Okt 2026, "yes" dijawab dengan isi FAQ kue
+    # custom. Dataset latih pun tidak pernah memberi konteks pada pesan pengisi.
+    pendek = len(user_text.split()) < 2 and "?" not in user_text
+    rag_context = retrieval.context_text() if retrieval.in_scope and not pendek else None
     logger.info(
         "RAG best_sim=%.3f in_scope=%s", retrieval.best_similarity, retrieval.in_scope
     )
