@@ -306,11 +306,12 @@ async def tandai_lunas(order) -> bool:
     # belakangan" tetap berlaku: baris yang gagal dikirim tetap dicoba ulang.
     if not await store.klaim_kabar_lunas(order.id):
         return False
-    terkirim = await _notify(
-        order.wa_number,
-        bahasa.teks("bayar_diterima", await store.get_lang(order.wa_number),
-                    jumlah=rupiah(order.amount_due)),
-    )
+    lang = await store.get_lang(order.wa_number)
+    teks = bahasa.teks("bayar_diterima", lang, jumlah=rupiah(order.amount_due))
+    if order.payment_type == "dp" and order.total_amount > order.amount_due:
+        teks += bahasa.teks("sisa_pelunasan", lang,
+                            sisa=rupiah(order.total_amount - order.amount_due))
+    terkirim = await _notify(order.wa_number, teks)
     if not terkirim:
         await store.update_pending_order(order.id, notified_paid=False)  # lepas klaim
         logger.warning("Kabar pembayaran %s gagal terkirim — dicoba lagi siklus berikutnya",

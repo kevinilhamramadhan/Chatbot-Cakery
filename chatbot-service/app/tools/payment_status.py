@@ -14,6 +14,7 @@ from app.backend_client import api as backend
 from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State
+from app.tools.formatting import rupiah
 
 logger = logging.getLogger(__name__)
 
@@ -49,5 +50,9 @@ async def check_payment_status() -> str:
     if inv in ("paid", "partial"):
         await store.update_pending_order(order.id, status="paid", notified_paid=True)
         ctx.next_state = State.ORDER_ACTIVE
-        return bahasa.teks("bayar_diterima_singkat", lang)
+        teks = bahasa.teks("bayar_diterima_singkat", lang)
+        sisa = (res or {}).get("amount_due") or 0
+        if inv == "partial" and sisa > 0:
+            teks += bahasa.teks("sisa_pelunasan", lang, sisa=rupiah(sisa))
+        return teks
     return bahasa.teks("bayar_belum_terdeteksi", lang)

@@ -213,6 +213,14 @@ async def get_active_pending(wa_number: str) -> PendingOrder | None:
         )
 
 
+async def pesanan_terakhir(wa_number: str) -> PendingOrder | None:
+    async with async_session_factory() as db:
+        return await db.scalar(
+            select(PendingOrder).where(PendingOrder.wa_number == wa_number)
+            .order_by(PendingOrder.id.desc())
+        )
+
+
 async def create_pending_order(**fields) -> PendingOrder:
     async with async_session_factory() as db:
         row = PendingOrder(**fields)

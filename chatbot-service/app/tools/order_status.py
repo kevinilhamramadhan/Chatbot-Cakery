@@ -47,6 +47,10 @@ async def get_order_status() -> str:
     nomor = inv.get("nomor_invoice") or f"#{o.get('id')}"
     order_lbl = _ORDER[bahasa.normalkan(lang)].get(o.get("status"), o.get("status"))
     inv_lbl = _INV[bahasa.normalkan(lang)].get(inv.get("status"), inv.get("status"))
+    # Backend membiarkan pesanan "pending" sampai Admin memprosesnya, juga
+    # sesudah dibayar: "Menunggu pembayaran (pembayaran: lunas)".
+    if o.get("status") == "pending" and inv.get("status") in ("paid", "partial"):
+        order_lbl = bahasa.teks("menunggu_diproses", lang)
     items = o.get("items") or []
     return bahasa.teks("status_pesanan", lang, nomor=nomor, status=order_lbl,
                        bayar=inv_lbl, jumlah=len(items),

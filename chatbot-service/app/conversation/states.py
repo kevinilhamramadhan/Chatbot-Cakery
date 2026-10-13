@@ -101,6 +101,32 @@ def text_minta_admin(text: str) -> bool:
     return bool(words & _MINTA and words & (_MANUSIA - {"orang"})) and not words & _PENOLAKAN
 
 
+def text_menolak(text: str) -> bool:
+    """Penolakan pendek: "ga usah deh", "nggak jadi", "no thanks"."""
+    words = _tokens(text)
+    return 0 < len(words) <= 4 and bool(set(words) & _PENOLAKAN)
+
+
+_UANG = {"uang", "uangnya", "dana", "dananya", "duit", "duitnya", "refund", "refundnya", "money"}
+_KEMBALI = {"kembali", "balik", "dikembalikan", "dibalikin", "pengembalian", "refund",
+            "refundnya", "back", "returned"}
+_PESANAN = {"pesanan", "pesananku", "pesanannya", "pesenan", "orderan", "orderanku",
+            "order", "kuenya", "kueku"}
+_SIAP = {"siap", "ready", "status", "statusnya", "progres", "progress"}
+
+
+def text_tanya_refund(text: str) -> bool:
+    """"uang saya kapan kembali?" — dijawab dari data pesanan, bukan FAQ."""
+    words = set(_tokens(text))
+    return bool(words & _UANG and words & _KEMBALI)
+
+
+def text_tanya_status_pesanan(text: str) -> bool:
+    """"pesanan saya sudah siap belum?" — terukur dijawab model soal harga."""
+    words = set(_tokens(text))
+    return bool(words & _PESANAN and words & _SIAP) and not mentions_quantity(text)
+
+
 def text_asks_for_human(text: str) -> bool:
     """Minta disambungkan ke orang, dengan kalimat yang terlalu panjang untuk
     aturan konfirmasi pendek.

@@ -636,6 +636,17 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Pembayaran sudah kami terima ✅\nPesananmu akan segera kami proses. Terima kasih! 🎂",
         EN: "We've received your payment ✅\nWe'll start on your order right away. Thank you! 🎂",
     },
+    "menunggu_diproses": {ID: "Menunggu diproses", EN: "Awaiting processing"},
+    "sisa_pelunasan": {
+        ID: "\nSisa pelunasan: *{sisa}*.",
+        EN: "\nRemaining balance: *{sisa}*.",
+    },
+    "refund_menunggu": {
+        ID: ("Pengembalian dana pesanan *{invoice}* sedang diproses tim kami lewat "
+             "transfer, biasanya beberapa hari kerja. {tutup}"),
+        EN: ("The refund for order *{invoice}* is being processed by our team by bank "
+             "transfer, usually within a few working days. {tutup}"),
+    },
     "bayar_diterima": {
         ID: ("Pembayaran sudah kami terima ✅\n"
              "Jumlah: {jumlah}. Pesananmu akan segera kami proses. Terima kasih! 🎂"),

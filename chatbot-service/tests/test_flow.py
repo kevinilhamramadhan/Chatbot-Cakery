@@ -988,3 +988,47 @@ async def test_minta_bicara_dengan_admin_ditawari_dulu(patch_externals):
     assert await store.is_takeover_active(WA) is False       # baru ditawari
     await handle_message(WA, "ya")
     assert await store.is_takeover_active(WA) is True
+
+
+async def test_menolak_tawaran_admin_membatalkan_tawarannya(patch_externals):
+    from app.conversation import orchestrator as orch
+
+    async def model(wa, text):
+        return orch.Reply(text="oke")
+
+    patch_externals["monkeypatch"].setattr(orch, "_run_agent_turn", model)
+    await handle_message(WA, "mau ngobrol sama admin dong")
+    assert (await store.get_or_create_session(WA)).pending_escalation
+    await handle_message(WA, "ga usah deh")
+    assert not (await store.get_or_create_session(WA)).pending_escalation
+
+
+async def test_tanya_refund_dan_status_dijawab_dari_data(patch_externals):
+    async def latest(wa):
+        return {"id": 100, "status": "pending", "invoice": {"status": "paid", "nomor_invoice": "INV-1"},
+                "items": [1], "total_harga_pesanan": 100}
+
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "get_latest_order", latest)
+    order = await store.create_pending_order(
+        wa_number=WA, order_ref="100", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method="pickup", status="paid",
+        nomor_invoice="INV-1", expires_at=dt.datetime.now(dt.timezone.utc),
+    )
+    r = await handle_message(WA, "pesanan saya sudah siap belum?")
+    assert "INV-1" in r.text and "Menunggu diproses" in r.text
+
+    await store.update_pending_order(order.id, status=store.MENUNGGU_TRANSFER)
+    r = await handle_message(WA, "uang saya kapan kembali?")
+    assert "INV-1" in r.text and "transfer" in r.text
+
+
+async def test_kabar_dp_menyebut_sisa_pelunasan(patch_externals):
+    from app.conversation import background
+
+    order = await store.create_pending_order(
+        wa_number=WA, order_ref="100", payment_type="dp", total_amount=190000, amount_due=95000,
+        items_json="[]", customer_json="{}", delivery_method="pickup",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    assert await background.tandai_lunas(order)
+    assert "Rp95.000" in patch_externals["sent"][-1][1] and "Sisa pelunasan" in patch_externals["sent"][-1][1]

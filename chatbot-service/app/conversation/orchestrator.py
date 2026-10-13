@@ -23,7 +23,10 @@ from app.conversation.states import (
     State,
     mentions_quantity,
     text_asks_for_human,
+    text_menolak,
     text_minta_admin,
+    text_tanya_refund,
+    text_tanya_status_pesanan,
     text_asks_recommendation,
     text_is_cancel,
     text_is_confirm,
@@ -263,7 +266,9 @@ async def handle_message(wa_number: str, text: str) -> Reply:
                 wa_number, session.pending_escalation, lang))
             await store.log_message(wa_number, "out", reply.text)
             return reply
-        elif text_is_cancel(text):
+        elif text_is_cancel(text) or text_menolak(text):
+            # "ga usah deh" juga menolak. Tanpa ini tawarannya tetap menggantung
+            # dan pesan berikutnya yang menyebut admin langsung mengalihkan.
             await store.set_pending_escalation(wa_number, None)
 
     # 2b) Kekecewaan susulan sesudah permintaan maaf. Terukur di gladi demo:
@@ -312,6 +317,12 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         # jadi tidak pernah masuk). Model membacanya sebagai keluhan dan
         # meminta maaf panjang lebar; tidak ada apa pun yang perlu dibatalkan.
         reply = Reply(text=bahasa.teks("tidak_jadi_kosong", lang))
+    elif text_tanya_refund(text) and (jawab := await _jawab_refund(wa_number, lang)):
+        reply = Reply(text=jawab)
+    elif text_tanya_status_pesanan(text) and await store.get_active_pending(wa_number):
+        from app.tools.order_status import get_order_status
+
+        reply = Reply(text=await get_order_status.ainvoke({}))
     elif text_minta_admin(text):
         # Prompt melarang model menawarkan admin selain untuk kue custom, jadi
         # "mau ngobrol sama admin" dijawab "aku asisten virtual" dan pelanggan
@@ -326,6 +337,25 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     if reply.text:
         await store.log_message(wa_number, "out", reply.text)
     return reply
+
+
+async def _jawab_refund(wa_number: str, lang: str) -> str | None:
+    """Kabar refund pesanan terakhir, atau None kalau tidak ada yang di-refund
+    (pertanyaannya lalu diteruskan ke model seperti biasa)."""
+    order = await store.pesanan_terakhir(wa_number)
+    if order is None:
+        return None
+    invoice = order.nomor_invoice or f"#{order.order_ref}"
+    if order.status == store.MENUNGGU_TRANSFER:
+        surel = settings.store_support_email.strip()
+        tutup = (bahasa.teks("tutup_refund_email", lang, email=surel) if surel
+                 else bahasa.teks("tutup_refund_umum", lang))
+        return bahasa.teks("refund_menunggu", lang, invoice=invoice, tutup=tutup)
+    if order.status == store.KABAR_TRANSFER_TERTUNDA:
+        return bahasa.teks("refund_ditransfer", lang, invoice=invoice)
+    if order.status == "refunded":
+        return bahasa.teks("sudah_direfund", lang)
+    return None
 
 
 async def _pemilik(wa_number: str) -> bool:
