@@ -35,7 +35,7 @@ async def check_payment_status() -> str:
     if order is None:
         return bahasa.teks("tak_ada_tagihan", lang)
     try:
-        res = await backend.get_payment_status(order.order_ref)
+        res = await backend.get_payment_status(order.order_ref, wa)
     except Exception as exc:  # noqa: BLE001
         logger.warning("payment status check failed for %s: %s", order.order_ref, exc)
         return bahasa.teks("cek_bayar_gagal", lang)

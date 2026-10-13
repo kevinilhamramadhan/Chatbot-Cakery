@@ -106,6 +106,9 @@ uvicorn app.main:app --reload --port 8000   # atau jalankan service-nya
 Service menolak start tanpa `WEBHOOK_TOKEN`, `INTERNAL_API_KEY`, dan
 `WWEBJS_API_KEY`. `BACKEND_SERVICE_API_KEY` harus sama persis dengan
 `SERVICE_API_KEY` backend; kalau beda, semua tool transaksi dijawab 401.
+Backend juga memakai satu kunci per kemampuan (`SERVICE_ORDERS_READ_KEY`,
+`SERVICE_CUSTOMERS_KEY`, dan seterusnya); pasangannya di chatbot adalah
+`BACKEND_*_KEY` di `.env.example`. Kunci yang belum diisi dijawab 403.
 
 Model fine-tune dibuat dari GGUF di Hugging Face:
 

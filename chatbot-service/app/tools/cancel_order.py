@@ -127,7 +127,7 @@ async def proses_pembatalan(wa_number: str) -> str:
     berhasil = False
     mode = ""
     try:
-        await backend.cancel_order(order.order_ref)
+        await backend.cancel_order(order.order_ref, order.wa_number)
         berhasil = True
     except Exception:  # noqa: BLE001 - 409 kalau pesanannya sudah dibayar
         hasil = await backend.refund_order(

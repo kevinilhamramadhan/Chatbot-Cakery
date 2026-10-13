@@ -64,14 +64,14 @@ def patch_externals(monkeypatch):
 
     cancelled = []
 
-    async def f_cancel(order_id):
+    async def f_cancel(order_id, wa=None):
         cancelled.append(str(order_id))
         return {"status": "success"}
 
     async def f_takeover_status(wa):
         return {"nomor_wa": wa, "human_takeover_active": True, "is_expired": False}
 
-    async def f_payment_status(order_id):
+    async def f_payment_status(order_id, wa=None):
         return {"invoice_status": "unpaid", "amount_paid": 0, "amount_due": 0}
 
     async def f_admin():
@@ -284,7 +284,7 @@ async def test_check_payment_status_reports_unpaid(patch_externals):
 async def test_check_payment_status_confirms_when_paid(patch_externals):
     from app.tools.payment_status import check_payment_status
 
-    async def paid(order_id):
+    async def paid(order_id, wa=None):
         return {"invoice_status": "paid", "amount_paid": 100000, "amount_due": 0}
     patch_externals["monkeypatch"].setattr(
         patch_externals["backend"], "get_payment_status", paid)
@@ -614,7 +614,7 @@ async def test_checkout_refuses_an_invoice_with_no_way_to_pay(patch_externals):
         return {"payment_id": 9, "pg_transaction_id": None,
                 "va_number": None, "qris_url": None, "status": "Pending"}
 
-    async def f_cancel(order_id):
+    async def f_cancel(order_id, wa=None):
         cancelled.append(order_id)
         return {"status": "success"}
 
@@ -1091,7 +1091,7 @@ async def test_refund_admin_mengosongkan_pesanan_lokal_dan_mengabari_pelanggan(p
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
     )
 
-    async def f_status(order_ref):
+    async def f_status(order_ref, wa=None):
         return {"invoice_status": "refunded", "amount_paid": 0, "amount_due": 0}
 
     patch_externals["monkeypatch"].setattr(
@@ -1119,7 +1119,7 @@ async def test_tool_status_pembayaran_mengenali_refund(patch_externals):
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
     )
 
-    async def f_status(order_ref):
+    async def f_status(order_ref, wa=None):
         return {"invoice_status": "refunded", "amount_paid": 0, "amount_due": 0}
 
     patch_externals["monkeypatch"].setattr(
@@ -1162,7 +1162,7 @@ async def test_konfirmasi_batal_tanpa_dukungan_backend_tidak_membuntukan(patch_e
     pesanan = await store.get_active_pending(WA)
     await store.update_pending_order(pesanan.id, status="paid")
 
-    async def f_cancel(order_ref):
+    async def f_cancel(order_ref, wa=None):
         raise httpx.HTTPStatusError("409", request=None, response=None)
 
     async def f_refund(order_ref, reason, wa_number=""):
@@ -1193,7 +1193,7 @@ async def test_konfirmasi_batal_berhasil_saat_backend_mengizinkan(patch_external
 
     dipanggil = []
 
-    async def f_cancel(order_ref):
+    async def f_cancel(order_ref, wa=None):
         raise httpx.HTTPStatusError("409", request=None, response=None)
 
     async def f_refund(order_ref, reason, wa_number=""):
@@ -1248,7 +1248,7 @@ async def test_pesanan_belum_dibayar_juga_dikonfirmasi_dulu(patch_externals):
     await _seed_awaiting_payment(order_ref="9105")
     dibatalkan = []
 
-    async def f_cancel(order_ref):
+    async def f_cancel(order_ref, wa=None):
         dibatalkan.append(order_ref)
         return {"status": "success"}
 
@@ -1280,7 +1280,7 @@ async def test_webhook_refund_mengabari_pelanggan_tanpa_menunggu_polling(patch_e
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2),
     )
 
-    async def f_status(order_ref):
+    async def f_status(order_ref, wa=None):
         return {"invoice_status": "refunded", "amount_paid": 0, "amount_due": 0}
 
     patch_externals["monkeypatch"].setattr(
@@ -1310,7 +1310,7 @@ async def test_kabar_refund_gagal_kirim_dicoba_lagi(patch_externals):
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2),
     )
 
-    async def f_status(order_ref):
+    async def f_status(order_ref, wa=None):
         return {"invoice_status": "refunded", "amount_paid": 0, "amount_due": 0}
 
     patch_externals["monkeypatch"].setattr(
@@ -1344,7 +1344,7 @@ async def test_webhook_pembayaran_mengabari_tanpa_menunggu_polling(patch_externa
 
     await _seed_awaiting_payment(order_ref="9201")
 
-    async def f_status(order_ref):
+    async def f_status(order_ref, wa=None):
         return {"invoice_status": "paid", "amount_paid": 100000, "amount_due": 0}
 
     patch_externals["monkeypatch"].setattr(
@@ -1364,7 +1364,7 @@ async def test_webhook_pembayaran_menolak_kalau_backend_bilang_belum_lunas(patch
 
     await _seed_awaiting_payment(order_ref="9202")
 
-    async def f_status(order_ref):
+    async def f_status(order_ref, wa=None):
         return {"invoice_status": "unpaid", "amount_paid": 0, "amount_due": 100000}
 
     patch_externals["monkeypatch"].setattr(
@@ -1387,7 +1387,7 @@ async def test_webhook_refund_ditolak_kalau_backend_bilang_belum_refund(patch_ex
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2),
     )
 
-    async def f_status(order_ref):
+    async def f_status(order_ref, wa=None):
         return {"invoice_status": "paid", "amount_paid": 40000, "amount_due": 40000}
 
     patch_externals["monkeypatch"].setattr(
@@ -1404,7 +1404,7 @@ async def test_refund_va_dikatakan_manual_qris_otomatis(patch_externals):
     butuh beberapa hari kerja karena ada orang yang harus transfer."""
     from app.tools.cancel_order import cancel_order, proses_pembatalan
 
-    async def f_cancel(order_ref):
+    async def f_cancel(order_ref, wa=None):
         raise httpx.HTTPStatusError("409", request=None, response=None)
 
     patch_externals["monkeypatch"].setattr(
@@ -1459,7 +1459,7 @@ async def test_refund_manual_menunggu_transfer_lalu_dikabari_saat_selesai(patch_
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
     )
 
-    async def f_cancel(order_ref):
+    async def f_cancel(order_ref, wa=None):
         raise httpx.HTTPStatusError("409", request=None, response=None)
 
     async def f_refund(order_ref, reason, wa_number=""):

@@ -23,9 +23,15 @@ def _base() -> str:
     return settings.backend_base_url.rstrip("/")
 
 
-def _headers() -> dict:
-    k = settings.backend_service_api_key
+def _headers(kunci: str = "") -> dict:
+    """`kunci`: nama setelan kunci untuk kemampuan yang dipanggil (mis.
+    "backend_orders_read_key"); kosong atau belum diisi = kunci utama."""
+    k = (getattr(settings, kunci, "") if kunci else "") or settings.backend_service_api_key
     return {"X-Service-Key": k} if k else {}
+
+
+def _nomor(wa_number: str) -> str:
+    return canonical_wa_number(wa_number) or (wa_number or "")
 
 
 def _wa_variants(wa_number: str) -> list[str]:
@@ -53,7 +59,7 @@ async def upsert_customer(wa_number: str, nama: str, alamat: str, phone: str) ->
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         r = await c.post(f"{_base()}/customers",
                          json={"nomor_wa": number, "nama": nama, "alamat": alamat},
-                         headers=_headers())
+                         headers=_headers("backend_customers_key"))
         r.raise_for_status()
         d = r.json()
         d["customer_id"] = d.get("id")
@@ -83,7 +89,7 @@ async def create_order(customer_id: int, items: list[dict], metode_pengiriman: s
 
 
 async def create_payment(order_id, amount, channel: str = "bank_transfer",
-                         payment_type: str = "full") -> dict:
+                         payment_type: str = "full", wa_number: str = "") -> dict:
     """Charge via backend -> Midtrans.
 
     channel ('payment_method'): 'bank_transfer' (VA) | 'qris'.
@@ -96,15 +102,20 @@ async def create_payment(order_id, amount, channel: str = "bank_transfer",
                          json={"order_id": int(order_id),
                                "payment_method": channel,
                                "payment_type": payment_type,
-                               "amount": float(amount)},
+                               "amount": float(amount),
+                               # Wajib sejak backend 7e1071e: tanpa pemilik
+                               # pesanan, panggilan layanan dijawab 404.
+                               "nomor_wa": _nomor(wa_number)},
                          headers=_headers())
         r.raise_for_status()
         return r.json()  # {payment_id, pg_transaction_id, va_number, qris_url, status}
 
 
-async def get_payment_status(order_id) -> dict | None:
+async def get_payment_status(order_id, wa_number: str) -> dict | None:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-        r = await c.get(f"{_base()}/payments/{int(order_id)}/status", headers=_headers())
+        r = await c.get(f"{_base()}/payments/{int(order_id)}/status",
+                        params={"nomor_wa": _nomor(wa_number)},
+                        headers=_headers("backend_payment_status_key"))
         if r.status_code == 404:
             return None
         r.raise_for_status()
@@ -115,7 +126,7 @@ async def get_latest_order(wa_number: str) -> dict | None:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         for number in _wa_variants(wa_number):
             r = await c.get(f"{_base()}/orders/latest", params={"nomor_wa": number},
-                            headers=_headers())
+                            headers=_headers("backend_orders_read_key"))
             if r.status_code == 404:
                 continue
             r.raise_for_status()
@@ -123,9 +134,11 @@ async def get_latest_order(wa_number: str) -> dict | None:
     return None
 
 
-async def cancel_order(order_id) -> dict:
+async def cancel_order(order_id, wa_number: str) -> dict:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-        r = await c.post(f"{_base()}/orders/{int(order_id)}/cancel", headers=_headers())
+        r = await c.post(f"{_base()}/orders/{int(order_id)}/cancel",
+                         params={"nomor_wa": _nomor(wa_number)},
+                         headers=_headers("backend_orders_cancel_key"))
         r.raise_for_status()
         return r.json()
 
@@ -145,7 +158,7 @@ async def refund_order(order_id, reason: str, wa_number: str = "") -> dict | Non
     try:
         async with httpx.AsyncClient(timeout=_WRITE_TIMEOUT) as c:
             r = await c.post(f"{_base()}/orders/{int(order_id)}/refund",
-                             json=payload, headers=_headers())
+                             json=payload, headers=_headers("backend_refund_key"))
             if r.status_code >= 400:
                 logger.info("refund ditolak backend (%s): %s",
                             r.status_code, r.text[:200])
@@ -176,7 +189,7 @@ async def get_takeover_status(wa_number: str) -> dict | None:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         for number in _wa_variants(wa_number):
             r = await c.get(f"{_base()}/customers/{_path_number(number)}/takeover",
-                            headers=_headers())
+                            headers=_headers("backend_customers_key"))
             if r.status_code == 404:
                 continue
             r.raise_for_status()
@@ -190,7 +203,7 @@ async def set_takeover(wa_number: str, active: bool, expires_at: str | None) -> 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         for number in _wa_variants(wa_number):
             r = await c.post(f"{_base()}/customers/{_path_number(number)}/takeover",
-                             json=payload, headers=_headers())
+                             json=payload, headers=_headers("backend_customers_key"))
             if r.status_code == 404:
                 last = r
                 continue
@@ -213,7 +226,7 @@ async def get_report_summary(start_date: str, end_date: str) -> dict | None:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
             r = await c.get(f"{_base()}/reports/financial-summary",
                             params={"start_date": start_date, "end_date": end_date},
-                            headers=_headers())
+                            headers=_headers("backend_financial_summary_key"))
             if r.status_code >= 400:
                 return None
             return r.json()
@@ -225,7 +238,8 @@ async def get_takeover_admin_numbers() -> list[str]:
     # C2: GET /admin/takeover-handlers -> {"numbers": [...]}; [] -> caller falls back to env.
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-            r = await c.get(f"{_base()}/admin/takeover-handlers", headers=_headers())
+            r = await c.get(f"{_base()}/admin/takeover-handlers",
+                            headers=_headers("backend_customers_key"))
             if r.status_code >= 400:
                 return []
             return r.json().get("numbers", [])
@@ -247,7 +261,8 @@ async def _takeover_payload() -> dict | list | None:
     """
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-            r = await c.get(f"{_base()}/admin/takeover-handlers", headers=_headers())
+            r = await c.get(f"{_base()}/admin/takeover-handlers",
+                            headers=_headers("backend_customers_key"))
             if r.status_code >= 400:
                 return None
             return r.json()
@@ -275,7 +290,8 @@ async def get_owner_numbers() -> list[str] | None:
     """
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-            r = await c.get(f"{_base()}/users/owner-numbers", headers=_headers())
+            r = await c.get(f"{_base()}/users/owner-numbers",
+                            headers=_headers("backend_owner_numbers_key"))
             if r.status_code >= 400:
                 return None
             data = r.json()
@@ -328,7 +344,7 @@ async def confirm_wa_verification(code: str, phone: str) -> dict:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         r = await c.post(f"{_base()}/auth/verify/wa/confirm",
                          json={"nonce": code, "sender_phone": phone},
-                         headers=_headers())
+                         headers=_headers("backend_wa_verification_key"))
     if r.status_code == 200:
         return {"status": "ok"}
     if r.status_code == 404:      # kode tidak dikenal / kedaluwarsa / sudah dipakai

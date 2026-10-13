@@ -192,13 +192,14 @@ async def finalize_order(wa_number: str) -> str:
     channel = cust.get("channel", "bank_transfer")
     try:
         pay = await backend.create_payment(order_id, amount_due, channel=channel,
+                                           wa_number=wa_number,
                                            payment_type=payment_type)
     except Exception as exc:  # noqa: BLE001
         logger.exception("payment charge failed: %s", exc)
         # Cancel the just-created backend order so a retry doesn't stack
         # duplicate pending orders in the backend DB. Best-effort.
         try:
-            await backend.cancel_order(order_id)
+            await backend.cancel_order(order_id, wa_number)
         except Exception:  # noqa: BLE001
             logger.warning("could not cancel orphaned order %s", order_id)
         return bahasa.teks("tagihan_gagal", lang)
@@ -214,7 +215,7 @@ async def finalize_order(wa_number: str) -> str:
         logger.error("charge for order %s returned no payment instrument: %s",
                      order_id, {k: pay.get(k) for k in ("status", "pg_transaction_id")})
         try:
-            await backend.cancel_order(order_id)
+            await backend.cancel_order(order_id, wa_number)
         except Exception:  # noqa: BLE001
             logger.warning("could not cancel unpayable order %s", order_id)
         return bahasa.teks("tagihan_tanpa_cara_bayar", lang)

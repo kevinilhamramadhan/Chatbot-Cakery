@@ -66,7 +66,7 @@ def patch_externals(monkeypatch):
 
     charges = []
 
-    async def f_create_payment(order_id, amount, channel="bank_transfer", payment_type="full"):
+    async def f_create_payment(order_id, amount, channel="bank_transfer", payment_type="full", wa_number=""):
         charges.append({"order_id": order_id, "amount": amount,
                         "channel": channel, "payment_type": payment_type})
         if channel == "qris":
@@ -75,13 +75,13 @@ def patch_externals(monkeypatch):
         return {"payment_id": 1, "pg_transaction_id": "MID",
                 "va_number": "8808123456789012", "qris_url": None, "status": "Pending"}
 
-    async def f_payment_status(order_id):
+    async def f_payment_status(order_id, wa=None):
         return {"invoice_status": "unpaid", "amount_paid": 0, "amount_due": 0, "payments": []}
 
     async def f_latest(wa):
         return None
 
-    async def f_cancel(order_id):
+    async def f_cancel(order_id, wa=None):
         return {"status": "success"}
 
     async def f_set_takeover(wa, active, expires_at):
@@ -389,7 +389,7 @@ async def test_payment_failure_cancels_backend_order(patch_externals):
     async def boom(order_id, amount, channel="bank_transfer"):
         raise RuntimeError("midtrans down")
 
-    async def f_cancel(order_id):
+    async def f_cancel(order_id, wa=None):
         cancelled.append(order_id)
         return {"status": "success"}
 
@@ -628,7 +628,7 @@ async def test_background_detects_paid(patch_externals):
         items_json="[]", customer_json="{}", delivery_method="pickup", expires_at=future,
     )
 
-    async def paid(order_id):
+    async def paid(order_id, wa=None):
         return {"invoice_status": "paid", "amount_paid": 100, "amount_due": 0}
     patch_externals["monkeypatch"].setattr(patch_externals["backend"], "get_payment_status", paid)
 

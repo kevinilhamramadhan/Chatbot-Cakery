@@ -130,7 +130,7 @@ async def notify_refunded(order_id: int) -> bool:
         # Tanpa ini, satu panggilan keliru cukup untuk memberi tahu pelanggan
         # "dananya dikembalikan" padahal tidak ada yang dikembalikan.
         try:
-            res = await backend.get_payment_status(order.order_ref)
+            res = await backend.get_payment_status(order.order_ref, order.wa_number)
         except Exception as exc:  # noqa: BLE001
             logger.warning("cek status refund %s gagal: %s", order.order_ref, exc)
             return False
@@ -153,7 +153,7 @@ async def _check_refunded() -> None:
     """
     for order in await store.list_orders_by_status("paid", "ready"):
         try:
-            res = await backend.get_payment_status(order.order_ref)
+            res = await backend.get_payment_status(order.order_ref, order.wa_number)
         except Exception as exc:  # noqa: BLE001
             logger.warning("cek status refund gagal untuk %s: %s", order.order_ref, exc)
             continue
@@ -263,7 +263,7 @@ async def _check_once() -> None:
             # customer had already been told it was cancelled.
             cancelled = True
             try:
-                await backend.cancel_order(order.order_ref)
+                await backend.cancel_order(order.order_ref, order.wa_number)
             except Exception as exc:  # noqa: BLE001
                 cancelled = False
                 logger.warning("could not cancel expired order %s upstream: %s",
@@ -283,7 +283,7 @@ async def _check_once() -> None:
 
         # 2) Poll backend payment status (invoice: unpaid|partial|paid|refunded).
         try:
-            res = await backend.get_payment_status(order.order_ref)
+            res = await backend.get_payment_status(order.order_ref, order.wa_number)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Payment status check failed for %s: %s", order.order_ref, exc)
             continue
@@ -333,7 +333,7 @@ async def notify_paid(order_id: int) -> bool:
         if str(order.order_ref) != str(order_id):
             continue
         try:
-            res = await backend.get_payment_status(order.order_ref)
+            res = await backend.get_payment_status(order.order_ref, order.wa_number)
         except Exception as exc:  # noqa: BLE001
             logger.warning("cek pembayaran %s gagal: %s", order.order_ref, exc)
             return False

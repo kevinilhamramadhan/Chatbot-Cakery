@@ -46,6 +46,18 @@ class Settings(BaseSettings):
     # Sent as X-Service-Key on every backend call. Must match the backend's
     # SERVICE_API_KEY (require_service_key dependency). Harmless on public GETs.
     backend_service_api_key: str = ""
+    # Backend 7e1071e memecah kunci layanan: satu kunci per kemampuan, dan
+    # SERVICE_API_KEY tinggal berlaku untuk membuat pesanan dan tagihan. Tiap
+    # nilai di bawah harus sama dengan SERVICE_*_KEY pasangannya di backend.
+    # Kosong = pakai backend_service_api_key (backend lama, satu kunci).
+    backend_orders_read_key: str = ""
+    backend_orders_cancel_key: str = ""
+    backend_customers_key: str = ""
+    backend_refund_key: str = ""
+    backend_payment_status_key: str = ""
+    backend_financial_summary_key: str = ""
+    backend_owner_numbers_key: str = ""
+    backend_wa_verification_key: str = ""
 
     # ── Ollama (LLM + embeddings) ─────────────────────────────────────────────
     ollama_base_url: str = "http://localhost:11434"
