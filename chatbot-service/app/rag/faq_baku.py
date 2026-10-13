@@ -95,7 +95,8 @@ def _cos(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
-def pilih(kandidat: list[dict], balasan_model: str, lang: str) -> tuple[str, str] | None:
+def pilih(kandidat: list[dict], balasan_model: str, lang: str,
+          pesan_inggris: bool = False) -> tuple[str, str] | None:
     """(jawaban baku, alasan) atau None = biarkan balasan model.
 
     Fungsi biasa (bukan async): dipanggil lewat asyncio.to_thread karena
@@ -105,7 +106,10 @@ def pilih(kandidat: list[dict], balasan_model: str, lang: str) -> tuple[str, str
         return None
     atas = kandidat[0]
     jarak = atas["skor"] - kandidat[1]["skor"] if len(kandidat) > 1 else 1.0
-    en = bahasa.normalkan(lang) == bahasa.EN
+    # Ambang Inggris hanya untuk PESAN yang memang berbahasa Inggris, bukan
+    # untuk sesi Inggris: "selamat malam" di sesi Inggris sempat lolos ambang
+    # rendah itu dan dijawab FAQ cara memesan.
+    en = pesan_inggris and bahasa.normalkan(lang) == bahasa.EN
     if (atas["skor"] >= (SKOR_YAKIN_EN if en else SKOR_YAKIN)
             and jarak >= (JARAK_YAKIN_EN if en else JARAK_YAKIN)):
         teks = jawaban_untuk(atas, lang)

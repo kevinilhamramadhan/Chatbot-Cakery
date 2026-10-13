@@ -231,7 +231,8 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
 
             try:
                 baku = await asyncio.to_thread(
-                    faq_baku.pilih, getattr(retrieval, "kandidat", []), answer, lang)
+                    faq_baku.pilih, getattr(retrieval, "kandidat", []), answer, lang,
+                    bahasa.deteksi(user_text) == bahasa.EN)
             except Exception as exc:  # noqa: BLE001 - jangan menjatuhkan giliran
                 logger.warning("pemilihan jawaban FAQ baku gagal: %s", exc)
                 baku = None

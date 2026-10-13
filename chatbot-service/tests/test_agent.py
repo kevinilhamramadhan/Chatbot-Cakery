@@ -206,5 +206,6 @@ def test_faq_baku_inggris_memakai_ambang_sendiri(monkeypatch):
 
     monkeypatch.setattr(faq_baku, "jawaban_untuk", lambda faq, lang: "TEKS BAKU")
     kandidat = [{"skor": 0.58, "pertanyaan": "Jam berapa Toti Cakery buka?", "jawaban": "x"}]
-    assert faq_baku.pilih(kandidat, "", "en") == ("TEKS BAKU", "skor")
+    assert faq_baku.pilih(kandidat, "", "en", True) == ("TEKS BAKU", "skor")
+    assert faq_baku.pilih(kandidat, "", "en") is None      # pesan Indonesia di sesi Inggris
     assert faq_baku.pilih(kandidat, "", "id") is None

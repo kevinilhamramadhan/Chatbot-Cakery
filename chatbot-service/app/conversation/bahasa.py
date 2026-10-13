@@ -46,6 +46,15 @@ _KATA_ID = {
     "tidak", "belum", "sudah", "udah", "ya", "iya", "pesan", "pesanan", "kue",
     "harga", "bayar", "kirim", "antar", "ambil", "batal", "halo", "hai",
     "juga", "aja", "saja", "dong", "deh", "nih", "sih", "lagi", "masih",
+    # Ditambah 13 Okt 2026: "toko buka sampai jam berapa?" dan "selamat malam"
+    # tidak dikenali, jadi sesi yang sempat berbahasa Inggris tetap dijawab
+    # Inggris. Hanya kata yang tidak punya arti lain dalam bahasa Inggris.
+    "buka", "tutup", "toko", "tokonya", "selamat", "pagi", "siang", "malam",
+    "lihat", "menunya", "harganya", "kuenya", "alamat", "alamatnya", "banget",
+    "enak", "sampai", "besok", "lusa", "dikirim", "diambil", "jual", "kalau",
+    "buat", "jadi", "rasa", "punya", "mana", "sekarang", "nanti", "tanya",
+    "minta", "kurang", "tambah", "hapus", "totalnya", "pesen", "mesen", "dulu",
+    "banyak", "terimakasih", "yg", "brp", "sdh", "tdk", "gk",
 }
 
 _PUNCT = re.compile(r"[^\w\s]+", re.UNICODE)
