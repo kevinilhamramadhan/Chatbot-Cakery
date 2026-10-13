@@ -740,6 +740,20 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Report figures always come from our system, so I can't state them myself. "
              "Please ask again and I'll pull the real data 🙏"),
     },
+    "laporan_khusus_owner": {
+        ID: ("Maaf, laporan penjualan dan keuangan hanya bisa diminta oleh pemilik toko 🙏 "
+             "Kalau soal menu, pesanan, atau pembayaran, aku siap bantu."),
+        EN: ("Sorry, sales and financial reports are only available to the store owner 🙏 "
+             "I'm happy to help with the menu, orders, or payments."),
+    },
+    "sisa_pelunasan_pesanan": {
+        ID: "Untuk pesanan *{invoice}*: sudah dibayar {dibayar}, sisa pelunasan *{sisa}*.",
+        EN: "For order *{invoice}*: {dibayar} paid, remaining balance *{sisa}*.",
+    },
+    "pesanan_sudah_lunas": {
+        ID: "Pesanan *{invoice}* sudah lunas ✅ Tidak ada sisa yang perlu dibayar.",
+        EN: "Order *{invoice}* is paid in full ✅ Nothing left to pay.",
+    },
     "ulangi_maksud": {
         ID: ("Boleh diulang maksudnya kak? Aku bisa bantu soal menu, pemesanan, "
              "pembayaran, dan status pesanan 😊"),

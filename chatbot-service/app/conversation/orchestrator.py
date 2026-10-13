@@ -25,7 +25,9 @@ from app.conversation.states import (
     text_asks_for_human,
     text_menolak,
     text_minta_admin,
+    text_minta_laporan,
     text_tanya_refund,
+    text_tanya_sisa,
     text_tanya_status_pesanan,
     text_asks_recommendation,
     text_is_cancel,
@@ -317,6 +319,10 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         # jadi tidak pernah masuk). Model membacanya sebagai keluhan dan
         # meminta maaf panjang lebar; tidak ada apa pun yang perlu dibatalkan.
         reply = Reply(text=bahasa.teks("tidak_jadi_kosong", lang))
+    elif text_minta_laporan(text) and not await _pemilik(wa_number):
+        reply = Reply(text=bahasa.teks("laporan_khusus_owner", lang))
+    elif text_tanya_sisa(text) and (jawab := await _jawab_sisa(wa_number, lang)):
+        reply = Reply(text=jawab)
     elif text_tanya_refund(text) and (jawab := await _jawab_refund(wa_number, lang)):
         reply = Reply(text=jawab)
     elif text_tanya_status_pesanan(text) and await store.get_active_pending(wa_number):
@@ -337,6 +343,27 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     if reply.text:
         await store.log_message(wa_number, "out", reply.text)
     return reply
+
+
+async def _jawab_sisa(wa_number: str, lang: str) -> str | None:
+    """Sisa pelunasan pesanan aktif menurut backend; None = biarkan model."""
+    order = await store.get_active_pending(wa_number)
+    if order is None or order.status == "pending":
+        return None
+    try:
+        res = await backend.get_payment_status(order.order_ref, wa_number)
+    except Exception:  # noqa: BLE001
+        return None
+    if not res:
+        return None
+    from app.tools.formatting import rupiah
+
+    invoice = order.nomor_invoice or f"#{order.order_ref}"
+    sisa = res.get("amount_due") or 0
+    if sisa <= 0:
+        return bahasa.teks("pesanan_sudah_lunas", lang, invoice=invoice)
+    return bahasa.teks("sisa_pelunasan_pesanan", lang, invoice=invoice,
+                       dibayar=rupiah(res.get("amount_paid") or 0), sisa=rupiah(sisa))
 
 
 async def _jawab_refund(wa_number: str, lang: str) -> str | None:
@@ -572,6 +599,10 @@ async def _handle_confirmation(wa_number: str, text: str, lang: str) -> Reply:
     reply = await _run_agent_turn(wa_number, text)
     if (await store.get_or_create_session(wa_number)).state == State.AWAITING_CART_CONFIRMATION:
         body = (reply.text or "").strip()
+        # Ringkasan keranjang sudah ditutup dengan ajakan yang sama; ditempel
+        # lagi, pelanggan membaca "ketik sudah sesuai" dua kali berturut-turut.
+        if "*sudah sesuai*" in body or "*confirm*" in body:
+            return reply
         reask = bahasa.teks("ulangi_konfirmasi_keranjang", lang)
         return Reply(text=f"{body}\n\n{reask}" if body else reask, media=reply.media)
     return reply

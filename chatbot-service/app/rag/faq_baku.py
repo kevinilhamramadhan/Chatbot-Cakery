@@ -47,6 +47,15 @@ logger = logging.getLogger(__name__)
 # Skor kemiripan pertanyaan (dengan instruksi, lihat embeddings.py).
 SKOR_YAKIN = 0.60
 JARAK_YAKIN = 0.05
+# Pertanyaan berbahasa Inggris dicocokkan ke pertanyaan FAQ berbahasa Indonesia,
+# jadi skornya lebih rendah untuk FAQ yang sama benarnya ("what time do you
+# open?" = 0,58) dan sesi Inggris hampir selalu jatuh ke tulisan model yang
+# janggal. Diukur di server produksi 13 Okt 2026 pada 43 pertanyaan Inggris (35
+# FAQ, 8 di luar FAQ): ambang 0,60/0,05 memberi teks baku ke 10 pertanyaan,
+# 0,50/0,08 ke 24, dua-duanya tanpa satu pun FAQ keliru. Dipakai 0,52 supaya
+# ada jarak dari "can I pay with bitcoin" (0,49).
+SKOR_YAKIN_EN = 0.52
+JARAK_YAKIN_EN = 0.08
 # Kemiripan balasan model dengan jawaban FAQ supaya dianggap "model memilih ini".
 MIRIP_BALASAN = 0.75
 
@@ -92,7 +101,9 @@ def pilih(kandidat: list[dict], balasan_model: str, lang: str) -> tuple[str, str
         return None
     atas = kandidat[0]
     jarak = atas["skor"] - kandidat[1]["skor"] if len(kandidat) > 1 else 1.0
-    if atas["skor"] >= SKOR_YAKIN and jarak >= JARAK_YAKIN:
+    en = bahasa.normalkan(lang) == bahasa.EN
+    if (atas["skor"] >= (SKOR_YAKIN_EN if en else SKOR_YAKIN)
+            and jarak >= (JARAK_YAKIN_EN if en else JARAK_YAKIN)):
         teks = jawaban_untuk(atas, lang)
         return (teks, "skor") if teks else None
 

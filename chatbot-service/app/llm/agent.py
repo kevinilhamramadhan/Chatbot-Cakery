@@ -262,7 +262,10 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         # and the internal tool names are not something a customer should read.
         if answer and _REPORT_RE.search(answer):
             logger.warning("Ungrounded report in a tool-less reply — dropping it")
-            return bahasa.teks("laporan_dari_sistem", lang)
+            # "Coba minta lagi ya" hanya benar untuk Owner; pelanggan biasa
+            # tidak punya tool laporan, jadi mengulang tidak akan berhasil.
+            return bahasa.teks("laporan_dari_sistem" if NAMA_TOOL_OWNER & diizinkan
+                               else "laporan_khusus_owner", lang)
         if answer and "(dipotong)" in answer:
             # Model menyalin potongan riwayatnya sendiri, lengkap dengan penanda
             # dari _history_view: "Batas waktu pembayaran …(dipotong)".

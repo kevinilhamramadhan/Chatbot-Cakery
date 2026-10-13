@@ -115,6 +115,27 @@ _PESANAN = {"pesanan", "pesananku", "pesanannya", "pesenan", "orderan", "orderan
 _SIAP = {"siap", "ready", "status", "statusnya", "progres", "progress"}
 
 
+_SISA = {"sisa", "sisanya", "pelunasan", "dilunasi", "lunasi", "melunasi", "kekurangan",
+         "kurangnya", "remaining", "balance"}
+_LAPORAN = {"omzet", "omset", "keuangan", "analitik", "revenue"}
+_LAPORAN_APA = {"penjualan", "pendapatan", "bulan", "bulanan", "minggu", "mingguan", "harian",
+                "sales", "financial", "monthly", "weekly"}
+
+
+def text_tanya_sisa(text: str) -> bool:
+    """"sisa yang harus dilunasi berapa?" — dijawab dari data pembayaran."""
+    # Hanya pertanyaan JUMLAH. "sisanya dibayar gimana?" adalah pertanyaan
+    # cara, dan itu sudah ada di FAQ.
+    words = set(_tokens(text))
+    return bool(words & _SISA and words & {"berapa", "brp", "much", "nominal", "jumlahnya"})
+
+
+def text_minta_laporan(text: str) -> bool:
+    # "laporan" saja tidak cukup: "mau laporan kue saya rusak" adalah keluhan.
+    words = set(_tokens(text))
+    return bool(words & _LAPORAN or (words & {"laporan", "report"} and words & _LAPORAN_APA))
+
+
 def text_tanya_refund(text: str) -> bool:
     """"uang saya kapan kembali?" — dijawab dari data pesanan, bukan FAQ."""
     words = set(_tokens(text))

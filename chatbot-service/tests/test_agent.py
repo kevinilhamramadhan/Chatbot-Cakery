@@ -198,3 +198,13 @@ async def test_faq_yang_menyebut_admin_ikut_menawarkan_sambungan(monkeypatch):
     assert dicatat == ["mau pesen kue custom dong"]
     assert await agent_mod.run_agent(WA, "jam buka?", history=[]) == "09.00-19.00"
     assert len(dicatat) == 1
+
+
+def test_faq_baku_inggris_memakai_ambang_sendiri(monkeypatch):
+    """Sesi Inggris: skor 0,58 sudah cukup; sesi Indonesia tetap butuh 0,60."""
+    from app.rag import faq_baku
+
+    monkeypatch.setattr(faq_baku, "jawaban_untuk", lambda faq, lang: "TEKS BAKU")
+    kandidat = [{"skor": 0.58, "pertanyaan": "Jam berapa Toti Cakery buka?", "jawaban": "x"}]
+    assert faq_baku.pilih(kandidat, "", "en") == ("TEKS BAKU", "skor")
+    assert faq_baku.pilih(kandidat, "", "id") is None

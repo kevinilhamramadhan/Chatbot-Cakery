@@ -1038,3 +1038,38 @@ async def test_kabar_dp_menyebut_sisa_pelunasan(patch_externals):
     )
     assert await background.tandai_lunas(order)
     assert "Rp95.000" in patch_externals["sent"][-1][1] and "Sisa pelunasan" in patch_externals["sent"][-1][1]
+
+
+async def test_cacat_kecil_uat(patch_externals):
+    from app.conversation.states import text_minta_laporan
+
+    assert text_minta_laporan("laporan penjualan bulan ini dong")
+    assert not text_minta_laporan("mau laporan kue saya rusak")
+    # Bukan Owner: ditolak terus terang, bukan "coba minta lagi ya".
+    r = await handle_message(WA, "laporan keuangan bulan ini")
+    assert "pemilik toko" in r.text
+
+    async def bayar(order_id, wa=None):
+        return {"invoice_status": "partial", "amount_paid": 95000, "amount_due": 95000}
+
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "get_payment_status", bayar)
+    await store.create_pending_order(
+        wa_number=WA, order_ref="100", payment_type="dp", total_amount=190000, amount_due=95000,
+        items_json="[]", customer_json="{}", delivery_method="pickup", status="paid",
+        nomor_invoice="INV-1", expires_at=dt.datetime.now(dt.timezone.utc),
+    )
+    r = await handle_message(WA, "sisa yang harus dilunasi berapa?")
+    assert "INV-1" in r.text and "Rp95.000" in r.text
+
+
+async def test_ajakan_konfirmasi_keranjang_tidak_dobel(patch_externals):
+    from app.conversation import orchestrator as orch
+
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 2}])
+
+    async def model(wa, text):
+        return orch.Reply(text="Ringkasan...\n\nKetik *sudah sesuai* untuk lanjut ya")
+
+    patch_externals["monkeypatch"].setattr(orch, "_run_agent_turn", model)
+    r = await handle_message(WA, "tambah bolu pandan 1")
+    assert r.text.count("*sudah sesuai*") == 1
