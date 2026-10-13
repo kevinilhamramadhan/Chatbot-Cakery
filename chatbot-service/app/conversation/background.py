@@ -162,7 +162,7 @@ async def _check_refunded() -> None:
         await tutup_karena_refund(order)
 
 
-_STATUS_TUTUP = {"delivered", "picked_up", "cancelled", "refunded",
+_STATUS_TUTUP = {"delivered", "picked_up", "completed", "cancelled", "refunded",
                  "cancelled_settlement_expired"}
 
 
