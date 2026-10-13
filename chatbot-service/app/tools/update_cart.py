@@ -26,7 +26,10 @@ _KATA = re.compile(r"[a-z0-9]+")
 def _cocok_di_keranjang(nama: str, cart: list[dict]) -> tuple[dict | None, list[dict]]:
     """(item, []) kalau satu item paling cocok; (None, [a, b]) kalau seri;
     (None, []) kalau tidak ada yang cocok."""
-    q = set(_KATA.findall(nama.lower()))
+    # "browniesnya" = "brownies" + akhiran; tanpa ini kata itu tidak cocok ke
+    # item mana pun dan perubahan jumlahnya ditolak.
+    q = {k[:-3] if k.endswith("nya") and len(k) > 5 else k
+         for k in _KATA.findall(nama.lower())}
     if not q:
         return None, []
     skor = [(len(q & set(_KATA.findall(str(it["nama"]).lower()))), it) for it in cart]

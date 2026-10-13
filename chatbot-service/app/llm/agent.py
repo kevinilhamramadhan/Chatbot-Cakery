@@ -263,6 +263,11 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         if answer and _REPORT_RE.search(answer):
             logger.warning("Ungrounded report in a tool-less reply — dropping it")
             return bahasa.teks("laporan_dari_sistem", lang)
+        if answer and "(dipotong)" in answer:
+            # Model menyalin potongan riwayatnya sendiri, lengkap dengan penanda
+            # dari _history_view: "Batas waktu pembayaran …(dipotong)".
+            logger.warning("Reply echoed a truncated history line — dropping it")
+            return bahasa.teks("ulangi_maksud", lang)
         if answer and _TOOLNAME_RE.search(answer):
             logger.warning("Reply mentioned an internal tool name — dropping it")
             return bahasa.teks("ulangi_maksud", lang)

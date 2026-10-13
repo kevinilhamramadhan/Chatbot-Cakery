@@ -54,3 +54,15 @@ async def test_pelanggan_tidak_bisa_mengakhiri_takeover_orang_lain(direktori):
 async def test_pesan_biasa_tidak_dianggap_perintah(direktori):
     assert await escalation.perintah_selesai(ADMIN_WA, "pesanan sudah selesai?") is None
     assert await escalation.perintah_selesai(ADMIN_WA, "selesai") is None
+
+
+@pytest.mark.asyncio
+async def test_sesi_berkunci_c_us_ikut_dilepas(direktori):
+    """Sesi dari webhook berkunci "62…@c.us"; admin dulu dijawab "memang tidak
+    sedang ditangani" padahal takeover-nya menyala."""
+    await store.activate_takeover(f"{PELANGGAN_WA}@c.us")
+
+    balasan = await escalation.perintah_selesai(ADMIN_WA, f"selesai {PELANGGAN_WA}")
+
+    assert "dilepas" in balasan
+    assert not await store.is_takeover_active(f"{PELANGGAN_WA}@c.us")

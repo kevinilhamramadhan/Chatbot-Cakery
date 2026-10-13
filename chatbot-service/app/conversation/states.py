@@ -87,6 +87,20 @@ _PENOLAKAN = {"ga", "gak", "nggak", "enggak", "gausah", "tidak", "tak", "jangan"
               "no", "not", "dont"}
 
 
+_MINTA = {"ngobrol", "bicara", "ngomong", "chat", "hubungi", "hubungkan", "sambungkan",
+          "sambungin", "minta", "panggil", "panggilkan", "talk", "speak", "connect"}
+
+
+def text_minta_admin(text: str) -> bool:
+    """Permintaan terang-terangan untuk dilayani orang: "mau ngobrol sama admin".
+
+    Butuh kata kerja meminta DAN sebutan orangnya. "orang" sengaja tidak ikut
+    ("kue untuk 20 orang, minta rekomendasi" bukan permintaan ini).
+    """
+    words = set(_tokens(text))
+    return bool(words & _MINTA and words & (_MANUSIA - {"orang"})) and not words & _PENOLAKAN
+
+
 def text_asks_for_human(text: str) -> bool:
     """Minta disambungkan ke orang, dengan kalimat yang terlalu panjang untuk
     aturan konfirmasi pendek.

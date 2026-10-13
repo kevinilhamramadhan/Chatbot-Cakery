@@ -926,3 +926,65 @@ async def test_kata_batal_saat_menunggu_bayar_tidak_lewat_model(monkeypatch):
     r = await handle_message(WA, "cancel")
     assert (await store.get_or_create_session(WA)).state == State.AWAITING_CANCEL_CONFIRMATION
     assert "ya" in r.text.lower()
+
+
+# ── Uji UAT 13 Okt 2026 ───────────────────────────────────────────────────────
+async def test_pesanan_kedua_menanyakan_data_lagi():
+    """Pesanan kedua dari nomor yang sama langsung terbit memakai nama, tanggal,
+    dan kanal pesanan pertama tanpa satu pertanyaan pun."""
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    for pesan in ("sudah sesuai", "Budi Santoso", "Jl. Mawar No. 10, Batam", "pickup",
+                  "lusa", "penuh", "va"):
+        await handle_message(WA, pesan)
+    pertama = await store.get_active_pending(WA)
+    assert pertama is not None and await store.get_customer(WA) == {}
+
+    await store.update_pending_order(pertama.id, status="cancelled")
+    await _seed_cart_awaiting_confirmation([{"product": "Bolu Pandan", "qty": 1}])
+    await handle_message(WA, "sudah sesuai")
+    assert (await store.get_or_create_session(WA)).state == State.COLLECTING_IDENTITY
+    assert await store.get_active_pending(WA) is None
+
+
+async def test_pesanan_yang_sudah_diserahkan_dilepas(patch_externals):
+    """Baris "ready" tidak pernah ditutup, jadi pelanggan yang pernah membeli
+    ditolak memesan lagi selamanya."""
+    from app.conversation import background
+
+    await store.create_pending_order(
+        wa_number=WA, order_ref="100", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method="pickup", status="ready",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    status = {"status": "ready"}
+
+    async def latest(wa):
+        return {"id": 100, **status}
+
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "get_latest_order", latest)
+    await background._lepas_pesanan_selesai()
+    assert await store.get_active_pending(WA) is not None    # belum diserahkan
+
+    status["status"] = "picked_up"
+    await background._lepas_pesanan_selesai()
+    assert await store.get_active_pending(WA) is None
+
+
+async def test_ubah_jumlah_dengan_akhiran_nya():
+    from app.tools.update_cart import _cocok_di_keranjang
+
+    cart = [{"nama": "Brownies Fudgy Almond"}, {"nama": "Lapis Legit Premium"}]
+    assert _cocok_di_keranjang("browniesnya", cart)[0] is cart[0]
+    assert _cocok_di_keranjang("lapis legitnya", cart)[0] is cart[1]
+
+
+async def test_minta_bicara_dengan_admin_ditawari_dulu(patch_externals):
+    from app.conversation.states import text_minta_admin
+
+    assert not text_minta_admin("kue untuk 20 orang, minta rekomendasi")
+    assert not text_minta_admin("ga usah hubungi admin")
+    reply = await handle_message(WA, "mau ngobrol sama admin dong")
+    assert "admin" in reply.text.lower()
+    assert await store.is_takeover_active(WA) is False       # baru ditawari
+    await handle_message(WA, "ya")
+    assert await store.is_takeover_active(WA) is True

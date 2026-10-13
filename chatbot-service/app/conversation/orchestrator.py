@@ -23,6 +23,7 @@ from app.conversation.states import (
     State,
     mentions_quantity,
     text_asks_for_human,
+    text_minta_admin,
     text_asks_recommendation,
     text_is_cancel,
     text_is_confirm,
@@ -311,6 +312,12 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         # jadi tidak pernah masuk). Model membacanya sebagai keluhan dan
         # meminta maaf panjang lebar; tidak ada apa pun yang perlu dibatalkan.
         reply = Reply(text=bahasa.teks("tidak_jadi_kosong", lang))
+    elif text_minta_admin(text):
+        # Prompt melarang model menawarkan admin selain untuk kue custom, jadi
+        # "mau ngobrol sama admin" dijawab "aku asisten virtual" dan pelanggan
+        # buntu. Sama seperti kue custom: ditawari dulu, takeover menunggu "ya".
+        await store.set_pending_escalation(wa_number, text)
+        reply = Reply(text=escalation.teks_tawaran(lang))
     else:
         # IDLE / AWAITING_PAYMENT / ORDER_ACTIVE -> LLM agent (with tools).
         reply = await _run_agent_turn(wa_number, text)

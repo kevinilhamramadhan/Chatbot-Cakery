@@ -122,8 +122,12 @@ async def perintah_selesai(pengirim: str, text: str) -> str | None:
     if not nomor:
         return "Nomornya tidak terbaca. Tulis: selesai 6281234567890"
 
-    aktif = await store.is_takeover_active(nomor)
-    await store.deactivate_takeover(nomor)
+    # Sesi dari webhook berkunci "62…@c.us", sedangkan nomor yang diketik admin
+    # polos. Dicari dua-duanya: dengan kunci polos saja takeover-nya memang
+    # padam lewat backend, tapi admin dijawab "memang tidak sedang ditangani".
+    aktif = await store.sesi_takeover_aktif(nomor)
+    for kunci in aktif:
+        await store.deactivate_takeover(kunci)
     try:
         await backend.set_takeover(nomor, False, None)
     except Exception as exc:  # noqa: BLE001 - salinan lokal sudah dimatikan

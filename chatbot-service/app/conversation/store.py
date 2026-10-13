@@ -129,6 +129,17 @@ async def deactivate_takeover(wa_number: str) -> None:
     )
 
 
+async def sesi_takeover_aktif(nomor: str) -> list[str]:
+    """Kunci sesi (`62…` maupun `62…@c.us`) yang takeover-nya sedang menyala."""
+    async with async_session_factory() as db:
+        return list(await db.scalars(
+            select(ChatSession.wa_number).where(
+                ChatSession.wa_number.in_((nomor, f"{nomor}@c.us")),
+                ChatSession.human_takeover_active.is_(True),
+            )
+        ))
+
+
 async def is_takeover_active(wa_number: str) -> bool:
     row = await get_or_create_session(wa_number)
     if not row.human_takeover_active:

@@ -246,6 +246,12 @@ async def finalize_order(wa_number: str) -> str:
         expires_at=expires_at,
     )
     await store.set_cart(wa_number, [])
+    # Data pemesan sudah dipotret ke customer_json di atas. Kalau dibiarkan di
+    # sesi, pesanan BERIKUTNYA dari nomor ini melompati semua pertanyaan
+    # (nama, alamat, tanggal, cara bayar) dan langsung terbit dengan isian lama
+    # — terukur 13 Okt 2026: pesanan kedua memakai tanggal dan kanal pesanan
+    # pertama tanpa ditanya.
+    await store.set_customer(wa_number, {})
     await store.set_state(wa_number, State.AWAITING_PAYMENT)
 
     if not va and qris:

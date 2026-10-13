@@ -162,6 +162,37 @@ async def _check_refunded() -> None:
         await tutup_karena_refund(order)
 
 
+_STATUS_TUTUP = {"delivered", "picked_up", "cancelled", "refunded",
+                 "cancelled_settlement_expired"}
+
+
+async def _lepas_pesanan_selesai() -> None:
+    """Pesanan lunas/siap yang di backend sudah diserahkan berhenti dihitung aktif.
+
+    Tanpa ini baris lokalnya "paid"/"ready" selamanya, dan karena satu nomor
+    hanya boleh punya satu pesanan aktif, pelanggan yang pernah membeli ditolak
+    memesan lagi lewat WhatsApp ("kamu masih punya pesanan yang sedang
+    diproses") — terukur 13 Okt 2026.
+    """
+    for order in await store.list_orders_by_status("paid", "ready"):
+        try:
+            terbaru = await backend.get_latest_order(order.wa_number)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cek status pesanan gagal untuk %s: %s", order.order_ref, exc)
+            continue
+        # ponytail: backend hanya memberi pesanan TERBARU per nomor. Kalau
+        # pelanggan memesan lagi lewat website, baris ini tidak terlepas sampai
+        # ada endpoint status per id untuk service key.
+        if not terbaru or str(terbaru.get("id")) != str(order.order_ref):
+            continue
+        if terbaru.get("status") not in _STATUS_TUTUP:
+            continue
+        await store.update_pending_order(order.id, status="selesai")
+        await store.set_state(order.wa_number, State.IDLE)
+        logger.info("Pesanan %s sudah %s di backend — dilepas", order.order_ref,
+                    terbaru.get("status"))
+
+
 async def _kabari_transfer_tertunda() -> None:
     """Ulangi kabar "dana sudah ditransfer" yang tadi gagal terkirim.
 
@@ -219,6 +250,7 @@ async def _pastikan_sesi_wa() -> None:
 async def _check_once() -> None:
     await _pastikan_sesi_wa()
     await _check_refunded()
+    await _lepas_pesanan_selesai()
     await _kabari_transfer_tertunda()
     pending = await store.list_orders_by_status("pending")
     now = datetime.now(timezone.utc)
