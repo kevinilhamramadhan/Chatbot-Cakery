@@ -5,7 +5,8 @@
 #
 #   pull request  → tes + build (tanpa push), memastikan Dockerfile tetap sehat
 #   push ke main  → tambah push tag :main, :sha-<commit>, dan :latest
-#                   (:latest yang ditarik WUD di server — lihat repo Deploy-Toti-Cakery)
+#                   lalu memicu deploy :latest ke server (workflow deploy.yml di
+#                   repo Deploy-Toti-Cakery, jalan di runner server itu)
 #   tag v*        → tambah push tag semver (:1.2.3, :1.2)
 name: CI
 
@@ -167,3 +168,14 @@ jobs:
               docker push "$tag"
             fi
           done
+
+      # Image :latest sudah di GHCR. Minta server produksi menariknya: workflow
+      # deploy ada di repo Deploy-Toti-Cakery dan jalan di runner server itu.
+      - name: Picu deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: >-
+          gh api -X POST
+          repos/kevinilhamramadhan/Deploy-Toti-Cakery/actions/workflows/deploy.yml/dispatches
+          -f ref=main -f 'inputs[service]=chatbot-service'
