@@ -1073,3 +1073,27 @@ async def test_ajakan_konfirmasi_keranjang_tidak_dobel(patch_externals):
     patch_externals["monkeypatch"].setattr(orch, "_run_agent_turn", model)
     r = await handle_message(WA, "tambah bolu pandan 1")
     assert r.text.count("*sudah sesuai*") == 1
+
+
+async def test_sapuan_13_okt(patch_externals, monkeypatch):
+    from app.conversation import orchestrator as orch
+    from app.conversation.states import text_asks_recommendation, text_menawar
+
+    async def model_tidak_boleh_dipanggil(wa, text):
+        raise AssertionError(f"model dipanggil untuk: {text}")
+
+    monkeypatch.setattr(orch, "_run_agent_turn", model_tidak_boleh_dipanggil)
+    monkeypatch.setattr(orch.settings, "store_address", "Jalan Batam")
+    assert text_asks_recommendation("yang murah yang mana?")
+    assert text_menawar("bisa kurang ga harganya?") and not text_menawar("gulanya kurang ga?")
+    assert "catatanku" in (await handle_message(WA, "ada diskon?")).text
+    assert "Jalan Batam" in (await handle_message(WA, "alamat tokonya dimana?")).text
+    assert "Sama-sama" in (await handle_message(WA, "makasih ya")).text
+
+    await store.create_pending_order(
+        wa_number=WA, order_ref="100", payment_type="dp", total_amount=190000, amount_due=95000,
+        items_json="[]", customer_json="{}", delivery_method="pickup", nomor_invoice="INV-1",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    r = await handle_message(WA, "sisa yang harus dilunasi berapa?")
+    assert "belum dibayar" in r.text and "Rp95.000" in r.text

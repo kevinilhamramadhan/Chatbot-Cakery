@@ -740,6 +740,26 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Report figures always come from our system, so I can't state them myself. "
              "Please ask again and I'll pull the real data 🙏"),
     },
+    "belum_ada_info": {
+        ID: ("Maaf kak, info soal itu belum ada di catatanku 🙏 Kalau soal menu, "
+             "pesanan, atau pembayaran, aku siap bantu."),
+        EN: ("Sorry, I don't have that information yet 🙏 I'm happy to help with the "
+             "menu, orders, or payments."),
+    },
+    "alamat_toko": {
+        ID: "*{nama_toko}* beralamat di {alamat_toko}.",
+        EN: "*{nama_toko}* is located at {alamat_toko}.",
+    },
+    "sama_sama": {
+        ID: "Sama-sama kak 😊 Kalau butuh apa-apa lagi, tinggal chat ya.",
+        EN: "You're welcome 😊 Just message me if you need anything else.",
+    },
+    "tagihan_belum_dibayar": {
+        ID: ("Pesanan *{invoice}* belum dibayar. Yang perlu dibayar sekarang *{jumlah}* "
+             "dari total {total}."),
+        EN: ("Order *{invoice}* hasn't been paid yet. Amount due now: *{jumlah}* "
+             "out of a total of {total}."),
+    },
     "laporan_khusus_owner": {
         ID: ("Maaf, laporan penjualan dan keuangan hanya bisa diminta oleh pemilik toko 🙏 "
              "Kalau soal menu, pesanan, atau pembayaran, aku siap bantu."),

@@ -130,6 +130,24 @@ def text_tanya_sisa(text: str) -> bool:
     return bool(words & _SISA and words & {"berapa", "brp", "much", "nominal", "jumlahnya"})
 
 
+_TAWAR = {"diskon", "diskonnya", "promo", "promonya", "nego", "tawar", "discount", "voucher"}
+_TEMPAT = {"alamat", "alamatnya", "lokasi", "lokasinya", "dimana", "where", "address", "location"}
+_TOKO = {"toko", "tokonya", "outlet", "outletnya", "store", "shop", "kalian", "located"}
+
+
+def text_menawar(text: str) -> bool:
+    """Diskon/tawar-menawar: tidak ada di FAQ, dan model pernah menjawabnya
+    dengan kalimat tagihan ("Tagihannya sudah terbit…") padahal belum ada pesanan."""
+    words = set(_tokens(text))
+    return bool(words & _TAWAR or (words & {"kurang", "kurangin", "turun"}
+                                   and words & {"harga", "harganya"}))
+
+
+def text_tanya_alamat_toko(text: str) -> bool:
+    words = set(_tokens(text))
+    return bool(words & _TEMPAT and words & _TOKO)
+
+
 def text_minta_laporan(text: str) -> bool:
     # "laporan" saja tidak cukup: "mau laporan kue saya rusak" adalah keluhan.
     words = set(_tokens(text))
@@ -178,6 +196,7 @@ def text_is_negative(text: str) -> bool:
 
 
 _REKOMENDASI_KATA = {"laris", "laku", "bestseller", "favorit", "favourite", "favorite",
+                     "murah", "termurah", "cheapest",
                      "rekomendasi", "rekomen", "recommend", "recommendation",
                      "andalan", "populer", "popular", "signature"}
 _REKOMENDASI_FRASA = ("best seller", "paling enak", "most popular")

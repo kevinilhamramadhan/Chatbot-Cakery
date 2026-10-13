@@ -25,7 +25,9 @@ from app.conversation.states import (
     text_asks_for_human,
     text_menolak,
     text_minta_admin,
+    text_menawar,
     text_minta_laporan,
+    text_tanya_alamat_toko,
     text_tanya_refund,
     text_tanya_sisa,
     text_tanya_status_pesanan,
@@ -319,6 +321,15 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         # jadi tidak pernah masuk). Model membacanya sebagai keluhan dan
         # meminta maaf panjang lebar; tidak ada apa pun yang perlu dibatalkan.
         reply = Reply(text=bahasa.teks("tidak_jadi_kosong", lang))
+    elif text_menawar(text):
+        reply = Reply(text=bahasa.teks("belum_ada_info", lang))
+    elif text_tanya_alamat_toko(text) and "ganti di .env" not in settings.store_address:
+        reply = Reply(text=bahasa.teks("alamat_toko", lang, nama_toko=settings.store_name,
+                                       alamat_toko=settings.store_address))
+    elif (state != State.AWAITING_PAYMENT and text_is_gratitude(text)
+          and len(text.split()) <= 4 and "?" not in text):
+        # Terukur 13 Okt 2026: "makasih ya" dijawab model "Yang mau kubagiakan ya?".
+        reply = Reply(text=bahasa.teks("sama_sama", lang))
     elif text_minta_laporan(text) and not await _pemilik(wa_number):
         reply = Reply(text=bahasa.teks("laporan_khusus_owner", lang))
     elif text_tanya_sisa(text) and (jawab := await _jawab_sisa(wa_number, lang)):
@@ -347,17 +358,21 @@ async def handle_message(wa_number: str, text: str) -> Reply:
 
 async def _jawab_sisa(wa_number: str, lang: str) -> str | None:
     """Sisa pelunasan pesanan aktif menurut backend; None = biarkan model."""
+    from app.tools.formatting import rupiah
+
     order = await store.get_active_pending(wa_number)
-    if order is None or order.status == "pending":
+    if order is None:
         return None
+    if order.status == "pending":
+        return bahasa.teks("tagihan_belum_dibayar", lang,
+                           invoice=order.nomor_invoice or f"#{order.order_ref}",
+                           jumlah=rupiah(order.amount_due), total=rupiah(order.total_amount))
     try:
         res = await backend.get_payment_status(order.order_ref, wa_number)
     except Exception:  # noqa: BLE001
         return None
     if not res:
         return None
-    from app.tools.formatting import rupiah
-
     invoice = order.nomor_invoice or f"#{order.order_ref}"
     sisa = res.get("amount_due") or 0
     if sisa <= 0:
