@@ -264,6 +264,8 @@ async def _pastikan_sesi_wa() -> None:
 
 _sudah_diingatkan: set[int] = set()
 _terakhir_ditolak: tuple[str, ...] = ()
+_gagal_sambung = 0
+_TAK_TERJANGKAU = "backend tidak terjangkau"
 
 
 async def _periksa_backend() -> None:
@@ -273,18 +275,31 @@ async def _periksa_backend() -> None:
     WhatsApp gagal 403 selama belasan menit tanpa ada yang tahu. Yang dikirim
     hanya PERUBAHAN keadaan (mulai ditolak, daftar berubah, pulih).
     """
-    global _terakhir_ditolak
-    ditolak = tuple(await backend.periksa_kunci())
+    global _terakhir_ditolak, _gagal_sambung
+    try:
+        ditolak = tuple(await backend.periksa_kunci())
+        _gagal_sambung = 0
+    except Exception as exc:  # noqa: BLE001
+        # Sekali gagal bisa cuma restart; dua kali berturut-turut berarti mati.
+        # (14 Okt 2026: image backend baru menolak start dan berputar restart.)
+        _gagal_sambung += 1
+        logger.warning("backend tidak terjangkau (%s kali): %s", _gagal_sambung, exc)
+        if _gagal_sambung < 2:
+            return
+        ditolak = (_TAK_TERJANGKAU,)
     if ditolak == _terakhir_ditolak:
         return
     _terakhir_ditolak = ditolak
-    if ditolak:
+    if ditolak == (_TAK_TERJANGKAU,):
+        teks = ("⚠️ Chatbot tidak bisa menghubungi backend. Website dan pesanan lewat "
+                "WhatsApp kemungkinan mati. Periksa container backend di server.")
+    elif ditolak:
         logger.error("Backend menolak kunci layanan untuk: %s", ", ".join(ditolak))
         teks = ("⚠️ Chatbot ditolak backend (401/403) untuk: " + ", ".join(ditolak) + ".\n"
                 "Pesanan lewat WhatsApp bisa gagal. Periksa SERVICE_*_KEY di .env dan "
                 "perubahan kontrak backend.")
     else:
-        teks = "✅ Backend kembali menerima semua kunci layanan chatbot."
+        teks = "✅ Backend kembali terjangkau dan menerima semua kunci layanan chatbot."
     tujuan = ([n.strip() for n in settings.alert_wa_numbers.split(",") if n.strip()]
               or settings.owner_wa_list)
     for nomor in tujuan:

@@ -1227,3 +1227,20 @@ async def test_peringatan_kunci_hanya_saat_berubah(patch_externals, monkeypatch)
         await background._periksa_backend()
     kiriman = [t for wa, t in patch_externals["sent"] if wa == "628111@c.us"]
     assert len(kiriman) == 2 and "ditolak" in kiriman[0] and "kembali" in kiriman[1]
+
+
+async def test_backend_mati_dikabari_setelah_dua_kali_gagal(patch_externals, monkeypatch):
+    from app.conversation import background
+
+    async def mati():
+        raise RuntimeError("connect error")
+
+    monkeypatch.setattr(patch_externals["backend"], "periksa_kunci", mati)
+    monkeypatch.setattr(background.settings, "alert_wa_numbers", "628111")
+    monkeypatch.setattr(background, "_terakhir_ditolak", ())
+    monkeypatch.setattr(background, "_gagal_sambung", 0)
+    await background._periksa_backend()
+    assert not patch_externals["sent"]
+    await background._periksa_backend()
+    await background._periksa_backend()
+    assert len([t for wa, t in patch_externals["sent"] if "tidak bisa menghubungi" in t]) == 1
