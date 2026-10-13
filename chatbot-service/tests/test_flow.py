@@ -999,7 +999,8 @@ async def test_menolak_tawaran_admin_membatalkan_tawarannya(patch_externals):
     patch_externals["monkeypatch"].setattr(orch, "_run_agent_turn", model)
     await handle_message(WA, "mau ngobrol sama admin dong")
     assert (await store.get_or_create_session(WA)).pending_escalation
-    await handle_message(WA, "ga usah deh")
+    r = await handle_message(WA, "ga usah deh")
+    assert "nggak apa-apa" in r.text
     assert not (await store.get_or_create_session(WA)).pending_escalation
 
 

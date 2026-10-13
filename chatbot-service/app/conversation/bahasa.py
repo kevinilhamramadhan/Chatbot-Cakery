@@ -808,6 +808,10 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Yes 😊 The earliest we can do is tomorrow. Tell me the cake and quantity, "
              "or type *menu* to see the list."),
     },
+    "tawaran_ditolak": {
+        ID: "Siap, nggak apa-apa kak 😊 Aku tetap di sini kalau butuh bantuan.",
+        EN: "No problem 😊 I'm still here if you need anything.",
+    },
     "belum_ada_info": {
         ID: ("Maaf kak, info soal itu belum ada di catatanku 🙏 Kalau soal menu, "
              "pesanan, atau pembayaran, aku siap bantu."),

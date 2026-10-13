@@ -280,6 +280,12 @@ async def handle_message(wa_number: str, text: str) -> Reply:
             # "ga usah deh" juga menolak. Tanpa ini tawarannya tetap menggantung
             # dan pesan berikutnya yang menyebut admin langsung mengalihkan.
             await store.set_pending_escalation(wa_number, None)
+            if text_menolak(text) and not text_is_cancel(text):
+                # Dijawab di sini: diteruskan ke model, penolakan sependek ini
+                # pernah dibalas "kami tidak bisa ubah-bungukan pesanannya".
+                reply = Reply(text=bahasa.teks("tawaran_ditolak", lang))
+                await store.log_message(wa_number, "out", reply.text)
+                return reply
 
     # 2b) Kekecewaan susulan sesudah permintaan maaf. Terukur di gladi demo:
     # "saya agak kecewa sih" dijawab model "Senang banget kalau suka". Dilihat
