@@ -4,6 +4,8 @@ The draft cart lives locally in the session; checkout finalizes it into a real
 backend order + Midtrans charge (PROMPT §9, §10.4).
 """
 
+import re
+
 from langchain_core.tools import tool
 
 from app.conversation import bahasa, store
@@ -67,6 +69,14 @@ def _as_items(items, product=None, qty=None, nama=None, jumlah=None) -> list[dic
         return [it for it in items if isinstance(it, dict)]
     polos = {"product": product or nama, "qty": qty if qty is not None else jumlah}
     return [polos] if polos["product"] else []
+
+
+_PENGISI_JUMLAH = {"aja", "saja", "ya", "dong", "deh", "pcs", "buah", "biji", "kak", "please"}
+
+
+def _hanya_jumlah(text: str) -> bool:
+    kata = [k for k in re.findall(r"[a-z0-9]+", text.lower()) if k not in _PENGISI_JUMLAH]
+    return len(kata) == 1 and mentions_quantity(kata[0])
 
 
 @tool
@@ -156,7 +166,13 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
             if ctx.user_text and not mentions_quantity(ctx.user_text):
                 unclear_qty.append(product_label(p))
                 continue
-            existing["qty"] += qty
+            # Pesan yang isinya jumlah saja ("2", "dua aja") sesudah kuenya
+            # masuk keranjang adalah jumlah yang dimaksud, bukan tambahan:
+            # "brownies" lalu "2" pernah menjadi 3.
+            if _hanya_jumlah(ctx.user_text or ""):
+                existing["qty"] = qty
+            else:
+                existing["qty"] += qty
         else:
             cart.append(
                 {

@@ -1123,3 +1123,16 @@ async def test_sapuan_kedua_13_okt(patch_externals, monkeypatch):
     assert p["id"] == 2
     p, _ = await resolve_product("brownies coklat")
     assert p["id"] == 1
+
+
+async def test_jumlah_saja_menetapkan_bukan_menambah():
+    from app.tools.add_to_cart import add_to_cart
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="brownies coklat"))
+    await add_to_cart.ainvoke({"items": [{"product": "Brownies Coklat", "qty": 1}]})
+    set_turn_context(TurnContext(wa_number=WA, user_text="2 aja"))
+    await add_to_cart.ainvoke({"items": [{"product": "Brownies Coklat", "qty": 2}]})
+    assert [c["qty"] for c in await store.get_cart(WA)] == [2]
+    set_turn_context(TurnContext(wa_number=WA, user_text="tambah brownies coklat 1 lagi"))
+    await add_to_cart.ainvoke({"items": [{"product": "Brownies Coklat", "qty": 1}]})
+    assert [c["qty"] for c in await store.get_cart(WA)] == [3]

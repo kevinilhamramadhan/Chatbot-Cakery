@@ -52,10 +52,14 @@ JARAK_YAKIN = 0.05
 # open?" = 0,58) dan sesi Inggris hampir selalu jatuh ke tulisan model yang
 # janggal. Diukur di server produksi 13 Okt 2026 pada 43 pertanyaan Inggris (35
 # FAQ, 8 di luar FAQ): ambang 0,60/0,05 memberi teks baku ke 10 pertanyaan,
-# 0,50/0,08 ke 24, dua-duanya tanpa satu pun FAQ keliru. Dipakai 0,52 supaya
-# ada jarak dari "can I pay with bitcoin" (0,49).
-SKOR_YAKIN_EN = 0.52
-JARAK_YAKIN_EN = 0.08
+# 0,50/0,08 ke 24, dua-duanya tanpa satu pun FAQ keliru. Dipakai 0,47/0,07:
+# pada 20 pertanyaan lain yang tidak ikut memilih ambang, 8 terjawab dan tidak
+# ada yang keliru; pertanyaan di luar FAQ yang paling dekat ("do you sell
+# coffee" 0,43; "do you accept credit card" 0,41) tetap di bawahnya. Yang
+# dihindari dengan ini nyata: tanpa teks baku, "do you deliver?" dijawab model
+# campur bahasa dan menyebut "bisa kirim ke luar kota", kebalikan dari FAQ-nya.
+SKOR_YAKIN_EN = 0.47
+JARAK_YAKIN_EN = 0.07
 # Kemiripan balasan model dengan jawaban FAQ supaya dianggap "model memilih ini".
 MIRIP_BALASAN = 0.75
 

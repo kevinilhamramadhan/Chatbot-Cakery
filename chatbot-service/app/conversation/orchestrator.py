@@ -37,6 +37,7 @@ from app.conversation.states import (
     text_is_confirm,
     text_is_gratitude,
     text_is_negative,
+    text_is_praise,
 )
 from app.core.config import settings
 from app.core.security import mask_phone
@@ -322,6 +323,9 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         # jadi tidak pernah masuk). Model membacanya sebagai keluhan dan
         # meminta maaf panjang lebar; tidak ada apa pun yang perlu dibatalkan.
         reply = Reply(text=bahasa.teks("tidak_jadi_kosong", lang))
+    elif text_is_praise(text) and len(text.split()) <= 8 and "?" not in text \
+            and not mentions_quantity(text):
+        reply = Reply(text=bahasa.teks("terima_kasih_pujian", lang))
     elif text_bisa_pesan_besok(text) and state == State.IDLE:
         reply = Reply(text=bahasa.teks("bisa_pesan_besok", lang))
     elif text_menawar(text):
