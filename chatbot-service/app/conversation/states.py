@@ -148,6 +148,34 @@ def text_tanya_alamat_toko(text: str) -> bool:
     return bool(words & _TEMPAT and words & _TOKO)
 
 
+_LUNASI = {"lunasi", "lunasin", "melunasi", "pelunasan", "pelunasannya"}
+_SISA_BAYAR = {"sisa", "sisanya", "remaining", "balance", "rest"}
+_UBAH = {"ganti", "ubah", "rubah", "pindah", "change", "reschedule"}
+_DATA_PESANAN = {"alamat", "alamatnya", "tanggal", "tanggalnya", "jadwal", "jadwalnya",
+                 "address", "date", "schedule"}
+
+
+def text_mau_lunasi(text: str) -> bool:
+    """"mau lunasi", "bayar sisanya", "pay balance" — bukan pertanyaan jumlah."""
+    words = set(_tokens(text))
+    if words & {"berapa", "brp", "much", "gimana", "bagaimana", "how", "kapan", "when"}:
+        return False
+    return bool(words & _LUNASI or (words & {"bayar", "pay", "membayar"} and words & _SISA_BAYAR))
+
+
+def text_tanya_cara_lunasi(text: str) -> bool:
+    """"sisanya dibayar gimana?", "how do I pay the remaining balance"."""
+    words = set(_tokens(text))
+    return bool(words & (_LUNASI | _SISA_BAYAR)
+                and words & {"gimana", "bagaimana", "how", "cara", "caranya", "kapan", "when"}
+                and words & (_LUNASI | {"bayar", "dibayar", "membayar", "pay", "paid"}))
+
+
+def text_ubah_pesanan(text: str) -> bool:
+    words = set(_tokens(text))
+    return bool(words & _UBAH and words & _DATA_PESANAN)
+
+
 def text_minta_laporan(text: str) -> bool:
     # "laporan" saja tidak cukup: "mau laporan kue saya rusak" adalah keluhan.
     words = set(_tokens(text))

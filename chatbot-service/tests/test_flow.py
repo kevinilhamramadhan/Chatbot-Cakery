@@ -1136,3 +1136,94 @@ async def test_jumlah_saja_menetapkan_bukan_menambah():
     set_turn_context(TurnContext(wa_number=WA, user_text="tambah brownies coklat 1 lagi"))
     await add_to_cart.ainvoke({"items": [{"product": "Brownies Coklat", "qty": 1}]})
     assert [c["qty"] for c in await store.get_cart(WA)] == [3]
+
+
+# ── Pelunasan DP, kabar selesai, pengingat, peringatan kunci (14 Okt 2026) ────
+async def _pesanan_dp(status="paid"):
+    return await store.create_pending_order(
+        wa_number=WA, order_ref="100", payment_type="dp", total_amount=190000, amount_due=95000,
+        items_json="[]", customer_json=json.dumps({"channel": "bank_transfer"}),
+        delivery_method="pickup", status=status, nomor_invoice="INV-1",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+
+
+async def test_pelunasan_dp_dari_tagihan_sampai_kabar_lunas(patch_externals):
+    from app.conversation import background
+
+    mp, backend = patch_externals["monkeypatch"], patch_externals["backend"]
+    keadaan = {"invoice_status": "partial", "amount_paid": 95000, "amount_due": 95000}
+    dibuat = {}
+
+    async def status(order_id, wa=None):
+        return dict(keadaan)
+
+    async def tagih(order_id, amount, channel="bank_transfer", payment_type="full", wa_number=""):
+        dibuat.update(amount=amount, payment_type=payment_type, channel=channel)
+        return {"pg_transaction_id": "MID2", "va_number": "8808999", "qris_url": None}
+
+    mp.setattr(backend, "get_payment_status", status)
+    mp.setattr(backend, "create_payment", tagih)
+    await _pesanan_dp()
+
+    r = await handle_message(WA, "mau lunasi")
+    assert "8808999" in r.text and "Rp95.000" in r.text
+    assert dibuat == {"amount": 95000.0, "payment_type": "full", "channel": "bank_transfer"}
+    assert (await store.get_active_pending(WA)).payment_type == store.PELUNASAN
+
+    await background._check_refunded()          # belum dibayar: tidak ada kabar
+    assert not any("Pelunasan" in t for _, t in patch_externals["sent"])
+    keadaan.update(invoice_status="paid", amount_due=0)
+    await background._check_refunded()
+    await background._check_refunded()          # siklus berikutnya tidak mengulang
+    assert sum("Pelunasan" in t for _, t in patch_externals["sent"]) == 1
+    assert "lunas" in (await handle_message(WA, "lunasi")).text.lower()
+
+
+async def test_pesanan_selesai_dikabari_dan_ubah_pesanan(patch_externals):
+    from app.conversation import background
+
+    async def latest(wa):
+        return {"id": 100, "status": "picked_up"}
+
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "get_latest_order", latest)
+    await _pesanan_dp()
+    r = await handle_message(WA, "bisa ganti alamat?")
+    assert "admin" in r.text.lower()            # sudah dibayar: lewat admin
+    await background._lepas_pesanan_selesai()
+    assert any("sudah selesai" in t for _, t in patch_externals["sent"])
+
+
+async def test_pengingat_tagihan_sekali_saja(patch_externals):
+    from app.conversation import background
+
+    async def status(order_id, wa=None):
+        return {"invoice_status": "unpaid"}
+
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "get_payment_status", status)
+    order = await _pesanan_dp(status="pending")
+    await background._check_once()
+    assert not any("Mengingatkan" in t for _, t in patch_externals["sent"])     # masih 30 menit
+    await store.update_pending_order(
+        order.id, expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=8))
+    background._sudah_diingatkan.clear()
+    await background._check_once()
+    await background._check_once()
+    assert sum("Mengingatkan" in t for _, t in patch_externals["sent"]) == 1
+
+
+async def test_peringatan_kunci_hanya_saat_berubah(patch_externals, monkeypatch):
+    from app.conversation import background
+
+    hasil = [["baca pesanan"], ["baca pesanan"], []]
+
+    async def periksa():
+        return hasil.pop(0)
+
+    monkeypatch.setattr(patch_externals["backend"], "periksa_kunci", periksa)
+    monkeypatch.setattr(background.settings, "alert_wa_numbers", "628111")
+    monkeypatch.setattr(background, "_terakhir_ditolak", ())
+    for _ in range(3):
+        await background._periksa_backend()
+    kiriman = [t for wa, t in patch_externals["sent"] if wa == "628111@c.us"]
+    assert len(kiriman) == 2 and "ditolak" in kiriman[0] and "kembali" in kiriman[1]

@@ -5,6 +5,7 @@ identity -> payment-type -> checkout), and delegates open-ended turns to the LLM
 agent. Returns a Reply; the caller is responsible for actually sending it.
 """
 
+import json
 import logging
 import re
 import time
@@ -28,6 +29,7 @@ from app.conversation.states import (
     text_menawar,
     text_minta_laporan,
     text_tanya_alamat_toko,
+    text_tanya_cara_lunasi,
     text_tanya_refund,
     text_tanya_sisa,
     text_tanya_status_pesanan,
@@ -38,6 +40,8 @@ from app.conversation.states import (
     text_is_gratitude,
     text_is_negative,
     text_is_praise,
+    text_mau_lunasi,
+    text_ubah_pesanan,
 )
 from app.core.config import settings
 from app.core.security import mask_phone
@@ -339,6 +343,12 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         reply = Reply(text=bahasa.teks("sama_sama", lang))
     elif text_minta_laporan(text) and not await _pemilik(wa_number):
         reply = Reply(text=bahasa.teks("laporan_khusus_owner", lang))
+    elif text_tanya_cara_lunasi(text):
+        reply = Reply(text=bahasa.teks("cara_pelunasan", lang))
+    elif text_mau_lunasi(text) and (jawab := await _lunasi(wa_number, lang)):
+        reply = Reply(text=jawab, media=_media_giliran())
+    elif text_ubah_pesanan(text) and (jawab := await _jawab_ubah_pesanan(wa_number, text, lang)):
+        reply = Reply(text=jawab)
     elif text_tanya_sisa(text) and (jawab := await _jawab_sisa(wa_number, lang)):
         reply = Reply(text=jawab)
     elif text_tanya_refund(text) and (jawab := await _jawab_refund(wa_number, lang)):
@@ -361,6 +371,60 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     if reply.text:
         await store.log_message(wa_number, "out", reply.text)
     return reply
+
+
+async def _lunasi(wa_number: str, lang: str) -> str | None:
+    """Terbitkan tagihan pelunasan untuk pesanan DP; None = biarkan model.
+
+    Backend menerima pelunasan sebagai tagihan `full` sebesar sisa invoice, dan
+    membatalkan pesanan DP yang belum lunas pada H-1 pukul 18.00 WIB — tanpa
+    jalur ini pelanggan WhatsApp tidak punya cara melunasinya.
+    """
+    from app.tools.formatting import rupiah
+
+    order = await store.get_active_pending(wa_number)
+    if order is None or order.status == "pending":
+        return None
+    if order.payment_type not in ("dp", store.PELUNASAN):
+        return bahasa.teks("pesanan_sudah_lunas", lang,
+                           invoice=order.nomor_invoice or f"#{order.order_ref}")
+    invoice = order.nomor_invoice or f"#{order.order_ref}"
+    try:
+        res = await backend.get_payment_status(order.order_ref, wa_number)
+        sisa = float((res or {}).get("amount_due") or 0)
+        if sisa <= 0:
+            return bahasa.teks("pesanan_sudah_lunas", lang, invoice=invoice)
+        channel = json.loads(order.customer_json or "{}").get("channel", "bank_transfer")
+        pay = await backend.create_payment(order.order_ref, sisa, channel=channel,
+                                           payment_type="full", wa_number=wa_number)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("tagihan pelunasan %s gagal: %s", order.order_ref, exc)
+        return bahasa.teks("pelunasan_gagal", lang)
+    va, qris = pay.get("va_number"), pay.get("qris_url")
+    if not va and not qris:
+        logger.error("tagihan pelunasan %s tanpa cara bayar", order.order_ref)
+        return bahasa.teks("pelunasan_gagal", lang)
+    cara = f"💳 Virtual Account: *{va}*" if va else bahasa.teks("scan_qris", lang)
+    await store.update_pending_order(
+        order.id, payment_type=store.PELUNASAN, amount_due=sisa, pay_instruction=cara,
+        qris_url=None if va else qris, payment_ref=pay.get("pg_transaction_id"))
+    if not va:
+        checkout.kirim_gambar_qris(qris, lang)
+    return bahasa.teks("tagihan_pelunasan", lang, invoice=invoice, jumlah=rupiah(sisa),
+                       cara_bayar=cara)
+
+
+async def _jawab_ubah_pesanan(wa_number: str, text: str, lang: str) -> str | None:
+    """Ganti alamat/tanggal sesudah tagihan terbit: backend tidak punya jalurnya,
+    jadi dijawab apa adanya daripada "belum punya infonya"."""
+    order = await store.get_active_pending(wa_number)
+    if order is None:
+        return None
+    invoice = order.nomor_invoice or f"#{order.order_ref}"
+    if order.status == "pending":
+        return bahasa.teks("ubah_belum_bayar", lang, invoice=invoice)
+    await store.set_pending_escalation(wa_number, text)
+    return bahasa.teks("ubah_sudah_bayar", lang, invoice=invoice) + "\n\n" + escalation.teks_tawaran(lang)
 
 
 async def _jawab_sisa(wa_number: str, lang: str) -> str | None:

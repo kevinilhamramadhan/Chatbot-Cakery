@@ -647,8 +647,57 @@ _TEMPLAT: dict[str, dict[str, str]] = {
     },
     "menunggu_diproses": {ID: "Menunggu diproses", EN: "Awaiting processing"},
     "sisa_pelunasan": {
-        ID: "\nSisa pelunasan: *{sisa}*.",
-        EN: "\nRemaining balance: *{sisa}*.",
+        ID: ("\nSisa pelunasan: *{sisa}*, paling lambat sehari sebelum tanggal "
+             "ambil/kirim pukul 18.00 WIB. Ketik *lunasi* kalau mau membayarnya."),
+        EN: ("\nRemaining balance: *{sisa}*, due by 18.00 WIB the day before "
+             "pickup/delivery. Type *pay balance* when you're ready to pay it."),
+    },
+    "cara_pelunasan": {
+        ID: ("Sisa DP dilunasi lewat chat ini: ketik *lunasi*, nanti kukirim tagihannya. "
+             "Batasnya sehari sebelum tanggal ambil/kirim pukul 18.00 WIB."),
+        EN: ("You pay the remaining balance right here: type *pay balance* and I'll send "
+             "the invoice. It's due by 18.00 WIB the day before pickup/delivery."),
+    },
+    "tagihan_pelunasan": {
+        ID: ("Ini tagihan pelunasan pesanan *{invoice}*:\n\n"
+             "Sisa yang harus dibayar: *{jumlah}*\n\n{cara_bayar}\n\n"
+             "Pembayaran akan terdeteksi otomatis."),
+        EN: ("Here is the balance invoice for order *{invoice}*:\n\n"
+             "Amount due: *{jumlah}*\n\n{cara_bayar}\n\n"
+             "Your payment is detected automatically."),
+    },
+    "pelunasan_gagal": {
+        ID: ("Maaf, tagihan pelunasannya belum bisa dibuat 🙏 Coba lagi sebentar "
+             "lagi ya."),
+        EN: "Sorry, I couldn't create the balance invoice 🙏 Please try again shortly.",
+    },
+    "pelunasan_diterima": {
+        ID: "Pelunasan pesanan *{invoice}* sudah kami terima ✅ Pesananmu sekarang lunas. Terima kasih! 🎂",
+        EN: "We've received the balance for order *{invoice}* ✅ Your order is now paid in full. Thank you! 🎂",
+    },
+    "pengingat_bayar": {
+        ID: ("Mengingatkan ya kak 🙏 Tagihan pesanan *{invoice}* sebesar *{jumlah}* "
+             "berakhir sekitar {menit} menit lagi. Kalau lewat, pesanannya batal "
+             "otomatis. Ketik *kirim ulang* kalau butuh cara bayarnya lagi."),
+        EN: ("A quick reminder 🙏 The invoice for order *{invoice}* (*{jumlah}*) expires "
+             "in about {menit} minutes. After that the order is cancelled automatically. "
+             "Type *resend* if you need the payment details again."),
+    },
+    "pesanan_selesai": {
+        ID: ("Pesanan *{invoice}* sudah selesai ✅ Terima kasih sudah memesan di "
+             "{toko}! Semoga kuenya cocok 🎂"),
+        EN: ("Order *{invoice}* is complete ✅ Thank you for ordering from {toko}! "
+             "We hope you enjoy it 🎂"),
+    },
+    "ubah_belum_bayar": {
+        ID: ("Data pesanan *{invoice}* tidak bisa diubah setelah tagihannya terbit 🙏 "
+             "Karena belum dibayar, ketik *batal* lalu pesan ulang dengan data yang baru ya."),
+        EN: ("Order *{invoice}* can't be changed once its invoice is issued 🙏 "
+             "Since it isn't paid yet, type *cancel* and place the order again with the new details."),
+    },
+    "ubah_sudah_bayar": {
+        ID: "Pesanan *{invoice}* sudah dibayar, jadi perubahannya perlu dibantu admin kami.",
+        EN: "Order *{invoice}* is already paid, so our admin needs to help with that change.",
     },
     "refund_menunggu": {
         ID: ("Pengembalian dana pesanan *{invoice}* sedang diproses tim kami lewat "

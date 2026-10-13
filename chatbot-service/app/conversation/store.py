@@ -21,6 +21,8 @@ ACTIVE_ORDER_STATUSES = ("pending", "paid", "ready")
 # Pesanan sudah dibatalkan, tapi dananya menunggu ditransfer admin (khusus VA,
 # yang tidak bisa di-refund otomatis oleh Midtrans). Sengaja TIDAK termasuk
 # status aktif: pelanggan boleh memesan lagi sambil menunggu uangnya kembali.
+# payment_type untuk pesanan DP yang tagihan pelunasannya sudah diterbitkan.
+PELUNASAN = "dp_final"
 MENUNGGU_TRANSFER = "refund_wait"
 # Admin sudah mentransfer dananya (webhook /refunded sudah datang), tapi kabarnya
 # belum sampai ke pelanggan karena pengiriman WhatsApp-nya gagal. Dipisah dari

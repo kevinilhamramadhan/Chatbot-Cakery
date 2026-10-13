@@ -157,7 +157,16 @@ async def _check_refunded() -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("cek status refund gagal untuk %s: %s", order.order_ref, exc)
             continue
-        if str((res or {}).get("invoice_status") or "").lower() != "refunded":
+        inv = str((res or {}).get("invoice_status") or "").lower()
+        if inv == "paid" and order.payment_type == store.PELUNASAN:
+            # Tagihan pelunasan DP sudah dibayar. Ditandai dulu supaya kabarnya
+            # tidak terkirim dua kali kalau siklus berikutnya datang lebih cepat.
+            await store.update_pending_order(order.id, payment_type="full")
+            await _notify(order.wa_number, bahasa.teks(
+                "pelunasan_diterima", await store.get_lang(order.wa_number),
+                invoice=_label(order)))
+            continue
+        if inv != "refunded":
             continue
         await tutup_karena_refund(order)
 
@@ -189,6 +198,12 @@ async def _lepas_pesanan_selesai() -> None:
             continue
         await store.update_pending_order(order.id, status="selesai")
         await store.set_state(order.wa_number, State.IDLE)
+        # Backend hanya mengabari saat "siap"; saat pesanan diserahkan pelanggan
+        # tidak mendapat apa pun. Batal/refund punya kabarnya sendiri.
+        if terbaru.get("status") in ("delivered", "picked_up", "completed"):
+            await _notify(order.wa_number, bahasa.teks(
+                "pesanan_selesai", await store.get_lang(order.wa_number),
+                invoice=_label(order), toko=settings.store_name))
         logger.info("Pesanan %s sudah %s di backend — dilepas", order.order_ref,
                     terbaru.get("status"))
 
@@ -247,6 +262,35 @@ async def _pastikan_sesi_wa() -> None:
     await whatsapp_client.start_session()
 
 
+_sudah_diingatkan: set[int] = set()
+_terakhir_ditolak: tuple[str, ...] = ()
+
+
+async def _periksa_backend() -> None:
+    """Kabari pemilik sistem kalau backend menolak kunci layanan chatbot.
+
+    13 Okt 2026: backend baru memecah kuncinya per kemampuan dan pesanan lewat
+    WhatsApp gagal 403 selama belasan menit tanpa ada yang tahu. Yang dikirim
+    hanya PERUBAHAN keadaan (mulai ditolak, daftar berubah, pulih).
+    """
+    global _terakhir_ditolak
+    ditolak = tuple(await backend.periksa_kunci())
+    if ditolak == _terakhir_ditolak:
+        return
+    _terakhir_ditolak = ditolak
+    if ditolak:
+        logger.error("Backend menolak kunci layanan untuk: %s", ", ".join(ditolak))
+        teks = ("⚠️ Chatbot ditolak backend (401/403) untuk: " + ", ".join(ditolak) + ".\n"
+                "Pesanan lewat WhatsApp bisa gagal. Periksa SERVICE_*_KEY di .env dan "
+                "perubahan kontrak backend.")
+    else:
+        teks = "✅ Backend kembali menerima semua kunci layanan chatbot."
+    tujuan = ([n.strip() for n in settings.alert_wa_numbers.split(",") if n.strip()]
+              or settings.owner_wa_list)
+    for nomor in tujuan:
+        await _notify(nomor if "@" in nomor else f"{nomor}@c.us", teks)
+
+
 async def _check_once() -> None:
     await _pastikan_sesi_wa()
     await _check_refunded()
@@ -280,6 +324,19 @@ async def _check_once() -> None:
                 text = bahasa.teks("batas_lewat", lang, invoice=_label(order), lanjut=lanjut)
             await _notify(order.wa_number, text)
             continue
+
+        # 1b) Sekali diingatkan sebelum hangus.
+        # ponytail: penandanya di memori; kalau service restart di jendela
+        # pengingat, pelanggan bisa menerimanya dua kali. Kolom baru kalau itu
+        # mengganggu.
+        sisa_detik = (_aware(order.expires_at) - now).total_seconds()
+        if (0 < sisa_detik <= settings.payment_reminder_minutes * 60
+                and order.id not in _sudah_diingatkan):
+            _sudah_diingatkan.add(order.id)
+            await _notify(order.wa_number, bahasa.teks(
+                "pengingat_bayar", await store.get_lang(order.wa_number),
+                invoice=_label(order), jumlah=rupiah(order.amount_due),
+                menit=max(1, round(sisa_detik / 60))))
 
         # 2) Poll backend payment status (invoice: unpaid|partial|paid|refunded).
         try:
@@ -429,7 +486,15 @@ async def _loop() -> None:
     logger.info("Payment background worker started (interval=%ss)", interval)
     last_purge = 0.0
     last_faq_check = 0.0
+    last_probe = 0.0
     while True:
+        if (settings.backend_probe_seconds > 0
+                and time.monotonic() - last_probe >= settings.backend_probe_seconds):
+            last_probe = time.monotonic()
+            try:
+                await _periksa_backend()
+            except Exception as exc:  # noqa: BLE001 - never kill the worker
+                logger.warning("pemeriksaan kunci backend gagal: %s", exc)
         try:
             await _check_once()
         except Exception as exc:  # noqa: BLE001

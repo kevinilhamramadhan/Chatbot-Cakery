@@ -134,6 +134,7 @@ QA percakapan terhadap model dan backend sungguhan (WhatsApp di-stub):
 
 ```bash
 python -m scripts.qa_runner scripts/qa_demo.json /tmp/hasil.json
+python -m scripts.qa_runner scripts/qa_sapuan.json /tmp/sapuan.json   # 170 pesan gaya pelanggan (UAT Okt 2026)
 ```
 
 Di server, jalankan di dalam container `chatbot-service` dengan nomor uji

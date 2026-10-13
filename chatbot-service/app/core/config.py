@@ -131,6 +131,12 @@ class Settings(BaseSettings):
     # (Charging happens in the backend -> Midtrans; we only poll status here.)
     payment_check_interval_seconds: int = 30
     payment_timeout_minutes: int = 30
+    # Pengingat sekali sebelum tagihan hangus; 0 = tidak mengingatkan.
+    payment_reminder_minutes: int = 10
+    # Nomor yang dikabari kalau backend menolak kunci layanan chatbot (401/403),
+    # dipisah koma. Kosong = pakai OWNER_WA_NUMBERS; dua-duanya kosong = log saja.
+    alert_wa_numbers: str = ""
+    backend_probe_seconds: int = 600
     # Decision: support full payment OR 50% down-payment (DP).
     allow_down_payment: bool = True
     down_payment_percentage: float = 0.50

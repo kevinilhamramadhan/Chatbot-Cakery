@@ -5,6 +5,7 @@ Replaces the old mock_backend. All calls send X-Service-Key. Customer/Order use
 """
 
 import logging
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import httpx
@@ -327,6 +328,35 @@ async def get_takeover_admin_numbers() -> list[str]:
         if b:
             nomor.append(str(b))
     return nomor
+
+
+async def periksa_kunci() -> list[str]:
+    """Kemampuan yang dijawab backend 401/403. Kosong = semua kunci diterima.
+
+    Tiap panggilan sengaja menunjuk data yang tidak ada (nomor 620000000000,
+    pesanan 0), jadi jawaban yang sehat adalah 404/200 dan tidak ada yang
+    berubah di backend. Membuat pesanan dan tagihan tidak ikut dicoba: tidak
+    ada cara memanggilnya tanpa akibat. Backend yang tidak terjangkau bukan
+    urusan fungsi ini (pemanggilnya mencoba lagi di siklus berikut).
+    """
+    n = "620000000000"
+    hari = datetime.now(timezone.utc).date().isoformat()
+    uji = [
+        ("baca pesanan", "GET", "/orders/latest", {"params": {"nomor_wa": n}}, "backend_orders_read_key"),
+        ("batal pesanan", "POST", "/orders/0/cancel", {"params": {"nomor_wa": n}}, "backend_orders_cancel_key"),
+        ("pelanggan/takeover", "GET", f"/customers/{n}/takeover", {}, "backend_customers_key"),
+        ("refund", "POST", "/orders/0/refund", {"json": {"reason": "cek kunci", "nomor_wa": n}}, "backend_refund_key"),
+        ("status pembayaran", "GET", "/payments/0/status", {"params": {"nomor_wa": n}}, "backend_payment_status_key"),
+        ("laporan", "GET", "/reports/financial-summary", {"params": {"start_date": hari, "end_date": hari}}, "backend_financial_summary_key"),
+        ("daftar Owner", "GET", "/users/owner-numbers", {}, "backend_owner_numbers_key"),
+    ]
+    ditolak = []
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        for nama, metode, path, kw, kunci in uji:
+            r = await c.request(metode, f"{_base()}{path}", headers=_headers(kunci), **kw)
+            if r.status_code in (401, 403):
+                ditolak.append(nama)
+    return ditolak
 
 
 async def confirm_wa_verification(code: str, phone: str) -> dict:
