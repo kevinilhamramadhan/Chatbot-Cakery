@@ -1,0 +1,32 @@
+# CD chatbot: begitu workflow CI di main selesai dengan sukses (image :latest sudah
+# di GHCR), minta server produksi menariknya. Deploy-nya sendiri dikerjakan
+# workflow deploy.yml di repo Deploy-Toti-Cakery, yang jalan di runner server itu.
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:   # deploy ulang manual dari tab Actions
+
+permissions: {}
+
+jobs:
+  deploy:
+    name: picu deploy
+    # CI dari pull request juga memicu workflow_run (branch di fork bisa bernama
+    # main), jadi hanya run hasil push yang diterima.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Panggil workflow deploy di repo Deploy-Toti-Cakery
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: >-
+          gh api -X POST
+          repos/kevinilhamramadhan/Deploy-Toti-Cakery/actions/workflows/deploy.yml/dispatches
+          -f ref=main -f 'inputs[service]=chatbot-service'
