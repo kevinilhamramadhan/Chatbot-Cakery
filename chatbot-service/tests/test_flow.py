@@ -1018,6 +1018,12 @@ async def test_tanya_refund_dan_status_dijawab_dari_data(patch_externals):
     assert "INV-1" in r.text and "Menunggu diproses" in r.text
 
     await store.update_pending_order(order.id, status=store.MENUNGGU_TRANSFER)
+    # Pesanan lain sesudahnya (batal biasa) tidak menutupi refund yang masih berjalan.
+    await store.create_pending_order(
+        wa_number=WA, order_ref="101", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method="pickup", status="expired",
+        expires_at=dt.datetime.now(dt.timezone.utc),
+    )
     r = await handle_message(WA, "uang saya kapan kembali?")
     assert "INV-1" in r.text and "transfer" in r.text
 

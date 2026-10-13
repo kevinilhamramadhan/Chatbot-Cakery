@@ -342,7 +342,7 @@ async def handle_message(wa_number: str, text: str) -> Reply:
 async def _jawab_refund(wa_number: str, lang: str) -> str | None:
     """Kabar refund pesanan terakhir, atau None kalau tidak ada yang di-refund
     (pertanyaannya lalu diteruskan ke model seperti biasa)."""
-    order = await store.pesanan_terakhir(wa_number)
+    order = await store.refund_terakhir(wa_number)
     if order is None:
         return None
     invoice = order.nomor_invoice or f"#{order.order_ref}"

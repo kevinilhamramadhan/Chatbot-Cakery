@@ -213,11 +213,14 @@ async def get_active_pending(wa_number: str) -> PendingOrder | None:
         )
 
 
-async def pesanan_terakhir(wa_number: str) -> PendingOrder | None:
+async def refund_terakhir(wa_number: str) -> PendingOrder | None:
+    """Pesanan terbaru nomor ini yang dananya sedang atau sudah dikembalikan."""
     async with async_session_factory() as db:
         return await db.scalar(
-            select(PendingOrder).where(PendingOrder.wa_number == wa_number)
-            .order_by(PendingOrder.id.desc())
+            select(PendingOrder).where(
+                PendingOrder.wa_number == wa_number,
+                PendingOrder.status.in_((MENUNGGU_TRANSFER, KABAR_TRANSFER_TERTUNDA, "refunded")),
+            ).order_by(PendingOrder.id.desc())
         )
 
 
