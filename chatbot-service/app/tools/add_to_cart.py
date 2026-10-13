@@ -8,7 +8,7 @@ import re
 
 from langchain_core.tools import tool
 
-from app.conversation import bahasa, store
+from app.conversation import bahasa, rbac, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State, mentions_quantity
 from app.core.config import settings
@@ -94,6 +94,11 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
     lang = await store.get_lang(wa)
     if not items:
         return await menu_fallback(bahasa.teks("keranjang_tak_tertangkap", lang), lang)
+
+    # Nomor internal (Owner, Admin, Staff) tidak dipakai memesan. Dijaga di
+    # sini karena semua jalan menuju pesanan lewat keranjang.
+    if await rbac.siapa(wa) is not None:
+        return bahasa.teks("nomor_internal_tidak_memesan", lang)
 
     # PROMPT §10.11 — one active transaction per WA number.
     active = await store.get_active_pending(wa)

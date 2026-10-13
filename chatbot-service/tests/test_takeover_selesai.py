@@ -66,3 +66,67 @@ async def test_sesi_berkunci_c_us_ikut_dilepas(direktori):
 
     assert "dilepas" in balasan
     assert not await store.is_takeover_active(f"{PELANGGAN_WA}@c.us")
+
+
+# ── Aturan nomor internal (14 Okt 2026) ───────────────────────────────────────
+OWNER_WA = "628777000111"
+ADMIN_KEDUA = "628777000333"
+
+
+def _direktori(monkeypatch, baris):
+    async def f():
+        return baris
+
+    async def set_takeover(nomor, active, expires_at):
+        return {}
+
+    async def upsert(*a, **k):
+        return {"customer_id": 1}
+
+    monkeypatch.setattr(backend, "get_role_directory", f)
+    monkeypatch.setattr(backend, "set_takeover", set_takeover)
+    monkeypatch.setattr(backend, "upsert_customer", upsert)
+    rbac.bersihkan_cache()
+
+
+@pytest.mark.asyncio
+async def test_selesai_hanya_untuk_admin_takeover(monkeypatch):
+    _direktori(monkeypatch, DIREKTORI + [
+        {"nomor_wa": OWNER_WA, "role": "Owner", "level": 1, "handles_takeover": False}])
+    await store.activate_takeover(PELANGGAN_WA)
+
+    balasan = await escalation.perintah_selesai(OWNER_WA, f"selesai {PELANGGAN_WA}")
+    assert "hanya bisa dipakai admin" in balasan
+    assert await store.is_takeover_active(PELANGGAN_WA)
+
+
+@pytest.mark.asyncio
+async def test_nomor_internal_tidak_bisa_memesan(monkeypatch):
+    from app.conversation.context import TurnContext, set_turn_context
+    from app.tools.add_to_cart import add_to_cart
+
+    _direktori(monkeypatch, [
+        {"nomor_wa": OWNER_WA, "role": "Owner", "level": 1, "handles_takeover": False}])
+    set_turn_context(TurnContext(wa_number=f"{OWNER_WA}@c.us", user_text="pesan brownies 2"))
+    out = await add_to_cart.ainvoke({"items": [{"product": "Brownies Coklat", "qty": 2}]})
+    assert "nomor internal" in out and await store.get_cart(f"{OWNER_WA}@c.us") == []
+
+
+@pytest.mark.asyncio
+async def test_takeover_digilir_antar_admin(monkeypatch):
+    from app.whatsapp_client.client import whatsapp_client
+
+    _direktori(monkeypatch, DIREKTORI + [
+        {"nomor_wa": ADMIN_KEDUA, "role": "Admin", "level": 2, "handles_takeover": True}])
+    terkirim = []
+
+    async def kirim(wa, text):
+        terkirim.append(wa)
+        return {"ok": True}
+
+    monkeypatch.setattr(whatsapp_client, "send_text", kirim)
+    monkeypatch.setattr(escalation, "_putaran", 0)
+    await escalation.start_takeover("628111000001@c.us", "uji", "id")
+    await escalation.start_takeover("628111000002@c.us", "uji", "id")
+    # Tiap takeover hanya mengabari satu admin, dan adminnya bergantian.
+    assert terkirim == [ADMIN_WA, ADMIN_KEDUA]

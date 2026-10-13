@@ -814,6 +814,12 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Yes 😊 The earliest we can do is tomorrow. Tell me the cake and quantity, "
              "or type *menu* to see the list."),
     },
+    "nomor_internal_tidak_memesan": {
+        ID: ("Nomor ini terdaftar sebagai nomor internal Toti Cakery, jadi tidak bisa "
+             "dipakai untuk memesan 🙏 Silakan memesan dari nomor lain."),
+        EN: ("This number is registered as an internal Toti Cakery number, so it can't be "
+             "used to place orders 🙏 Please order from another number."),
+    },
     "tawaran_ditolak": {
         ID: "Siap, nggak apa-apa kak 😊 Aku tetap di sini kalau butuh bantuan.",
         EN: "No problem 😊 I'm still here if you need anything.",

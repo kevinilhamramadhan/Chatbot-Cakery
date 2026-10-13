@@ -43,6 +43,25 @@ async def admin_numbers() -> list[str]:
     return await rbac.nomor_penerima_takeover()
 
 
+_putaran = 0
+
+
+def _giliran(numbers: list[str]) -> list[str]:
+    """Daftar penerima, diputar supaya tiap takeover dimulai dari admin berikutnya.
+
+    ponytail: gilirannya di memori dan bergantian rata, bukan menurut beban.
+    Sesudah restart mulai lagi dari admin pertama; kalau pembagian menurut
+    jumlah takeover yang sedang dipegang dibutuhkan, simpan penanggung jawabnya
+    di sesi.
+    """
+    global _putaran
+    if len(numbers) < 2:
+        return list(numbers)
+    awal = _putaran % len(numbers)
+    _putaran += 1
+    return numbers[awal:] + numbers[:awal]
+
+
 async def start_takeover(wa_number: str, reason: str, lang: str | None = None) -> str:
     """Notify an admin, and only then silence the bot for this customer.
 
@@ -54,10 +73,15 @@ async def start_takeover(wa_number: str, reason: str, lang: str | None = None) -
 
     if lang is None:
         lang = await store.get_lang(wa_number)
-    numbers = await admin_numbers()
+    # Satu takeover ditangani SATU admin. Kalau penerimanya lebih dari satu,
+    # pekerjaannya digilir; admin berikutnya baru dicoba kalau yang mendapat
+    # giliran tidak bisa dihubungi.
+    numbers = _giliran(await admin_numbers())
     note = sanitize_relay(reason or "")
     delivered = 0
     for number in numbers:
+        if delivered:
+            break
         try:
             await whatsapp_client.send_text(
                 number,
@@ -115,8 +139,13 @@ async def perintah_selesai(pengirim: str, text: str) -> str | None:
     cocok = _SELESAI_RE.match((text or "").strip())
     if not cocok:
         return None
-    if not await rbac.boleh(pengirim, rbac.ADMIN):
+    # Hanya admin yang bertugas menerima takeover. Orang internal lain diberi
+    # tahu alasannya; pelanggan biasa tidak (pesannya diteruskan seperti biasa).
+    orang = await rbac.siapa(pengirim)
+    if orang is None:
         return None
+    if not orang.menerima_takeover:
+        return "Perintah selesai hanya bisa dipakai admin yang bertugas menerima takeover."
 
     nomor = canonical_wa_number(cocok.group(1))
     if not nomor:
