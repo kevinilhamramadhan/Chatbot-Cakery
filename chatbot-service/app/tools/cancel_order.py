@@ -148,7 +148,7 @@ async def proses_pembatalan(wa_number: str) -> str:
     manual = mode == "manual" or (not mode and _bayar_pakai_va(order))
     await store.update_pending_order(
         order.id, status=store.MENUNGGU_TRANSFER if (manual and sudah_dibayar)
-        else "cancelled")
+        else store.REFUND_OTOMATIS if sudah_dibayar else "cancelled")
     await store.set_cart(wa_number, [])
     await store.set_state(wa_number, State.IDLE)
     if not sudah_dibayar:

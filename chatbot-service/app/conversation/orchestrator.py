@@ -470,6 +470,8 @@ async def _jawab_refund(wa_number: str, lang: str) -> str | None:
         tutup = (bahasa.teks("tutup_refund_email", lang, email=surel) if surel
                  else bahasa.teks("tutup_refund_umum", lang))
         return bahasa.teks("refund_menunggu", lang, invoice=invoice, tutup=tutup)
+    if order.status == store.REFUND_OTOMATIS:
+        return bahasa.teks("refund_otomatis_menunggu", lang, invoice=invoice)
     if order.status == store.KABAR_TRANSFER_TERTUNDA:
         return bahasa.teks("refund_ditransfer", lang, invoice=invoice)
     if order.status == "refunded":

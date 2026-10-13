@@ -99,9 +99,15 @@ async def financial_report() -> str:
         return bahasa.teks("laporan_tak_tersedia", lang)
     revenue = float(data.get("revenue") or 0)
     expenses = float(data.get("expenses") or 0)
+    # Laba kotor hanya ditulis kalau backend mengirimnya. Dulu dihitung di sini
+    # sebagai omzet dikurangi pengeluaran, padahal Seller Site menghitungnya
+    # sesudah HPP: 14 Okt 2026 chatbot menyebut Rp630.000 saat Seller Site
+    # menampilkan Rp477.000.
+    laba = (bahasa.teks("laporan_laba_kotor", lang, laba=rupiah(data["gross_profit"]))
+            if data.get("gross_profit") is not None else "")
     return bahasa.teks(
         "laporan_keuangan", lang, awal=start, akhir=end, omzet=rupiah(revenue),
-        pengeluaran=rupiah(expenses), laba=rupiah(revenue - expenses),
+        pengeluaran=rupiah(expenses), laba=laba,
         pesanan=data.get("order_count", "-"))
 
 

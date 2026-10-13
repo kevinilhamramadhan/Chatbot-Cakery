@@ -699,6 +699,12 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Pesanan *{invoice}* sudah dibayar, jadi perubahannya perlu dibantu admin kami.",
         EN: "Order *{invoice}* is already paid, so our admin needs to help with that change.",
     },
+    "refund_otomatis_menunggu": {
+        ID: ("Pengembalian dana pesanan *{invoice}* sedang diproses otomatis ke aplikasi "
+             "yang kamu pakai buat bayar, biasanya dalam beberapa menit sampai beberapa jam 🙏"),
+        EN: ("The refund for order *{invoice}* is being processed automatically to the app "
+             "you paid with, usually within a few minutes to a few hours 🙏"),
+    },
     "refund_menunggu": {
         ID: ("Pengembalian dana pesanan *{invoice}* sedang diproses tim kami lewat "
              "transfer, biasanya beberapa hari kerja. {tutup}"),
@@ -918,12 +924,13 @@ _TEMPLAT: dict[str, dict[str, str]] = {
     },
     "laporan_keuangan": {
         ID: ("📊 *Laporan Keuangan* ({awal} s/d {akhir})\n"
-             "Omzet (pembayaran masuk): {omzet}\nPengeluaran: {pengeluaran}\n"
-             "Laba kotor: {laba}\nJumlah pesanan: {pesanan}"),
+             "Omzet: {omzet}\nPengeluaran: {pengeluaran}{laba}\n"
+             "Jumlah pesanan: {pesanan}"),
         EN: ("📊 *Financial Report* ({awal} to {akhir})\n"
-             "Revenue (payments received): {omzet}\nExpenses: {pengeluaran}\n"
-             "Gross profit: {laba}\nNumber of orders: {pesanan}"),
+             "Revenue: {omzet}\nExpenses: {pengeluaran}{laba}\n"
+             "Number of orders: {pesanan}"),
     },
+    "laporan_laba_kotor": {ID: "\nLaba kotor: {laba}", EN: "\nGross profit: {laba}"},
     "analitik_judul": {
         ID: "📈 *Analitik Bisnis* ({awal} s/d {akhir})",
         EN: "📈 *Business Analytics* ({awal} to {akhir})",

@@ -24,6 +24,10 @@ ACTIVE_ORDER_STATUSES = ("pending", "paid", "ready")
 # payment_type untuk pesanan DP yang tagihan pelunasannya sudah diterbitkan.
 PELUNASAN = "dp_final"
 MENUNGGU_TRANSFER = "refund_wait"
+# Dibatalkan pelanggan sesudah dibayar lewat QRIS: dananya dikembalikan Midtrans
+# sendiri, tidak ada yang perlu ditunggu chatbot. Dibedakan dari "cancelled"
+# supaya "uang saya kapan kembali?" menemukan pesanan yang benar.
+REFUND_OTOMATIS = "refund_auto"
 # Admin sudah mentransfer dananya (webhook /refunded sudah datang), tapi kabarnya
 # belum sampai ke pelanggan karena pengiriman WhatsApp-nya gagal. Dipisah dari
 # refund_wait supaya siklus polling tahu mana yang masih harus dicoba lagi:
@@ -221,7 +225,8 @@ async def refund_terakhir(wa_number: str) -> PendingOrder | None:
         return await db.scalar(
             select(PendingOrder).where(
                 PendingOrder.wa_number == wa_number,
-                PendingOrder.status.in_((MENUNGGU_TRANSFER, KABAR_TRANSFER_TERTUNDA, "refunded")),
+                PendingOrder.status.in_((MENUNGGU_TRANSFER, KABAR_TRANSFER_TERTUNDA,
+                                         REFUND_OTOMATIS, "refunded")),
             ).order_by(PendingOrder.id.desc())
         )
 

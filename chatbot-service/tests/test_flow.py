@@ -570,7 +570,8 @@ async def test_reports_owner_gating_and_real_data(patch_externals):
 
     set_turn_context(TurnContext(wa_number="628777000222@c.us"))  # OWNER_WA_NUMBERS
     fin = await financial_report.ainvoke({})
-    assert "Rp500.000" in fin and "Rp300.000" in fin     # revenue & profit
+    assert "Rp500.000" in fin and "Rp200.000" in fin     # omzet & pengeluaran
+    assert "Laba kotor" not in fin                       # backend tidak mengirim gross_profit
     ana = await business_analytics.ainvoke({})
     assert "Brownies Coklat" in ana and "Rp166.667" in ana
     assert ana.index("Brownies Coklat") < ana.index("Cake 22cm"), ana  # urut jumlah terjual
@@ -1245,3 +1246,34 @@ async def test_backend_mati_dikabari_setelah_dua_kali_gagal(patch_externals, mon
     await background._periksa_backend()
     await background._periksa_backend()
     assert len([t for wa, t in patch_externals["sent"] if "tidak bisa menghubungi" in t]) == 1
+
+
+async def test_refund_otomatis_dan_laba_kotor(patch_externals):
+    """Dua temuan uji langsung 14 Okt 2026."""
+    from app.tools.cancel_order import cancel_order
+
+    mp, backend = patch_externals["monkeypatch"], patch_externals["backend"]
+
+    async def tolak(order_id, wa=None):
+        raise RuntimeError("409")
+
+    async def refund(order_id, reason, wa_number=""):
+        return {"refund_mode": "auto"}
+
+    mp.setattr(backend, "cancel_order", tolak)
+    mp.setattr(backend, "refund_order", refund)
+    # Refund manual lama tidak boleh menutupi refund otomatis yang baru.
+    await store.create_pending_order(
+        wa_number=WA, order_ref="94", payment_type="dp", total_amount=100, amount_due=50,
+        items_json="[]", customer_json="{}", delivery_method="pickup",
+        status=store.MENUNGGU_TRANSFER, nomor_invoice="INV-LAMA",
+        expires_at=dt.datetime.now(dt.timezone.utc))
+    await store.create_pending_order(
+        wa_number=WA, order_ref="107", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json=json.dumps({"channel": "qris"}), delivery_method="pickup",
+        status="paid", nomor_invoice="INV-BARU", qris_url="http://x",
+        expires_at=dt.datetime.now(dt.timezone.utc))
+    await store.set_state(WA, State.AWAITING_CANCEL_CONFIRMATION)
+    await handle_message(WA, "ya")
+    r = await handle_message(WA, "uang saya kapan kembali?")
+    assert "INV-BARU" in r.text and "otomatis" in r.text
