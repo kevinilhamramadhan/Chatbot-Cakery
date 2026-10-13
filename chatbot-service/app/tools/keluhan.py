@@ -20,6 +20,7 @@ from langchain_core.tools import tool
 
 from app.conversation import bahasa, escalation, store
 from app.conversation.context import get_turn_context
+from app.conversation.states import text_is_praise
 from app.core.config import settings
 from app.core.security import mask_phone, sanitize_relay
 
@@ -54,6 +55,11 @@ async def send_apology(keluhan: str) -> str:
     kalimatmu sendiri — pakai tool ini supaya permintaan maafnya tepat.
     """
     ctx = get_turn_context()
+    # KAPAN tool ini dipakai memang keputusan model, tapi pujian yang dibacanya
+    # sebagai keluhan terlalu mahal untuk dibiarkan: takeover menyala dan admin
+    # dikabari "keluhan" yang tidak pernah ada.
+    if text_is_praise(ctx.user_text or ""):
+        return bahasa.teks("terima_kasih_pujian", await store.get_lang(ctx.wa_number))
     ringkas = sanitize_relay(keluhan or "")[:200]
     logger.warning("KELUHAN dari %s: %s", mask_phone(ctx.wa_number), ringkas)
 

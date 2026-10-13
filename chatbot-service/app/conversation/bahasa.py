@@ -740,6 +740,16 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Report figures always come from our system, so I can't state them myself. "
              "Please ask again and I'll pull the real data 🙏"),
     },
+    "terima_kasih_pujian": {
+        ID: "Wah, terima kasih banyak kak! Senang sekali kuenya cocok 😊",
+        EN: "Thank you so much! We're really glad you enjoyed it 😊",
+    },
+    "bisa_pesan_besok": {
+        ID: ("Bisa kak 😊 Pesanan paling cepat untuk besok. Sebutkan kue dan jumlahnya, "
+             "atau ketik *menu* untuk lihat daftarnya."),
+        EN: ("Yes 😊 The earliest we can do is tomorrow. Tell me the cake and quantity, "
+             "or type *menu* to see the list."),
+    },
     "belum_ada_info": {
         ID: ("Maaf kak, info soal itu belum ada di catatanku 🙏 Kalau soal menu, "
              "pesanan, atau pembayaran, aku siap bantu."),

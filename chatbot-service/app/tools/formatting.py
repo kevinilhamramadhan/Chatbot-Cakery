@@ -96,6 +96,11 @@ async def resolve_product(query: str) -> tuple[dict | None, list[dict]]:
         # Matched-token count dominates (specific beats generic); coverage of
         # label+query breaks ties toward the tighter name.
         score = len(overlap) * 2 + len(overlap) / len(l_tokens) + len(overlap) / len(q_tokens)
+        # "brownies" cocok ke Brownies Coklat (habis) dan Brownies Fudgy Almond
+        # (ada): yang bisa dipesan didahulukan. Bonusnya di bawah nilai satu
+        # kata cocok, jadi nama yang disebut lengkap tetap menang.
+        if tersedia(p):
+            score += 0.5
         scored.append((score, p))
 
     if not scored:

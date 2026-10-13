@@ -1097,3 +1097,29 @@ async def test_sapuan_13_okt(patch_externals, monkeypatch):
     )
     r = await handle_message(WA, "sisa yang harus dilunasi berapa?")
     assert "belum dibayar" in r.text and "Rp95.000" in r.text
+
+
+async def test_sapuan_kedua_13_okt(patch_externals, monkeypatch):
+    from app.conversation.states import text_is_confirm, text_is_praise
+    from app.tools.formatting import resolve_product
+    from app.tools.keluhan import send_apology
+
+    assert text_is_confirm("udah")
+    assert text_is_praise("kuenya kemarin enak banget")
+    assert not text_is_praise("kuenya kurang enak") and not text_is_praise("ga enak, basi")
+    set_turn_context(TurnContext(wa_number=WA, user_text="kuenya kemarin enak banget"))
+    out = await send_apology.ainvoke({"keluhan": "kue enak"})
+    assert "terima kasih" in out.lower() and await store.is_takeover_active(WA) is False
+
+    # Dua kue cocok dengan "brownies"; yang habis tidak boleh menang.
+    async def daftar(only_active=True, kategori=None):
+        return [{"id": 1, "nama_produk": "Brownies Coklat", "harga_jual": 1, "is_in_stock": False},
+                {"id": 2, "nama_produk": "Brownies Fudgy Almond", "harga_jual": 1, "is_in_stock": True}]
+
+    from app.backend_client import products as products_api
+
+    monkeypatch.setattr(products_api, "list_products", daftar)
+    p, _ = await resolve_product("brownies")
+    assert p["id"] == 2
+    p, _ = await resolve_product("brownies coklat")
+    assert p["id"] == 1

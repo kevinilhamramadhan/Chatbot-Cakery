@@ -17,7 +17,7 @@ class State(StrEnum):
 
 # Simple affirmative/cancel keyword sets for deterministic steps.
 CONFIRM_WORDS = {
-    "sudah", "sudah sesuai", "sesuai", "betul", "benar", "bener", "ya", "yes",
+    "sudah", "udah", "udh", "sdh", "sudah sesuai", "sesuai", "betul", "benar", "bener", "ya", "yes",
     "ok", "oke", "okay", "lanjut", "lanjutkan", "fix", "gas", "iya", "setuju",
     "confirm", "boleh", "siap", "sip", "yup", "deal", "yep", "yeah",
     "checkout",
@@ -186,6 +186,25 @@ _NEGATIF = {
     "disappointed", "disappointing", "upset", "angry", "terrible", "awful",
     "stale", "burnt", "late", "worst",
 }
+
+
+_POSITIF = {"enak", "suka", "mantap", "mantul", "lezat", "nikmat", "bagus", "puas",
+            "recommended", "delicious", "love", "loved", "great", "yummy", "tasty", "amazing"}
+_SANGKAL = _PENOLAKAN | {"kurang", "bukan", "kok"}
+
+
+def text_is_praise(text: str) -> bool:
+    """Pujian murni: "kuenya kemarin enak banget". Terukur 13 Okt 2026, kalimat
+    ini dijawab model dengan send_apology — pelanggan yang memuji dimintai maaf
+    lalu bot diam sehari karena takeover. "kurang enak"/"ga enak" bukan pujian."""
+    words = set(_tokens(text))
+    return bool(words & _POSITIF) and not words & (_NEGATIF | _SANGKAL)
+
+
+def text_bisa_pesan_besok(text: str) -> bool:
+    words = set(_tokens(text))
+    return bool(words & {"besok", "tomorrow"} and words & {"pesan", "pesen", "order", "mesen"}
+                and words & {"bisa", "bisakah", "boleh", "can"}) and not mentions_quantity(text)
 
 
 def text_is_negative(text: str) -> bool:

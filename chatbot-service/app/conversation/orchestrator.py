@@ -32,6 +32,7 @@ from app.conversation.states import (
     text_tanya_sisa,
     text_tanya_status_pesanan,
     text_asks_recommendation,
+    text_bisa_pesan_besok,
     text_is_cancel,
     text_is_confirm,
     text_is_gratitude,
@@ -321,6 +322,8 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         # jadi tidak pernah masuk). Model membacanya sebagai keluhan dan
         # meminta maaf panjang lebar; tidak ada apa pun yang perlu dibatalkan.
         reply = Reply(text=bahasa.teks("tidak_jadi_kosong", lang))
+    elif text_bisa_pesan_besok(text) and state == State.IDLE:
+        reply = Reply(text=bahasa.teks("bisa_pesan_besok", lang))
     elif text_menawar(text):
         reply = Reply(text=bahasa.teks("belum_ada_info", lang))
     elif text_tanya_alamat_toko(text) and "ganti di .env" not in settings.store_address:

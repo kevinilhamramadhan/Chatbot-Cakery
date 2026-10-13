@@ -18,7 +18,7 @@ from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State, mentions_quantity
 from app.core.config import settings
-from app.tools.add_to_cart import _as_items, cart_summary
+from app.tools.add_to_cart import _as_items, add_to_cart, cart_summary
 
 _KATA = re.compile(r"[a-z0-9]+")
 
@@ -72,6 +72,10 @@ async def update_cart(items: list[dict] | None = None, product: str | None = Non
         return bahasa.teks("ubah_keranjang_sudah_ditagih", lang)
     cart = await store.get_cart(wa)
     if not cart:
+        # "ga usah, 5 aja" sesudah tawaran pesanan besar: keranjangnya masih
+        # kosong, jadi yang dimaksud jelas memesan, bukan mengubah.
+        if any((it.get("qty") or 0) > 0 for it in items):
+            return await add_to_cart.ainvoke({"items": items})
         return bahasa.teks("keranjang_kosong_tool", lang)
     if not items:
         return bahasa.teks("ubah_keranjang_item_mana", lang) + "\n\n" + cart_summary(cart, lang)
