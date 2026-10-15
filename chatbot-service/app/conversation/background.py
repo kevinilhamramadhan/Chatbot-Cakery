@@ -15,10 +15,10 @@ import time
 from datetime import datetime, timezone
 
 from app.backend_client import api as backend
-from app.conversation import bahasa, store
+from app.conversation import bahasa, rbac, store, tanggal
 from app.conversation.states import State
 from app.core.config import settings
-from app.core.security import mask_phone
+from app.core.security import mask_phone, sanitize_relay, wa_digits
 from app.tools.formatting import rupiah
 from app.whatsapp_client.client import whatsapp_client
 
@@ -196,16 +196,20 @@ async def _lepas_pesanan_selesai() -> None:
             continue
         if terbaru.get("status") not in _STATUS_TUTUP:
             continue
-        await store.update_pending_order(order.id, status="selesai")
-        await store.set_state(order.wa_number, State.IDLE)
-        # Backend hanya mengabari saat "siap"; saat pesanan diserahkan pelanggan
-        # tidak mendapat apa pun. Batal/refund punya kabarnya sendiri.
-        if terbaru.get("status") in ("delivered", "picked_up", "completed"):
-            await _notify(order.wa_number, bahasa.teks(
-                "pesanan_selesai", await store.get_lang(order.wa_number),
-                invoice=_label(order), toko=settings.store_name))
-        logger.info("Pesanan %s sudah %s di backend — dilepas", order.order_ref,
-                    terbaru.get("status"))
+        await _lepas(order, terbaru.get("status"))
+
+
+async def _lepas(order, status_backend: str) -> None:
+    """Tutup baris lokal pesanan yang di backend sudah diserahkan/berakhir."""
+    await store.update_pending_order(order.id, status="selesai")
+    await store.set_state(order.wa_number, State.IDLE)
+    # Backend hanya mengabari "siap" dan "completed"; delivered/picked_up hanya
+    # ketahuan dari polling. Batal/refund punya kabarnya sendiri.
+    if status_backend in ("delivered", "picked_up", "completed"):
+        await _notify(order.wa_number, bahasa.teks(
+            "pesanan_selesai", await store.get_lang(order.wa_number),
+            invoice=_label(order), toko=settings.store_name))
+    logger.info("Pesanan %s sudah %s di backend — dilepas", order.order_ref, status_backend)
 
 
 async def _kabari_transfer_tertunda() -> None:
@@ -437,6 +441,88 @@ async def notify_ready(order_id: int) -> bool:
     await _notify(order.wa_number, msg)
     return True
 
+
+
+# Kabar "pembayaran diterima" sudah berbunyi "pesananmu akan segera kami
+# proses", dan backend memindahkan pesanan ke in_process tepat saat lunas — jadi
+# /paid dan /processing tiba berdempetan. Kabar "sedang diproses" hanya dikirim
+# kalau seller memindahkannya belakangan.
+# ponytail: dibedakan dari umur kabar lunas, bukan dari penyebab perpindahan;
+# kalau backend suatu saat mengirim penyebabnya, pakai itu.
+_JEDA_SESUDAH_LUNAS = 5 * 60
+
+
+async def notify_processing(order_id: int) -> bool:
+    """Kabari pelanggan pesanannya mulai dibuat (webhook backend /processing)."""
+    orders = await store.list_orders_by_status("paid")
+    order = next((o for o in orders if o.order_ref == str(order_id)), None)
+    if order is None:
+        return False
+    umur = (datetime.now(timezone.utc) - _aware(order.updated_at)).total_seconds()
+    if umur < _JEDA_SESUDAH_LUNAS:
+        return True
+    lang = await store.get_lang(order.wa_number)
+    return await _notify(order.wa_number, bahasa.teks("pesanan_diproses", lang,
+                                                      label=_label(order)))
+
+
+async def notify_completed(order_id: int) -> bool:
+    """Pesanan diselesaikan seller (webhook backend /completed).
+
+    Sama dengan yang dilakukan polling _lepas_pesanan_selesai, hanya tanpa
+    menunggu siklusnya.
+    """
+    orders = await store.list_orders_by_status("pending", "paid", "ready")
+    order = next((o for o in orders if o.order_ref == str(order_id)), None)
+    if order is None:
+        return False
+    await _lepas(order, "completed")
+    return True
+
+
+def _teks_pesanan_baru(o: dict) -> str:
+    """Ringkasan pesanan baru untuk seller. Nama dan alamat diketik pelanggan
+    (website), jadi diperlakukan sama seperti kutipan takeover."""
+    inv = (o.get("invoice") or {}).get("nomor_invoice") or f"#{o.get('id')}"
+    asal = "WhatsApp" if o.get("created_via") == "chatbot" else "website"
+    cust = o.get("customer") or {}
+    baris = [f"🧾 Pesanan baru masuk: *{inv}* (lewat {asal})",
+             f"Pelanggan: {sanitize_relay(cust.get('nama') or '-')}"
+             f" ({wa_digits(cust.get('nomor_wa') or '') or '-'})"]
+    for it in o.get("order_items") or []:
+        nama = it.get("product_name") or it.get("custom_product_name") or "?"
+        baris.append(f"- {it.get('jumlah', 1)}× {sanitize_relay(nama)}")
+    if o.get("fulfillment_date"):
+        waktu = datetime.fromisoformat(o["fulfillment_date"]).astimezone(tanggal.WIB)
+        cara = "Dikirim" if o.get("metode_pengiriman") == "delivery" else "Diambil"
+        baris.append(f"{cara}: {tanggal.tampil(waktu.isoformat())}")
+    bayar = "sudah dibayar" if o.get("payment_status") == "paid" else "belum dibayar"
+    baris.append(f"Total: {rupiah(o.get('total_harga_pesanan'))} ({bayar})")
+    return "\n".join(baris)
+
+
+async def notify_created(order_id: int) -> bool:
+    """Kabari seller ada pesanan baru (webhook backend /created).
+
+    Penerimanya sama dengan penerima takeover: yang bertugas melayani pelanggan,
+    diatur dari Admin Site. Dikirim ke semuanya, tidak digilir.
+    """
+    try:
+        order = await backend.get_order(order_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("detail pesanan baru %s gagal diambil: %s", order_id, exc)
+        return False
+    if order is None:
+        return False
+    teks = _teks_pesanan_baru(order)
+    terkirim = False
+    for nomor in await rbac.nomor_penerima_takeover():
+        try:
+            await whatsapp_client.send_text(nomor, teks)
+            terkirim = True
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Kabar pesanan baru ke %s gagal: %s", mask_phone(nomor), exc)
+    return terkirim
 
 _PURGE_EVERY_SECONDS = 24 * 60 * 60
 

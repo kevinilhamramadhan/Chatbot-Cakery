@@ -492,6 +492,10 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: "Thank you",
     },
     # ── Kabar proaktif ───────────────────────────────────────────────────────
+    "pesanan_diproses": {
+        ID: "Pesananmu *{label}* sedang kami buat sekarang 👩‍🍳 Nanti aku kabari lagi begitu siap.",
+        EN: "We're making your order *{label}* now 👩‍🍳 I'll let you know as soon as it's ready.",
+    },
     "pesanan_siap": {
         ID: "Kabar baik! Pesananmu *{label}* sudah *siap* 🎉\n",
         EN: "Good news! Your order *{label}* is *ready* 🎉\n",

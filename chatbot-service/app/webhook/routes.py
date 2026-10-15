@@ -273,6 +273,36 @@ async def mark_ready(order_id: int, x_internal_key: str | None = Header(default=
     return {"status": "ok" if ok else "not_found", "order_id": order_id}
 
 
+@router.post("/internal/orders/{order_id}/processing")
+async def mark_processing(order_id: int, x_internal_key: str | None = Header(default=None)):
+    """Seller memindahkan pesanan ke in_process: kabari pelanggan kuenya mulai dibuat."""
+    _require_internal_key(x_internal_key)
+    ok = await background.notify_processing(order_id)
+    return {"status": "ok" if ok else "not_found", "order_id": order_id}
+
+
+@router.post("/internal/orders/{order_id}/completed")
+async def mark_completed(order_id: int, x_internal_key: str | None = Header(default=None)):
+    """Seller menandai pesanan selesai: kabari pelanggan dan lepas pesanannya."""
+    _require_internal_key(x_internal_key)
+    ok = await background.notify_completed(order_id)
+    return {"status": "ok" if ok else "not_found", "order_id": order_id}
+
+
+@router.post("/internal/orders/{order_id}/created")
+async def mark_created(order_id: int, tasks: BackgroundTasks,
+                       x_internal_key: str | None = Header(default=None)):
+    """Pesanan baru masuk (chatbot atau website): kabari seller lewat WhatsApp.
+
+    Dijalankan di belakang supaya backend tidak ikut menunggu: webhook ini
+    dipanggil di dalam request pembuatan pesanan, dan mengirim ke beberapa
+    nomor seller bisa lebih lama dari batas waktu backend (5 detik).
+    """
+    _require_internal_key(x_internal_key)
+    tasks.add_task(background.notify_created, order_id)
+    return {"status": "accepted", "order_id": order_id}
+
+
 @router.post("/internal/orders/{order_id}/paid")
 async def mark_paid(order_id: int, x_internal_key: str | None = Header(default=None)):
     """Kabari pelanggan begitu pembayarannya masuk, tanpa menunggu polling.

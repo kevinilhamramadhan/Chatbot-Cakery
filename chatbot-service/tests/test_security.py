@@ -125,6 +125,24 @@ def test_internal_ready_works_with_key(client, monkeypatch):
     assert r.status_code == 200 and r.json()["status"] == "not_found"
 
 
+
+@pytest.mark.parametrize("event", ["processing", "completed", "created"])
+def test_internal_order_events_require_key(client, event):
+    assert client.post(f"/webhook/internal/orders/1/{event}").status_code == 404
+
+
+def test_internal_created_ditanggapi_tanpa_menunggu_kirim(client, monkeypatch):
+    dipanggil = []
+
+    async def fake_notify(order_id):
+        dipanggil.append(order_id)
+        return True
+    monkeypatch.setattr("app.conversation.background.notify_created", fake_notify)
+    r = client.post("/webhook/internal/orders/7/created",
+                    headers={"X-Internal-Key": settings.internal_api_key})
+    assert r.status_code == 200 and r.json()["status"] == "accepted"
+    assert dipanggil == [7]
+
 # ── Finding 5: no raw phone numbers in logs ──────────────────────────────────
 def test_mask_phone():
     assert mask_phone(WA) == "62***6789"

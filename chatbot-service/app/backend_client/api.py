@@ -135,6 +135,21 @@ async def get_latest_order(wa_number: str) -> dict | None:
     return None
 
 
+async def get_order(order_id) -> dict | None:
+    """Detail satu pesanan, dari mana pun asalnya (chatbot, website).
+
+    Service key `orders:read` boleh membaca `GET /orders/{id}` sejak backend
+    dcd422b; dipakai notifikasi pesanan baru ke seller.
+    """
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        r = await c.get(f"{_base()}/orders/{int(order_id)}",
+                        headers=_headers("backend_orders_read_key"))
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+
 async def cancel_order(order_id, wa_number: str) -> dict:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         r = await c.post(f"{_base()}/orders/{int(order_id)}/cancel",

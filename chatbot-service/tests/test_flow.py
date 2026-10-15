@@ -1277,3 +1277,66 @@ async def test_refund_otomatis_dan_laba_kotor(patch_externals):
     await handle_message(WA, "ya")
     r = await handle_message(WA, "uang saya kapan kembali?")
     assert "INV-BARU" in r.text and "otomatis" in r.text
+
+
+async def test_pesanan_baru_dikabarkan_ke_seller(patch_externals):
+    """Webhook backend /created: semua penerima takeover dapat ringkasan pesanan."""
+    from app.conversation import rbac
+
+    async def f_order(order_id):
+        return {"id": order_id, "created_via": "web", "metode_pengiriman": "pickup",
+                "fulfillment_date": "2026-10-18T03:00:00Z", "total_harga_pesanan": "125500.00",
+                "payment_status": "unpaid", "invoice": {"nomor_invoice": "INV-501"},
+                "customer": {"nama": "Alice https://jahat.example", "nomor_wa": "081234567890"},
+                "order_items": [{"product_name": "Bolu Cokelat", "jumlah": 2}]}
+
+    async def f_penerima():
+        return ["6281111111111", "6282222222222"]
+
+    mp = patch_externals["monkeypatch"]
+    mp.setattr(patch_externals["backend"], "get_order", f_order)
+    mp.setattr(rbac, "nomor_penerima_takeover", f_penerima)
+
+    assert await background.notify_created(501) is True
+    sent = patch_externals["sent"]
+    assert [wa for wa, _ in sent] == ["6281111111111", "6282222222222"]
+    teks = sent[0][1]
+    assert "INV-501" in teks and "website" in teks and "2× Bolu Cokelat" in teks
+    assert "Minggu, 18 Oktober 2026 pukul 10.00" in teks           # UTC → WIB
+    assert "Rp125.500" in teks and "belum dibayar" in teks
+    assert "https://" not in teks                                 # teks pelanggan dinetralkan
+
+
+async def test_kabar_diproses_tidak_dobel_dengan_kabar_lunas(patch_externals):
+    """Backend menembak /paid lalu /processing berdempetan saat lunas; kabar
+    "sedang dibuat" hanya untuk perpindahan oleh seller sesudahnya."""
+    await store.create_pending_order(
+        wa_number=WA, order_ref="900", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method="pickup", status="paid",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    assert await background.notify_processing(900) is True
+    assert patch_externals["sent"] == []                          # baru saja lunas
+
+    order = await store.get_active_pending(WA)
+    lama = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=10)
+    patch_externals["monkeypatch"].setattr(order, "updated_at", lama)
+
+    async def f_list(*statuses):
+        return [order]
+
+    patch_externals["monkeypatch"].setattr(store, "list_orders_by_status", f_list)
+    assert await background.notify_processing(900) is True
+    assert any("sedang kami buat" in t for _, t in patch_externals["sent"])
+
+
+async def test_webhook_completed_melepas_pesanan(patch_externals):
+    await store.create_pending_order(
+        wa_number=WA, order_ref="901", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method="pickup", status="ready",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    assert await background.notify_completed(901) is True
+    assert await store.get_active_pending(WA) is None
+    assert any("sudah selesai" in t for _, t in patch_externals["sent"])
+    assert await background.notify_completed(901) is False        # tidak dikabari dua kali
