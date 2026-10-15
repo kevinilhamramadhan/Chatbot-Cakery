@@ -14,7 +14,7 @@ permissions: {}
 
 jobs:
   deploy:
-    name: picu deploy
+    name: Deploy to production
     # CI dari pull request juga memicu workflow_run (branch di fork bisa bernama
     # main), jadi hanya run hasil push yang diterima.
     if: >-
@@ -23,7 +23,7 @@ jobs:
        github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     steps:
-      - name: Panggil workflow deploy di repo Deploy-Toti-Cakery
+      - name: Dispatch deploy workflow
         env:
           GH_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: >-
