@@ -1340,3 +1340,17 @@ async def test_webhook_completed_melepas_pesanan(patch_externals):
     assert await store.get_active_pending(WA) is None
     assert any("sudah selesai" in t for _, t in patch_externals["sent"])
     assert await background.notify_completed(901) is False        # tidak dikabari dua kali
+
+
+async def test_webhook_cancelled_mengabari_sekali(patch_externals):
+    await store.create_pending_order(
+        wa_number=WA, order_ref="902", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method="pickup", status="pending",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    assert await background.notify_cancelled(902) is True
+    assert await store.get_active_pending(WA) is None
+    sent = patch_externals["sent"]
+    assert len(sent) == 1 and "dibatalkan" in sent[0][1] and "refund" not in sent[0][1].lower()
+    assert await background.notify_cancelled(902) is None         # retry backend: tidak dobel
+    assert len(sent) == 1

@@ -126,7 +126,7 @@ def test_internal_ready_works_with_key(client, monkeypatch):
 
 
 
-@pytest.mark.parametrize("event", ["processing", "completed", "created"])
+@pytest.mark.parametrize("event", ["processing", "completed", "created", "cancelled"])
 def test_internal_order_events_require_key(client, event):
     assert client.post(f"/webhook/internal/orders/1/{event}").status_code == 404
 

@@ -270,6 +270,22 @@ async def klaim_kabar_lunas(order_id: int) -> bool:
         return res.rowcount == 1
 
 
+async def klaim_status(order_id: int, dari: str, ke: str) -> bool:
+    """Pindahkan status pesanan dari `dari` ke `ke`; True hanya untuk SATU pemanggil.
+
+    Alasannya sama dengan klaim_kabar_lunas: webhook yang diulang backend dan
+    polling bisa tiba berbarengan, dan hanya UPDATE bersyarat yang menutup celahnya.
+    """
+    async with async_session_factory() as db:
+        res = await db.execute(
+            update(PendingOrder)
+            .where(PendingOrder.id == order_id, PendingOrder.status == dari)
+            .values(status=ke)
+        )
+        await db.commit()
+        return res.rowcount == 1
+
+
 async def purge_old_data() -> tuple[int, int]:
     """Delete stale personal data: old transcripts + identity blobs on finished
     orders (nama/alamat/nomor HP). The backend keeps the authoritative order

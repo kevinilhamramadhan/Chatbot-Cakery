@@ -480,6 +480,31 @@ async def notify_completed(order_id: int) -> bool:
     return True
 
 
+async def notify_cancelled(order_id: int) -> bool | None:
+    """Backend membatalkan pesanan yang belum dibayar (webhook /cancelled).
+
+    Backend menembaknya saat pembayaran Midtrans kedaluwarsa atau ditolak dan
+    pesanannya masih pending. Ini BUKAN kabar refund: belum ada uang yang masuk.
+    None = tidak ada pesanan pending dengan id itu (sudah dikabari, atau bukan
+    pesanan lewat WhatsApp); False = kabarnya gagal terkirim.
+
+    Idempotency-Key dari backend (order:{id}:cancelled) satu-satu dengan
+    perpindahan pending -> cancelled, jadi klaim status itu yang menahan ulangan.
+    """
+    orders = await store.list_orders_by_status("pending")
+    order = next((o for o in orders if o.order_ref == str(order_id)), None)
+    if order is None or not await store.klaim_status(order.id, "pending", "cancelled"):
+        return None
+    lang = await store.get_lang(order.wa_number)
+    if not await _notify(order.wa_number, bahasa.teks("pesanan_dibatalkan", lang,
+                                                      invoice=_label(order))):
+        await store.update_pending_order(order.id, status="pending")  # lepas klaim
+        return False
+    await store.set_state(order.wa_number, State.IDLE)
+    logger.info("Pesanan %s dibatalkan backend — pelanggan sudah dikabari", order.order_ref)
+    return True
+
+
 def _teks_pesanan_baru(o: dict) -> str:
     """Ringkasan pesanan baru untuk seller. Nama dan alamat diketik pelanggan
     (website), jadi diperlakukan sama seperti kutipan takeover."""

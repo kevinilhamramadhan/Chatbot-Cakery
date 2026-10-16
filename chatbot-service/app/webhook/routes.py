@@ -289,6 +289,20 @@ async def mark_completed(order_id: int, x_internal_key: str | None = Header(defa
     return {"status": "ok" if ok else "not_found", "order_id": order_id}
 
 
+@router.post("/internal/orders/{order_id}/cancelled")
+async def mark_cancelled(order_id: int, x_internal_key: str | None = Header(default=None)):
+    """Backend membatalkan pesanan yang belum dibayar: kabari pelanggan.
+
+    503 kalau kabarnya gagal terkirim, supaya backend mengulang; ulangan sesudah
+    berhasil dijawab not_found tanpa mengirim apa pun.
+    """
+    _require_internal_key(x_internal_key)
+    ok = await background.notify_cancelled(order_id)
+    if ok is False:
+        raise HTTPException(status_code=503, detail="notification not sent")
+    return {"status": "ok" if ok else "not_found", "order_id": order_id}
+
+
 @router.post("/internal/orders/{order_id}/created")
 async def mark_created(order_id: int, tasks: BackgroundTasks,
                        x_internal_key: str | None = Header(default=None)):
