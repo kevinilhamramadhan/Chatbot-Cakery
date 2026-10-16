@@ -1182,6 +1182,33 @@ async def test_konfirmasi_batal_tanpa_dukungan_backend_tidak_membuntukan(patch_e
     assert await store.get_active_pending(WA) is not None, "tidak ada yang dibatalkan"
 
 
+async def test_batal_belum_bayar_ditolak_backend_tidak_menjanjikan_dana(patch_externals):
+    """UAT 17 Okt: backend menolak membatalkan pesanan yang tagihannya masih
+    pending, lalu chatbot menjawab "supaya dananya bisa dikembalikan" padahal
+    belum ada uang masuk, dan tertahan di pertanyaan ya/tidak."""
+    from app.tools.cancel_order import proses_pembatalan
+
+    await _seed_awaiting_payment(order_ref="9104")
+
+    async def f_cancel(order_ref, wa=None):
+        raise httpx.HTTPStatusError("409", request=None, response=None)
+
+    async def f_refund(order_ref, reason, wa_number=""):
+        return None
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "cancel_order", f_cancel)
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "refund_order", f_refund)
+    await store.set_state(WA, State.AWAITING_CANCEL_CONFIRMATION)
+
+    out = await proses_pembatalan(WA)
+
+    assert "dikembalikan" not in out.replace("tidak ada dana yang perlu dikembalikan", "")
+    assert "belum bisa dibatalkan" in out
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_PAYMENT
+
+
 async def test_konfirmasi_batal_berhasil_saat_backend_mengizinkan(patch_externals):
     """Begitu backend mengizinkan (cancel berbayar ATAU refund lewat service key),
     jalurnya langsung hidup tanpa perubahan kode lagi."""

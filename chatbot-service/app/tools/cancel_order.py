@@ -139,7 +139,16 @@ async def proses_pembatalan(wa_number: str) -> str:
         mode = str((hasil or {}).get("refund_mode") or "")
 
     if not berhasil:
-        logger.info("refund pelanggan belum bisa otomatis untuk %s", order.order_ref)
+        logger.info("pembatalan belum bisa otomatis untuk %s", order.order_ref)
+        # Pertanyaan "yakin batal?" sudah terjawab; tetap di keadaan itu membuat
+        # pesan berikutnya dibaca sebagai jawaban ya/tidak lagi.
+        await store.set_state(wa_number, State.ORDER_ACTIVE if sudah_dibayar
+                              else State.AWAITING_PAYMENT)
+        if not sudah_dibayar:
+            # Belum ada uang masuk: jangan menjanjikan pengembalian dana.
+            label = order.nomor_invoice or f"#{order.order_ref}"
+            return (bahasa.teks("batal_belum_bisa", lang, label=label)
+                    + _jalur_tindak_lanjut(lang))
         return bahasa.teks("batal_perlu_tim", lang) + _jalur_tindak_lanjut(lang)
 
     # Refund manual belum selesai saat ini juga — uangnya baru berpindah setelah

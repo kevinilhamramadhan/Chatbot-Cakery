@@ -42,7 +42,10 @@ def test_baca_tanggal(teks, harap):
     ("5/10", "terlalu_jauh"),                 # 5 Okt sudah hari ini -> tahun depan
     ("5 november", "terlalu_jauh"),           # 31 hari
     ("besok jam 6", "jam_tutup"),
-    ("besok jam 17", "jam_tutup"),
+    ("besok jam 8", "jam_tutup"),             # toko buka 09.00 (FAQ)
+    ("besok jam 19", "jam_tutup"),            # tutup 19.00
+    ("minggu", "hari_libur"),                 # 11 Okt, toko libur
+    ("11/10 jam 10", "hari_libur"),
     ("apa aja", "tidak_terbaca"),
 ])
 def test_periksa_menolak(teks, alasan):
@@ -55,6 +58,7 @@ def test_periksa_menolak(teks, alasan):
     ("lusa jam 2 siang", "2026-10-07T14:00:00+07:00"),
     ("12/10 jam 9.30", "2026-10-12T09:00:00+07:00"),
     ("sabtu at 3 pm", "2026-10-10T15:00:00+07:00"),
+    ("besok jam 18", "2026-10-06T18:00:00+07:00"),        # masih jam buka
 ])
 def test_periksa_menerima(teks, iso):
     assert tanggal.periksa(teks, KINI) == (iso, "")
@@ -97,3 +101,21 @@ async def test_dp_tidak_ditawarkan_untuk_pesanan_besok(patch_externals):
     assert "DP" not in r.text
     await handle_message(WA, "dp")                            # diminta pun tetap penuh
     assert (await store.get_customer(WA))["payment_type"] == "full"
+
+
+async def test_minggu_ditolak_dengan_penjelasan(patch_externals):
+    """FAQ: toko libur hari Minggu. UAT 17 Okt: "besok" pada hari Sabtu diterima."""
+    await _sampai_langkah_tanggal()
+    r = await handle_message(WA, "minggu")
+    assert "libur" in r.text and "tanggal" not in await store.get_customer(WA)
+
+
+async def test_tanggal_bisa_diganti_sebelum_tagihan_terbit(patch_externals):
+    """UAT 17 Okt: "Senin jam 10" saat ditanya metode bayar diabaikan diam-diam."""
+    await _sampai_langkah_tanggal()
+    await handle_message(WA, "lusa")
+    r = await handle_message(WA, "selasa jam 13")
+    assert "dicatat" in r.text and "13.00" in r.text
+    assert (await store.get_customer(WA))["tanggal"].endswith("T13:00:00+07:00")
+    r = await handle_message(WA, "bayar sekarang")                # bukan ganti tanggal
+    assert "dicatat" not in r.text

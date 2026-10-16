@@ -810,6 +810,16 @@ async def _handle_identity(wa_number: str, text: str, lang: str) -> Reply:
                                       tanggal=tanggal.tampil(iso, lang))
                      + "\n\n" + lanjut)
 
+    # Pelanggan mengganti tanggal sebelum tagihan terbit ("Senin jam 10" saat
+    # ditanya metode bayar). UAT 17 Okt: tanggal baru diabaikan diam-diam.
+    # Hanya tanggal sah atau yang jelas tanggal (libur, kejauhan, jam tutup);
+    # "bayar sekarang" terbaca hari ini dan tidak boleh mengulang langkah tanggal.
+    if tanggal.periksa(text)[1] not in ("tidak_terbaca", "terlalu_cepat"):
+        for kunci in ("tanggal", "payment_type"):
+            cust.pop(kunci, None)
+        await store.set_customer(wa_number, cust)
+        return await _handle_identity(wa_number, text, lang)
+
     # Step 4: payment type (full vs DP 50%)
     if "payment_type" not in cust:
         if not _boleh_dp(cust) or _FULL_RE.search(text):

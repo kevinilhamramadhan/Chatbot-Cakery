@@ -11,9 +11,13 @@ from datetime import date, datetime, time, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
 MAKS_HARI = 30
-# Jam buka toko. Juga menjaga nilai tetap >= 07.00 WIB: batas backend dihitung
-# pada tengah malam UTC (= 07.00 WIB), jadi jam lebih pagi akan ditolaknya.
-JAM_BUKA, JAM_TUTUP, JAM_BAWAAN = 7, 17, 10
+# Jam buka toko sesuai FAQ (Senin-Sabtu 09.00-19.00 WIB, Minggu libur). Juga
+# menjaga nilai tetap >= 07.00 WIB: batas backend dihitung pada tengah malam
+# UTC (= 07.00 WIB), jadi jam lebih pagi akan ditolaknya.
+# ponytail: jam dan hari libur ditulis tetap; pindahkan ke pengaturan kalau
+# toko mulai sering mengubah jadwalnya.
+JAM_BUKA, JAM_TUTUP, JAM_BAWAAN = 9, 19, 10
+HARI_LIBUR = {6}  # Minggu
 
 _BULAN = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "mei": 5, "may": 5, "jun": 6,
           "jul": 7, "agu": 8, "ags": 8, "aug": 8, "sep": 9, "okt": 10, "oct": 10,
@@ -117,7 +121,8 @@ def baca_jam(teks: str) -> int | None:
 def periksa(teks: str, kini: datetime | None = None) -> tuple[str | None, str]:
     """(iso, "") bila sah, atau (None, alasan).
 
-    alasan: "tidak_terbaca" | "terlalu_cepat" | "terlalu_jauh" | "jam_tutup".
+    alasan: "tidak_terbaca" | "terlalu_cepat" | "terlalu_jauh" | "hari_libur"
+    | "jam_tutup".
     """
     kini = kini or sekarang()
     hari_ini = kini.astimezone(WIB).date()
@@ -128,6 +133,8 @@ def periksa(teks: str, kini: datetime | None = None) -> tuple[str | None, str]:
         return None, "terlalu_cepat"
     if d > hari_ini + timedelta(days=MAKS_HARI):
         return None, "terlalu_jauh"
+    if d.weekday() in HARI_LIBUR:
+        return None, "hari_libur"
     jam = baca_jam(teks)
     if jam is None:
         jam = JAM_BAWAAN

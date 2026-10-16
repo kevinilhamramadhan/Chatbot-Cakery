@@ -29,9 +29,10 @@ os.environ.update({
     "OLLAMA_BASE_URL": "http://ollama.invalid",
 })
 
+import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 
-from app.conversation import rbac  # noqa: E402
+from app.conversation import rbac, tanggal  # noqa: E402
 from app.core.database import Base, engine  # noqa: E402
 
 # Last line of defence: `fresh_db` drops every table, so a misconfigured run
@@ -51,3 +52,15 @@ async def fresh_db():
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
+
+
+@pytest.fixture(autouse=True)
+def hari_kerja(monkeypatch):
+    """"besok" dan "lusa" tidak boleh jatuh pada Minggu (toko libur): tanpa ini
+    suite gagal tiap Jumat dan Sabtu. Jam dipatok ke Senin pekan berjalan."""
+    from datetime import datetime, time, timedelta
+
+    kini = datetime.now(tanggal.WIB)
+    senin = datetime.combine(kini.date() - timedelta(days=kini.weekday()),
+                             time(10), tzinfo=tanggal.WIB)
+    monkeypatch.setattr(tanggal, "sekarang", lambda: senin)

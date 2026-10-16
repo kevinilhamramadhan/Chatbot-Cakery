@@ -189,22 +189,35 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "courier 🙏"),
     },
     # Tanggal ambil/kirim: backend menolak pesanan untuk hari yang sama (H-1),
-    # dan toko menerima pesanan paling lama 30 hari ke depan.
+    # toko menerima pesanan paling lama 30 hari ke depan, buka Senin-Sabtu
+    # 09.00-19.00 WIB (lihat tanggal.py).
     "tanya_tanggal": {
-        ID: ("Kuenya mau diambil/dikirim *tanggal berapa*?\n"
-             "Paling cepat *besok*, paling lama *30 hari* dari sekarang. "
-             "Contoh: *besok*, *Sabtu*, *12 Oktober*, atau *12/10 jam 14*.\n"
-             "(Kalau jamnya tidak disebut, kami catat pukul 10.00.)"),
-        EN: ("*What date* would you like to pick it up or have it sent?\n"
-             "The earliest is *tomorrow*, the latest *30 days* from now. "
-             "For example: *tomorrow*, *Saturday*, *12 October*, or *12/10 at 14*.\n"
-             "(If you don't mention a time, we'll note 10:00.)"),
+        ID: ("Kuenya mau diambil/dikirim *tanggal berapa*? 📅\n\n"
+             "Ketentuannya:\n"
+             "• Paling cepat *besok*, paling lama *30 hari* dari sekarang\n"
+             "• Senin sampai Sabtu, pukul *09.00 - 19.00 WIB* (Minggu libur)\n"
+             "• Kalau jamnya tidak disebut, kami catat pukul *10.00*\n\n"
+             "Contoh jawaban:\n"
+             "• *besok*\n"
+             "• *Sabtu jam 14*\n"
+             "• *20 November jam 13*\n"
+             "• *20/11 jam 10*"),
+        EN: ("*What date* would you like to pick it up or have it sent? 📅\n\n"
+             "Our rules:\n"
+             "• Earliest *tomorrow*, latest *30 days* from now\n"
+             "• Monday to Saturday, *09:00 - 19:00 WIB* (closed on Sunday)\n"
+             "• If you don't mention a time, we'll note *10:00*\n\n"
+             "Example answers:\n"
+             "• *tomorrow*\n"
+             "• *Saturday at 14*\n"
+             "• *20 November at 13*\n"
+             "• *20/11 at 10*"),
     },
     "tanggal_tidak_terbaca": {
-        ID: ("Maaf, tanggalnya belum terbaca. Coba tulis seperti *besok*, *Sabtu*, "
-             "*12 Oktober*, atau *12/10* ya."),
-        EN: ("Sorry, I couldn't read that date. Try something like *tomorrow*, "
-             "*Saturday*, *12 October*, or *12/10*."),
+        ID: ("Maaf, tanggalnya belum terbaca 🙏 Coba tulis seperti *besok*, "
+             "*Sabtu jam 14*, *20 November jam 13*, atau *20/11 jam 10* ya."),
+        EN: ("Sorry, I couldn't read that date 🙏 Try something like *tomorrow*, "
+             "*Saturday at 14*, *20 November at 13*, or *20/11 at 10*."),
     },
     "tanggal_terlalu_cepat": {
         ID: ("Maaf, pesanan paling cepat untuk *besok* karena kuenya dibuat setelah "
@@ -218,15 +231,25 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Sorry, we take orders at most *30 days* ahead. What date would you "
              "like?"),
     },
+    "tanggal_hari_libur": {
+        ID: ("Maaf, hari *Minggu* toko libur, jadi kue tidak bisa diambil atau "
+             "dikirim hari itu. Mau diganti ke hari lain? Misalnya *Senin* atau "
+             "*Sabtu jam 14*."),
+        EN: ("Sorry, the store is closed on *Sunday*, so the cake can't be picked "
+             "up or sent that day. Would another day work? For example *Monday* or "
+             "*Saturday at 14*."),
+    },
     "tanggal_jam_tutup": {
-        ID: ("Toko buka pukul 07.00 sampai 17.00. Mau tanggal dan jam berapa di "
-             "antara jam itu?"),
-        EN: ("The store is open from 07:00 to 17:00. What date and time within "
-             "those hours would you like?"),
+        ID: ("Toko buka pukul *09.00 - 19.00 WIB*. Mau tanggal dan jam berapa di "
+             "antara jam itu? Misalnya *besok jam 13*."),
+        EN: ("The store is open *09:00 - 19:00 WIB*. What date and time within "
+             "those hours would you like? For example *tomorrow at 13*."),
     },
     "tanggal_dicatat": {
-        ID: "Baik, dicatat untuk *{tanggal}*.",
-        EN: "Got it, noted for *{tanggal}*.",
+        ID: ("Baik, dicatat untuk *{tanggal}*.\n"
+             "(Mau ganti? Ketik saja tanggal barunya.)"),
+        EN: ("Got it, noted for *{tanggal}*.\n"
+             "(Want to change it? Just type the new date.)"),
     },
     "tanya_jenis_bayar": {
         ID: ("Mau bayar *penuh* atau *DP 50%*? Ketik salah satu ya.\n"
@@ -411,6 +434,14 @@ _TEMPLAT: dict[str, dict[str, str]] = {
     "tidak_ada_yang_dibatalkan": {
         ID: "Tidak ada pesanan aktif yang perlu dibatalkan 😊",
         EN: "There's no active order to cancel 😊",
+    },
+    "batal_belum_bisa": {
+        ID: ("Maaf, pesanan *{label}* belum bisa dibatalkan otomatis saat ini. "
+             "Karena belum ada pembayaran yang masuk, tidak ada dana yang perlu "
+             "dikembalikan. Cukup jangan bayar tagihan pesanan ini ya."),
+        EN: ("Sorry, order *{label}* can't be cancelled automatically right now. "
+             "No payment has come in, so there's nothing to refund. Just don't pay "
+             "this order's bill."),
     },
     "batal_perlu_tim": {
         ID: "Pembatalannya perlu diproses tim kami dulu supaya dananya bisa dikembalikan.",
