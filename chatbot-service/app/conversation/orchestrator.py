@@ -5,7 +5,6 @@ identity -> payment-type -> checkout), and delegates open-ended turns to the LLM
 agent. Returns a Reply; the caller is responsible for actually sending it.
 """
 
-import json
 import logging
 import re
 import time
@@ -41,13 +40,20 @@ from app.conversation.states import (
     text_is_negative,
     text_is_praise,
     text_mau_lunasi,
+    text_perintah_lunasi,
     text_ubah_pesanan,
 )
 from app.core.config import settings
 from app.core.security import mask_phone
 from app.llm.agent import run_agent
+from app.tools.pay_remaining import lunasi
+from app.tools.payment_status import jawab_refund
 
 logger = logging.getLogger(__name__)
+
+
+_LANGKAH_TANPA_MODEL = {State.COLLECTING_IDENTITY, State.AWAITING_CART_CONFIRMATION,
+                        State.AWAITING_CANCEL_CONFIRMATION}
 
 
 @dataclass
@@ -226,7 +232,11 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     # Permintaan eksplisit menang atas deteksi, dan diperiksa LEBIH DULU:
     # "tolong pakai bahasa Inggris" seluruhnya kata Indonesia, jadi deteksi()
     # akan mengunci percakapan ke Indonesia -- persis kebalikan yang diminta.
-    diminta = bahasa.permintaan_ganti_bahasa(text)
+    # v11: permintaan ganti bahasa diputuskan model (tool set_language), KECUALI
+    # di langkah checkout: di sana model tidak dilibatkan, dan "tolong pakai
+    # bahasa Inggris" akan tersimpan sebagai nama pelanggan.
+    diminta = (bahasa.permintaan_ganti_bahasa(text)
+               if not settings.intent_dari_model or state in _LANGKAH_TANPA_MODEL else None)
     if diminta:
         await store.set_lang(wa_number, diminta)
         session.lang = diminta
@@ -292,7 +302,8 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     # dari riwayat, bukan dari tawaran yang menggantung — sejak keluhan langsung
     # disambungkan ke admin, tidak ada lagi tawaran yang bisa dijadikan penanda,
     # dan jalur ini justru terpakai sesudah admin menyudahi takeover-nya.
-    if text_is_negative(text) and await _baru_saja_minta_maaf(wa_number):
+    if (not settings.intent_dari_model and text_is_negative(text)
+            and await _baru_saja_minta_maaf(wa_number)):
         reply = Reply(text=bahasa.teks("empati_keluhan", lang))
         await store.log_message(wa_number, "out", reply.text)
         return reply
@@ -323,55 +334,17 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         if ctx is not None and ctx.next_state:
             await store.set_state(wa_number, ctx.next_state)
         reply = Reply(text=jawab, media=ctx.media if ctx else [])
-    elif (text_asks_recommendation(text) and not mentions_quantity(text)
-          and not await _pemilik(wa_number)):
-        # Owner yang bertanya "paling laku" sedang minta analitik penjualan
-        # (tool business_analytics), bukan rekomendasi untuk pelanggan.
-        reply = Reply(text=await _rekomendasi(lang))
-    elif state == State.IDLE and text_is_cancel(text) and await _tak_ada_yang_dibatalkan(wa_number):
-        # "bolu pandannya ga jadi" saat keranjang kosong (kuenya tadi habis,
-        # jadi tidak pernah masuk). Model membacanya sebagai keluhan dan
-        # meminta maaf panjang lebar; tidak ada apa pun yang perlu dibatalkan.
-        reply = Reply(text=bahasa.teks("tidak_jadi_kosong", lang))
-    elif text_is_praise(text) and len(text.split()) <= 8 and "?" not in text \
-            and not mentions_quantity(text):
-        reply = Reply(text=bahasa.teks("terima_kasih_pujian", lang))
-    elif text_bisa_pesan_besok(text) and state == State.IDLE:
-        reply = Reply(text=bahasa.teks("bisa_pesan_besok", lang))
-    elif text_menawar(text):
-        reply = Reply(text=bahasa.teks("belum_ada_info", lang))
-    elif text_tanya_alamat_toko(text) and "ganti di .env" not in settings.store_address:
-        reply = Reply(text=bahasa.teks("alamat_toko", lang, nama_toko=settings.store_name,
-                                       alamat_toko=settings.store_address))
-    elif (state != State.AWAITING_PAYMENT and text_is_gratitude(text)
-          and len(text.split()) <= 4 and "?" not in text):
-        # Terukur 13 Okt 2026: "makasih ya" dijawab model "Yang mau kubagiakan ya?".
-        reply = Reply(text=bahasa.teks("sama_sama", lang))
-    elif text_minta_laporan(text) and not await _pemilik(wa_number):
-        reply = Reply(text=bahasa.teks("laporan_khusus_owner", lang))
-    elif text_tanya_cara_lunasi(text):
-        reply = Reply(text=bahasa.teks("cara_pelunasan", lang))
-    elif text_mau_lunasi(text) and (jawab := await _lunasi(wa_number, lang)):
+    elif text_perintah_lunasi(text) and (jawab := await lunasi(wa_number, lang)):
+        # Templat kita sendiri berbunyi "Ketik *lunasi*" -- sama seperti *batal*,
+        # kata yang kita suruh ketik tidak boleh bergantung pada model.
         reply = Reply(text=jawab, media=_media_giliran())
-    elif text_ubah_pesanan(text) and (jawab := await _jawab_ubah_pesanan(wa_number, text, lang)):
-        reply = Reply(text=jawab)
-    elif text_tanya_sisa(text) and (jawab := await _jawab_sisa(wa_number, lang)):
-        reply = Reply(text=jawab)
-    elif text_tanya_refund(text) and (jawab := await _jawab_refund(wa_number, lang)):
-        reply = Reply(text=jawab)
-    elif text_tanya_status_pesanan(text) and await store.get_active_pending(wa_number):
-        from app.tools.order_status import get_order_status
-
-        reply = Reply(text=await get_order_status.ainvoke({}))
-    elif text_minta_admin(text):
-        # Prompt melarang model menawarkan admin selain untuk kue custom, jadi
-        # "mau ngobrol sama admin" dijawab "aku asisten virtual" dan pelanggan
-        # buntu. Sama seperti kue custom: ditawari dulu, takeover menunggu "ya".
-        await store.set_pending_escalation(wa_number, text)
-        reply = Reply(text=escalation.teks_tawaran(lang))
     else:
-        # IDLE / AWAITING_PAYMENT / ORDER_ACTIVE -> LLM agent (with tools).
-        reply = await _run_agent_turn(wa_number, text)
+        reply = None
+        if not settings.intent_dari_model:
+            reply = await _aturan_kata_kunci(wa_number, text, lang, state)
+        if reply is None:
+            # IDLE / AWAITING_PAYMENT / ORDER_ACTIVE -> LLM agent (with tools).
+            reply = await _run_agent_turn(wa_number, text)
     _log_turn(wa_number, state, started)
 
     if reply.text:
@@ -379,45 +352,60 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     return reply
 
 
-async def _lunasi(wa_number: str, lang: str) -> str | None:
-    """Terbitkan tagihan pelunasan untuk pesanan DP; None = biarkan model.
+async def _aturan_kata_kunci(wa_number: str, text: str, lang: str, state: str) -> Reply | None:
+    """Intent yang ditebak dari kata kunci; None = serahkan ke model.
 
-    Backend menerima pelunasan sebagai tagihan `full` sebesar sisa invoice, dan
-    membatalkan pesanan DP yang belum lunas pada H-1 pukul 18.00 WIB — tanpa
-    jalur ini pelanggan WhatsApp tidak punya cara melunasinya.
+    Hanya berlaku untuk model v10 (INTENT_DARI_MODEL mati). Kata kunci tidak
+    menangkap kalimat bermakna sama dengan kata lain, jadi sejak v11 keputusan
+    ini milik model -- hapus fungsi ini begitu v11 jalan di produksi.
     """
-    from app.tools.formatting import rupiah
+    if (text_asks_recommendation(text) and not mentions_quantity(text)
+          and not await _pemilik(wa_number)):
+        # Owner yang bertanya "paling laku" sedang minta analitik penjualan
+        # (tool business_analytics), bukan rekomendasi untuk pelanggan.
+        return Reply(text=await _rekomendasi(lang))
+    elif state == State.IDLE and text_is_cancel(text) and await _tak_ada_yang_dibatalkan(wa_number):
+        # "bolu pandannya ga jadi" saat keranjang kosong (kuenya tadi habis,
+        # jadi tidak pernah masuk). Model membacanya sebagai keluhan dan
+        # meminta maaf panjang lebar; tidak ada apa pun yang perlu dibatalkan.
+        return Reply(text=bahasa.teks("tidak_jadi_kosong", lang))
+    elif text_is_praise(text) and len(text.split()) <= 8 and "?" not in text \
+            and not mentions_quantity(text):
+        return Reply(text=bahasa.teks("terima_kasih_pujian", lang))
+    elif text_bisa_pesan_besok(text) and state == State.IDLE:
+        return Reply(text=bahasa.teks("bisa_pesan_besok", lang))
+    elif text_menawar(text):
+        return Reply(text=bahasa.teks("belum_ada_info", lang))
+    elif text_tanya_alamat_toko(text) and "ganti di .env" not in settings.store_address:
+        return Reply(text=bahasa.teks("alamat_toko", lang, nama_toko=settings.store_name,
+                                       alamat_toko=settings.store_address))
+    elif (state != State.AWAITING_PAYMENT and text_is_gratitude(text)
+          and len(text.split()) <= 4 and "?" not in text):
+        # Terukur 13 Okt 2026: "makasih ya" dijawab model "Yang mau kubagiakan ya?".
+        return Reply(text=bahasa.teks("sama_sama", lang))
+    elif text_minta_laporan(text) and not await _pemilik(wa_number):
+        return Reply(text=bahasa.teks("laporan_khusus_owner", lang))
+    elif text_tanya_cara_lunasi(text):
+        return Reply(text=bahasa.teks("cara_pelunasan", lang))
+    elif text_mau_lunasi(text) and (jawab := await lunasi(wa_number, lang)):
+        return Reply(text=jawab, media=_media_giliran())
+    elif text_ubah_pesanan(text) and (jawab := await _jawab_ubah_pesanan(wa_number, text, lang)):
+        return Reply(text=jawab)
+    elif text_tanya_sisa(text) and (jawab := await _jawab_sisa(wa_number, lang)):
+        return Reply(text=jawab)
+    elif text_tanya_refund(text) and (jawab := await jawab_refund(wa_number, lang)):
+        return Reply(text=jawab)
+    elif text_tanya_status_pesanan(text) and await store.get_active_pending(wa_number):
+        from app.tools.order_status import get_order_status
 
-    order = await store.get_active_pending(wa_number)
-    if order is None or order.status == "pending":
-        return None
-    if order.payment_type not in ("dp", store.PELUNASAN):
-        return bahasa.teks("pesanan_sudah_lunas", lang,
-                           invoice=order.nomor_invoice or f"#{order.order_ref}")
-    invoice = order.nomor_invoice or f"#{order.order_ref}"
-    try:
-        res = await backend.get_payment_status(order.order_ref, wa_number)
-        sisa = float((res or {}).get("amount_due") or 0)
-        if sisa <= 0:
-            return bahasa.teks("pesanan_sudah_lunas", lang, invoice=invoice)
-        channel = json.loads(order.customer_json or "{}").get("channel", "bank_transfer")
-        pay = await backend.create_payment(order.order_ref, sisa, channel=channel,
-                                           payment_type="full", wa_number=wa_number)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("tagihan pelunasan %s gagal: %s", order.order_ref, exc)
-        return bahasa.teks("pelunasan_gagal", lang)
-    va, qris = pay.get("va_number"), pay.get("qris_url")
-    if not va and not qris:
-        logger.error("tagihan pelunasan %s tanpa cara bayar", order.order_ref)
-        return bahasa.teks("pelunasan_gagal", lang)
-    cara = f"💳 Virtual Account: *{va}*" if va else bahasa.teks("scan_qris", lang)
-    await store.update_pending_order(
-        order.id, payment_type=store.PELUNASAN, amount_due=sisa, pay_instruction=cara,
-        qris_url=None if va else qris, payment_ref=pay.get("pg_transaction_id"))
-    if not va:
-        checkout.kirim_gambar_qris(qris, lang)
-    return bahasa.teks("tagihan_pelunasan", lang, invoice=invoice, jumlah=rupiah(sisa),
-                       cara_bayar=cara)
+        return Reply(text=await get_order_status.ainvoke({}))
+    elif text_minta_admin(text):
+        # Prompt melarang model menawarkan admin selain untuk kue custom, jadi
+        # "mau ngobrol sama admin" dijawab "aku asisten virtual" dan pelanggan
+        # buntu. Sama seperti kue custom: ditawari dulu, takeover menunggu "ya".
+        await store.set_pending_escalation(wa_number, text)
+        return Reply(text=escalation.teks_tawaran(lang))
+    return None
 
 
 async def _jawab_ubah_pesanan(wa_number: str, text: str, lang: str) -> str | None:
@@ -458,27 +446,6 @@ async def _jawab_sisa(wa_number: str, lang: str) -> str | None:
                        dibayar=rupiah(res.get("amount_paid") or 0), sisa=rupiah(sisa))
 
 
-async def _jawab_refund(wa_number: str, lang: str) -> str | None:
-    """Kabar refund pesanan terakhir, atau None kalau tidak ada yang di-refund
-    (pertanyaannya lalu diteruskan ke model seperti biasa)."""
-    order = await store.refund_terakhir(wa_number)
-    if order is None:
-        return None
-    invoice = order.nomor_invoice or f"#{order.order_ref}"
-    if order.status == store.MENUNGGU_TRANSFER:
-        surel = settings.store_support_email.strip()
-        tutup = (bahasa.teks("tutup_refund_email", lang, email=surel) if surel
-                 else bahasa.teks("tutup_refund_umum", lang))
-        return bahasa.teks("refund_menunggu", lang, invoice=invoice, tutup=tutup)
-    if order.status == store.REFUND_OTOMATIS:
-        return bahasa.teks("refund_otomatis_menunggu", lang, invoice=invoice)
-    if order.status == store.KABAR_TRANSFER_TERTUNDA:
-        return bahasa.teks("refund_ditransfer", lang, invoice=invoice)
-    if order.status == "refunded":
-        return bahasa.teks("sudah_direfund", lang)
-    return None
-
-
 async def _pemilik(wa_number: str) -> bool:
     from app.conversation import rbac
 
@@ -494,19 +461,15 @@ async def _tak_ada_yang_dibatalkan(wa_number: str) -> bool:
 
 
 async def _rekomendasi(lang: str) -> str:
-    """Tiga kue yang bisa dipesan sekarang: unggulan dulu, lalu yang paling laku.
-
-    Diambil dari katalog, bukan dikarang: model tidak punya data penjualan dan
-    sebelumnya menolak pertanyaan ini sebagai di luar cakupan."""
+    """Tiga rekomendasi dari katalog (aturan kata kunci v10; v11 lewat get_menu)."""
     from app.backend_client import products as products_api
-    from app.tools.formatting import product_label, rupiah, tersedia
+    from app.tools.formatting import product_label, rupiah
+    from app.tools.get_menu import teratas
 
-    items = [p for p in await products_api.list_products(only_active=True) if tersedia(p)]
+    items = teratas(await products_api.list_products(only_active=True))
     if not items:
         return bahasa.teks("rekomendasi_kosong", lang)
-    items.sort(key=lambda p: (not p.get("is_featured"), -(p.get("sold_count") or 0),
-                              -(p.get("rating") or 0), product_label(p).casefold()))
-    daftar = "\n".join(f"• {product_label(p)} — {rupiah(p.get('harga_jual'))}" for p in items[:3])
+    daftar = "\n".join(f"• {product_label(p)} — {rupiah(p.get('harga_jual'))}" for p in items)
     return bahasa.teks("rekomendasi", lang, daftar=daftar)
 
 

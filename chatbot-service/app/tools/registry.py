@@ -2,6 +2,8 @@
 
 import logging
 
+from app.core.config import settings
+from app.tools import escalate, get_menu as get_menu_mod, payment_status
 from app.tools.add_to_cart import add_to_cart
 from app.tools.cancel_order import cancel_order
 from app.tools.compare_products import compare_products
@@ -10,9 +12,11 @@ from app.tools.get_menu import get_menu
 from app.tools.get_product_detail import get_product_detail
 from app.tools.keluhan import send_apology
 from app.tools.order_status import get_order_status
+from app.tools.pay_remaining import pay_remaining
 from app.tools.payment_info import resend_payment_method
 from app.tools.payment_status import check_payment_status
 from app.tools.reports import business_analytics, financial_report
+from app.tools.set_language import set_language
 from app.tools.update_cart import update_cart
 from app.tools.view_cart import check_cart
 
@@ -33,6 +37,20 @@ TOOLS_UMUM = [
     escalate_to_admin,
     send_apology,
 ]
+
+if settings.intent_dari_model:
+    # v11: deskripsi diganti salinan, bukan disunting di tempat — v10 dilatih
+    # dengan docstring lama dan harus tetap melihatnya selama tombol ini mati.
+    def _v11(t, mod):
+        return t.model_copy(update={"description": mod.DESKRIPSI_V11})
+
+    TOOLS_UMUM = [
+        _v11(get_menu, get_menu_mod) if t is get_menu
+        else _v11(check_payment_status, payment_status) if t is check_payment_status
+        else _v11(escalate_to_admin, escalate) if t is escalate_to_admin
+        else t
+        for t in TOOLS_UMUM
+    ] + [pay_remaining, set_language]
 
 # Angka bisnis. Hanya Owner yang boleh melihat bahwa ini ada.
 TOOLS_OWNER = [

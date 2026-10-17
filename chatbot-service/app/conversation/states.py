@@ -163,6 +163,11 @@ def text_mau_lunasi(text: str) -> bool:
     return bool(words & _LUNASI or (words & {"bayar", "pay", "membayar"} and words & _SISA_BAYAR))
 
 
+def text_perintah_lunasi(text: str) -> bool:
+    """Persis kata yang disuruh ketik oleh templat sisa_pelunasan/cara_pelunasan."""
+    return " ".join(_tokens(text)) in ("lunasi", "pay balance")
+
+
 def text_tanya_cara_lunasi(text: str) -> bool:
     """"sisanya dibayar gimana?", "how do I pay the remaining balance"."""
     words = set(_tokens(text))

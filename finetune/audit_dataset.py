@@ -1,4 +1,4 @@
-"""Audit dataset (v7-v10): isinya benar, dan bentuknya sama dengan yang dilihat model di produksi?
+"""Audit dataset (v7-v11): isinya benar, dan bentuknya sama dengan yang dilihat model di produksi?
 
 Diperiksa terhadap KODE RUNTIME (bukan terhadap generator), supaya generator yang
 salah tidak bisa lolos dengan meluluskan dirinya sendiri:
@@ -24,6 +24,7 @@ benar-benar dibaca notebook:
     chatbot-service/.venv/bin/python finetune/audit_dataset.py /tmp/hf
 """
 import json
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -32,6 +33,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "chatbot-service"))
 sys.path.insert(0, str(ROOT / "finetune"))
+# v11: runtime yang diaudit adalah mode "intent dari model" (lihat generator).
+os.environ["INTENT_DARI_MODEL"] = "true"
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
 
 from app.llm.agent import pertanyaan_dengan_konteks  # noqa: E402
@@ -323,6 +326,71 @@ cek("T9: batal SELURUH pesanan tetap cancel_order walau ada keranjang di history
 lanjut = [r for r in tipe("T15") if re.search(r"checkout|lanjut|bayar|pay", pisah_konteks(user_akhir(r))[1].lower())]
 cek("T15: 'checkout'/'lanjut bayar' -> check_cart, bukan get_order_status",
     len(lanjut) >= 10 and all(panggil(r)[0] == "check_cart" for r in lanjut), str(len(lanjut)))
+
+# ── v11: intent yang dulu dicegat kata kunci ─────────────────────────────────
+from app.conversation import states  # noqa: E402
+
+HARAP_V11 = {"T20": "escalate_to_admin", "T21": "get_menu", "T22": "check_payment_status",
+             "T23": "check_payment_status", "T24": "pay_remaining", "T25": "set_language",
+             "T26": "cancel_order", "T27": "send_apology"}
+salah = [(t, panggil(r)[0] if args_of(r) is not None else None)
+         for t, alat in HARAP_V11.items() for r in tipe(t)
+         if "tool_calls" not in r["messages"][-1] or panggil(r)[0] != alat]
+cek("tipe v11 memanggil tool yang benar", all(tipe(t) for t in HARAP_V11) and not salah,
+    str(salah[:3]))
+teks_n = [t for t in ("N16", "N18") for r in tipe(t) if "tool_calls" in r["messages"][-1]]
+cek("N16 (terima kasih/pujian) dan N18 (ubah pesanan) -> teks, tanpa tool",
+    bool(tipe("N16")) and bool(tipe("N18")) and not teks_n, str(len(teks_n)))
+cek("N18 memakai templat ubah_pesanan_tidak_bisa", all(
+    r["messages"][-1]["content"] == bahasa.teks("ubah_pesanan_tidak_bisa", r["meta"]["lang"])
+    for r in tipe("N18")))
+bhs = [r for r in tipe("T25") if panggil(r)[1]["language"] == bahasa.normalkan(r["meta"]["lang"])]
+cek("T25: bahasa yang diminta berbeda dari bahasa sesi", not bhs, str(len(bhs)))
+dp = bahasa.teks("sisa_pelunasan", bahasa.ID, sisa="X").split("X")[0]
+tanpa_dp = [r["meta"]["type"] for t in ("T22", "T24") for r in tipe(t)
+            if not any(dp in (m.get("content") or "") for m in r["messages"][1:-1])]
+cek("T22/T24 selalu sesudah DP terbayar (sisa pelunasan di history)", not tanpa_dp,
+    str(Counter(tanpa_dp)))
+from app.llm.agent import _history_view  # noqa: E402
+
+maaf = [r for r in tipe("T27") if not any(
+    (m.get("content") or "") == _history_view(bahasa.teks("maaf_keluhan", r["meta"]["lang"]))
+    for m in r["messages"][1:-1])]
+cek("T27 selalu sesudah permintaan maaf (penanda runtime)", not maaf, str(len(maaf)))
+
+# Ukuran yang membuat aturan dicabut: berapa kalimat yang lolos dari kata kunci
+# lama. Dihitung pada teks pelanggan tanpa konteks FAQ.
+ATURAN_LAMA = {
+    "T20": states.text_minta_admin, "T21": states.text_asks_recommendation,
+    "T22": states.text_tanya_sisa, "T23": states.text_tanya_refund,
+    "T24": lambda x: states.text_mau_lunasi(x) or states.text_tanya_cara_lunasi(x),
+    "T25": bahasa.permintaan_ganti_bahasa, "T26": states.text_is_cancel,
+    "T27": states.text_is_negative,
+    "N16": lambda x: states.text_is_gratitude(x) or states.text_is_praise(x),
+    "N18": states.text_ubah_pesanan,
+}
+for split in ("train", "test"):
+    lolos = Counter()
+    total = Counter()
+    for r in rows[split]:
+        t = r["meta"]["type"]
+        if t in ATURAN_LAMA:
+            total[t] += 1
+            if not ATURAN_LAMA[t](pisah_konteks(user_akhir(r))[1]):
+                lolos[t] += 1
+    print(f"{split}: lolos dari aturan kata kunci lama {sum(lolos.values())}/{sum(total.values())} "
+          + " ".join(f"{t}={lolos[t]}/{total[t]}" for t in sorted(total)))
+
+par_path = DIR / "parafrase.jsonl"
+if par_path.exists():
+    par = [json.loads(line) for line in par_path.open(encoding="utf-8")]
+    kena = [pisah_konteks(user_akhir(r))[1] for r in par
+            if ATURAN_LAMA[r["meta"]["type"]](pisah_konteks(user_akhir(r))[1])]
+    cek("set parafrase tidak tertangkap aturan kata kunci lama", not kena, str(kena[:3]))
+    bocor = [pisah_konteks(user_akhir(r))[1] for r in par
+             if pisah_konteks(user_akhir(r))[1] in {pisah_konteks(user_akhir(x))[1]
+                                                    for s in rows for x in rows[s]}]
+    cek("set parafrase tidak sama dengan baris dataset mana pun", not bocor, str(bocor[:3]))
 
 print("\n".join(catat))
 print()

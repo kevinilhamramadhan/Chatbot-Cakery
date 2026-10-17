@@ -1063,6 +1063,18 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Rekomendasi kami yang bisa dipesan sekarang:\n{daftar}\n\nMau lihat detail salah satunya? Sebutkan namanya ya 😊",
         EN: "Our recommendations you can order right now:\n{daftar}\n\nWant details on one of them? Just say its name 😊",
     },
+    "menu_rekomendasi": {
+        ID: "⭐ Rekomendasi kami: {daftar}",
+        EN: "⭐ Our recommendations: {daftar}",
+    },
+    "ubah_pesanan_tidak_bisa": {
+        ID: ("Maaf kak, data pesanan (alamat, tanggal, atau isi kue) tidak bisa diubah "
+             "setelah tagihannya terbit 🙏 Kalau perlu diganti, ketik *batal* untuk "
+             "membatalkan pesanan ini, lalu pesan ulang dengan data yang baru ya."),
+        EN: ("Sorry, order details (address, date, or items) can't be changed once the "
+             "invoice is issued 🙏 If you need to change them, type *cancel* to cancel this "
+             "order, then order again with the new details."),
+    },
     "rekomendasi_kosong": {
         ID: "Maaf kak, saat ini belum ada kue yang bisa dipesan 🙏 Coba cek lagi nanti, atau ketik *menu* untuk lihat daftarnya.",
         EN: "Sorry, nothing is available to order right now 🙏 Please check back later, or type *menu* to see the list.",

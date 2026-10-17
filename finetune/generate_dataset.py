@@ -46,6 +46,15 @@ v7 (QA E2E 18-19 Sep 2026 — PROMPT_FINETUNE_V7.md):
 - Real products in the menu; "lapis legit" is no longer "off-catalog".
 - The test split is regenerated (no longer frozen since v1).
 
+v11 (17 Okt 2026): 16 aturan kata kunci di orchestrator (ucapan, pujian,
+rekomendasi, minta admin, sisa bayar, refund, lunasi, ubah pesanan, ganti
+bahasa, dll.) dicabut; maksud pelanggan diputuskan model. Kata kunci gagal
+pada kalimat bermakna sama dengan kata lain. Tool baru pay_remaining dan
+set_language; deskripsi get_menu/check_payment_status/escalate_to_admin
+diperluas. Tipe baru T20-T27, N16, N18; template TERAKHIR tiap pool baru
+(potongan test) sengaja tanpa kata kunci aturan lama, supaya split test
+mengukur parafrase yang dulu lolos dari aturan.
+
 Run from repo root:  python finetune/generate_dataset.py
 Outputs: finetune/data/{train,validation,test}.jsonl + stats.json
 """
@@ -53,6 +62,7 @@ Outputs: finetune/data/{train,validation,test}.jsonl + stats.json
 import collections
 import json
 import math
+import os
 import random
 import re
 import sys
@@ -61,6 +71,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "chatbot-service"))
+# v11: dataset dibuat untuk prompt dan tool versi "intent dari model" (lihat
+# app/core/config.py). Harus di-set SEBELUM app diimpor.
+os.environ["INTENT_DARI_MODEL"] = "true"
 
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
 
@@ -508,16 +521,17 @@ T14_EN = [("{greet}my cake arrived damaged yesterday, what now?",
 #           escalate_to_admin; sekarang bot menjawab sendiri.
 #   nego  : nego harga / pesanan kantor jumlah besar — keputusan Kevin 11 Sep,
 #           eskalasi khusus kue custom.
-N9_ID = [("{greet}aku mau ngomong sama admin langsung{part}", "human"),
-         ("{greet}bisa sambungkan aku ke CS{part}?", "human"),
-         ("{greet}ada nomor yang bisa aku telepon{part}?", "human"),
-         ("{greet}mau chat sama orangnya langsung, bukan bot{part}", "human"),
-         ("{greet}mau nego harga buat order kantor jumlah besar, bisa{part}?", "nego"),
+# v11: kategori "human" pindah ke T20 (escalate_to_admin) -- minta dilayani
+# orang kini ditawari admin oleh model, bukan oleh aturan kata kunci.
+N9_ID = [("{greet}mau nego harga buat order kantor jumlah besar, bisa{part}?", "nego"),
          ("{greet}kalau pesan 50 box dapat harga khusus ga{part}?", "nego"),
-         ("{greet}bisa minta diskon buat pesanan banyak{part}?", "nego")]
-N9_EN = [("{greet}I need to speak to a human please", "human"),
-         ("{greet}can I get a discount for a bulk order?", "nego"),
-         ("{greet}is there a phone number I can call?", "human")]
+         ("{greet}bisa minta diskon buat pesanan banyak{part}?", "nego"),
+         ("{greet}bisa kurang ga harganya{part}?", "nego"),
+         ("{greet}nego dikit boleh{part}?", "nego"),
+         ("{greet}ada potongan harga ga{part}?", "nego"),
+         ("{greet}harganya bisa dibikin lebih ramah ga{part}?", "nego")]
+N9_EN = [("{greet}can I get a discount for a bulk order?", "nego"),
+         ("{greet}any chance of a better price?", "nego")]
 N9_REPLY = {
     ("human", "id"): ["Aku asisten Toti Cakery yang siap bantu di sini kak 😊 Soal menu, pemesanan, pembayaran, dan status pesanan aku bisa langsung bantu — mau mulai dari yang mana?",
                       "Untuk sekarang aku yang menemani di chat ini kak 🙏 Menu, pesanan, pembayaran, sampai status pesanan bisa kubantu. Ada yang mau ditanyakan?"],
@@ -811,22 +825,18 @@ N6_ID = [("{greet}kemarin aku beli {prod} {qty}{unit}, enak banget{part}!", "pas
          ("{greet}seandainya order buat 500 orang, bisa ga{part}?", "capacity"),
          ("{greet}cara batalin pesanan gimana{part}?", "howcancel"),
          ("{greet}gimana sih cara pesannya{part}?", "howorder"),
-         ("{greet}kalau mau ubah pesanan caranya gimana{part}?", "howcancel"),
-         ("{greet}ga jadi mau {prod} deh, cuma tanya-tanya aja{part}", "negated"),
-         ("{greet}batal nanya deh hehe{part}", "negated"),
          ("{greet}resep {cat} yang enak dong{part}", "recipe")]
 N6_EN = [("{greet}I bought {qty} {prod} last week, they were amazing!", "past"),
          ("{greet}hypothetically, could you handle an order of 100 {cat}?", "capacity"),
          ("{greet}how do I cancel an order?", "howcancel"),
-         ("{greet}how does ordering work here?", "howorder"),
-         ("{greet}never mind the {prod}, I was just asking", "negated")]
+         ("{greet}how does ordering work here?", "howorder")]
 N6_REPLY = {
     ("past", "id"): ["Wah, makasih banyak kak! Senang banget kalau suka 😊 Mau pesan lagi atau lihat menu terbaru?",
                      "Terima kasih kak, jadi semangat! Kalau mau nostalgia rasanya lagi, aku siap bantu pesankan 😄"],
     ("capacity", "id"): ["Bisa kak, tinggal sebutkan kuenya dan jumlahnya — nanti kurangkum pesanannya dulu 😊 Untuk jumlah sebesar itu kami siapkan lebih awal ya.",
                          "Boleh banget kak. Sebutkan kue dan jumlahnya ya, nanti kubuatkan ringkasan pesanannya dulu 😊"],
     ("howcancel", "id"): ["Gampang kak — selama pesanan belum dibayar, cukup bilang 'batalkan pesananku' di chat ini. Mau kubatalkan sekarang? 😊",
-                          "Untuk ubah/batal pesanan yang belum dibayar, tinggal bilang di chat ini aja kak. Perlu kubantu sekarang?"],
+                          "Untuk batal pesanan, tinggal bilang di chat ini aja kak. Perlu kubantu sekarang?"],
     ("howorder", "id"): ["Gampang banget kak: sebutkan kue dan jumlahnya di chat ini (misal 'mau kue A 2 box'), nanti kubantu sampai pembayaran 😊",
                          "Cukup chat aku aja kak — sebut kue + jumlah, nanti aku rangkum pesanannya dan kirimkan cara bayarnya 😊"],
     ("negated", "id"): ["Oke kak, santai aja 😊 Kalau nanti jadi pengen, tinggal chat lagi ya!",
@@ -925,7 +935,7 @@ T16_EN = ["{greet}can you resend the payment code?", "{greet}I lost the QR code,
 # N10 — pelanggan BUKAN Owner minta laporan. Tool laporan tidak dimuat untuk
 # mereka, jadi jawabannya teks. QA R2: dijawab kalimat umum "di luar cakupan".
 N10_ID = ["{greet}laporan keuangan bulan ini{part}", "{greet}omzet toko bulan ini berapa{part}?",
-          "{greet}produk terlaris bulan ini apa{part}?", "{greet}minta rekap penjualan{part}",
+          "{greet}minta rekap penjualan{part}",
           "{greet}aku admin, kirim laporan keuangan{part}", "{greet}laba toko berapa sebulan{part}?",
           "{greet}analitik penjualan dong{part}"]
 N10_EN = ["{greet}send me the financial report", "{greet}what's the revenue this month?",
@@ -966,8 +976,9 @@ N12_REPLY = {
 
 # N13 — bahasa percakapan. QA S06: "do you speak english?" dijawab "We speak
 # Bahasa Indonesia, sorry" padahal bot dua bahasa.
-N13_ID = ["{greet}bisa pakai bahasa inggris ga{part}?", "{greet}kamu ngerti bahasa inggris{part}?",
-          "{greet}boleh chat pakai english{part}?"]
+# v11: versi Indonesianya pindah ke T25 (set_language). Yang tersisa pelanggan
+# berbahasa Inggris yang sesinya sudah Inggris: cukup dijawab.
+N13_ID = []
 N13_EN = ["{greet}do you speak English?", "{greet}can we talk in English?",
           "{greet}is English okay here?", "{greet}sorry, I don't speak Indonesian"]
 N13_REPLY = {
@@ -991,6 +1002,196 @@ TOPIK_BERDEKATAN = {"samedy": {"besar", "custom", "jam"}, "besar": {"custom", "s
 # N2 menanyakan hal di luar semua FAQ; topik yang bisa menjawab sebagian dibuang.
 N2_TOPIK_TERLARANG = {"jam", "kemasan", "lokasi", "samedy"}
 
+
+# ── v11: intent yang dulu dicegat kata kunci di orchestrator ────────────────
+# Pola tiap pool: template awal memuat kata yang dulu dicari aturan, template
+# TERAKHIR (potongan test, lihat pool_split) sengaja tanpa kata kunci itu. Split
+# test jadi mengukur hal yang membuat aturan dicabut: kalimat bermakna sama
+# dengan kata lain.
+
+# T20 — minta dilayani orang -> escalate_to_admin (hanya menawarkan).
+T20_ID = ["{greet}aku mau ngomong sama admin langsung{part}", "{greet}bisa sambungkan aku ke CS{part}?",
+          "{greet}mau chat sama orangnya langsung, bukan bot{part}", "{greet}tolong hubungkan ke admin{part}",
+          "{greet}panggilin adminnya dong{part}", "{greet}minta dilayani CS aja{part}",
+          "{greet}admin nya ada ga{part}?", "{greet}aku butuh bantuan admin{part}",
+          "{greet}ada nomor yang bisa aku telepon{part}?", "{greet}mau tanya langsung ke owner nya{part}",
+          "{greet}bisa minta disambungin ke staf toko{part}?", "{greet}aku maunya sama manusia aja{part}",
+          "{greet}bisa bicara dengan petugasnya aja{part}?", "{greet}aku lebih nyaman dilayani pegawai toko{part}",
+          "{greet}ada karyawan yang bisa bales chat ini{part}?"]
+T20_EN = ["{greet}I need to speak to a human please", "{greet}can I talk to an admin?",
+          "{greet}connect me to customer service", "{greet}is there a real person I can chat with?",
+          "{greet}could a member of your team reply to me?", "{greet}I'd rather deal with an employee"]
+T20_REASON = ["Pelanggan minta bicara langsung dengan admin toko",
+              "Pelanggan ingin dilayani orang, bukan asisten virtual",
+              "Pelanggan meminta disambungkan ke admin Toti Cakery"]
+
+# T21 — rekomendasi -> get_menu (menu v11 menyertakan tiga rekomendasi).
+T21_ID = ["{greet}rekomendasi kue yang enak dong{part}", "{greet}yang paling laris apa{part}?",
+          "{greet}best seller nya apa aja{part}?", "{greet}kue favorit di sini apa{part}?",
+          "{greet}andalan toti cakery apa{part}?", "{greet}yang paling populer yang mana{part}?",
+          "{greet}rekomen dong buat ultah{part}", "{greet}menu yang paling recommended apa{part}?",
+          "{greet}yang paling murah apa{part}?", "{greet}kue yang paling enak di sini apa{part}?",
+          "{greet}bingung mau pilih yang mana, saranin dong{part}",
+          "{greet}kue yang paling sering dibeli orang apa{part}?",
+          "{greet}kalau baru pertama kali beli, cocoknya coba yang mana{part}?"]
+T21_EN = ["{greet}what do you recommend?", "{greet}what's your best seller?",
+          "{greet}which cake is most popular?", "{greet}I can't decide, any suggestions?",
+          "{greet}what should a first-timer try?"]
+
+# T22 — sisa bayar (sesudah DP) -> check_payment_status.
+T22_ID = ["{greet}sisanya berapa ya{part}?", "{greet}kekurangannya berapa{part}?",
+          "{greet}sisa pelunasan berapa{part}?", "{greet}sisa yang harus dilunasi berapa{part}?",
+          "{greet}kurangnya berapa lagi{part}?", "{greet}sisa bayarnya brp{part}?",
+          "{greet}aku masih harus bayar berapa lagi{part}?", "{greet}masih ada tagihan ga{part}?",
+          "{greet}tinggal bayar berapa lagi ya{part}?", "{greet}tunggakanku masih ada{part}?"]
+T22_EN = ["{greet}how much is the remaining balance?", "{greet}how much do I still owe?",
+          "{greet}what's left to pay?", "{greet}is there anything outstanding on my order?"]
+
+# T23 — kabar refund -> check_payment_status.
+T23_ID = ["{greet}uangku kapan kembali{part}?", "{greet}refund nya udah diproses belum{part}?",
+          "{greet}dananya udah dikembalikan belum{part}?", "{greet}duitnya kapan dibalikin{part}?",
+          "{greet}pengembalian dana ku gimana{part}?", "{greet}refund aku udah masuk belum{part}?",
+          "{greet}uang pesanan yang dibatalin kapan balik{part}?",
+          "{greet}transferan dari toko buat pesanan yang dibatalin udah dikirim{part}?",
+          "{greet}uang yang sudah kubayar bakal diganti kapan{part}?"]
+T23_EN = ["{greet}when will I get my money back?", "{greet}has my refund been processed?",
+          "{greet}where is my refund?", "{greet}the order got called off, what happens to what I paid?"]
+
+# T24 — melunasi sisa DP -> pay_remaining. Kontras: T16 (tagihan pertama belum
+# dibayar -> resend_payment_method) dan T22 (bertanya jumlah -> cek bayar).
+T24_ID = ["{greet}mau lunasi{part}", "{greet}aku mau lunasin sekarang{part}",
+          "{greet}pelunasan dong{part}", "{greet}mau bayar sisanya{part}",
+          "{greet}bayar kekurangannya sekarang ya{part}", "{greet}gimana cara lunasinnya{part}?",
+          "{greet}minta tagihan pelunasan{part}", "{greet}sisanya mau aku bayar sekarang{part}",
+          "{greet}aku mau melunasi pesananku{part}",
+          "{greet}aku mau beresin pembayarannya sekarang{part}",
+          "{greet}kirim tagihan buat bayar yang belum lunas{part}",
+          "{greet}biar ga kepikiran, aku bayar full sekarang aja{part}"]
+T24_EN = ["{greet}I want to pay the balance", "{greet}how do I pay the rest?",
+          "{greet}let me settle the remaining amount", "{greet}I'd like to clear what I owe now"]
+
+# T25 — minta ganti bahasa -> set_language. Baris sesi Indonesia meminta
+# Inggris, baris sesi Inggris meminta Indonesia.
+T25_ID = ["{greet}pakai bahasa inggris aja{part}", "{greet}english please",
+          "{greet}bisa ganti ke bahasa inggris{part}?", "{greet}balas pakai english ya{part}",
+          "{greet}bisa pakai bahasa inggris ga{part}?", "{greet}kamu ngerti bahasa inggris{part}?",
+          "{greet}boleh chat pakai english{part}?", "{greet}tolong jawab pakai bahasa inggris{part}",
+          "{greet}aku lebih paham kalau dijawab in english{part}",
+          "{greet}temanku yang mau pesan ga ngerti bahasa kita, jawab in english ya{part}"]
+T25_EN = ["{greet}can you reply in Indonesian?", "{greet}please switch to Bahasa Indonesia",
+          "{greet}Indonesian is fine, reply in that", "{greet}bahasa indonesia aja",
+          "{greet}my English isn't great, let's continue in my own language, Indonesian"]
+
+# T26 — "X ga jadi" padahal keranjang kosong -> cancel_order (tool-nya menjawab
+# "oke, nggak jadi"). Dulu model membacanya sebagai keluhan. Kontras: T18 (kue
+# ada di keranjang -> update_cart qty 0). Kata batal tetap ada: cancel_order
+# menolak dipanggil tanpa kata batal dari pelanggan.
+T26_ID = ["{greet}{prod} nya ga jadi deh{part}", "{greet}ga jadi pesan {prod}{part}",
+          "{greet}batal aja {prod} nya{part}", "{greet}{prod} nya gajadi ya{part}",
+          "{greet}ga jadi deh{part}", "{greet}tidak jadi pesan{part}",
+          "{greet}{prod} cancel aja{part}", "{greet}yaudah ga jadi beli {prod}{part}"]
+T26_EN = ["{greet}never mind, cancel the {prod}", "{greet}cancel that, I won't order"]
+
+# T27 — kecewa lagi sesudah permintaan maaf -> send_apology. Terukur di gladi
+# demo: "saya agak kecewa sih" dijawab "Senang banget kalau suka".
+T27_ID = ["{greet}tetep aja aku kecewa{part}", "{greet}agak kecewa sih{part}",
+          "{greet}jujur kurang puas{part}", "{greet}harusnya ga gitu sih{part}",
+          "{greet}kesel juga sih jadinya{part}", "{greet}aku nyesel pesan kemarin{part}",
+          "{greet}yah sayang banget, padahal udah nunggu lama{part}",
+          "{greet}lain kali tolong lebih teliti ya{part}"]
+T27_EN = ["{greet}I'm still disappointed", "{greet}honestly not happy about it",
+          "{greet}that really ruined the day for us"]
+T27_REASON = ["Pelanggan masih kecewa setelah permintaan maaf sebelumnya",
+              "Pelanggan menyampaikan kekecewaan lanjutan soal pesanannya"]
+
+# N16 — terima kasih dan pujian -> dibalas teks, tanpa tool. Terukur: "makasih
+# ya" dijawab "Yang mau kubagiakan ya?", pujian dijawab send_apology.
+N16_ID = [("{greet}makasih ya{part}", "thanks"), ("{greet}kuenya kemarin enak banget{part}", "praise"),
+          ("{greet}terima kasih banyak{part}", "thanks"), ("{greet}suka banget sama kuenya{part}", "praise"),
+          ("{greet}thx{part}", "thanks"), ("{greet}mantap kuenya{part}", "praise"),
+          ("{greet}makasih udah dibantu{part}", "thanks"), ("{greet}anak aku seneng banget sama kuenya{part}", "praise"),
+          ("{greet}tengkyu{part}", "thanks"), ("{greet}pesanan kemarin sempurna{part}", "praise"),
+          ("{greet}sangat membantu, kamu baik banget{part}", "thanks"),
+          ("{greet}keluarga di rumah pada nambah terus, ludes{part}", "praise"),
+          ("{greet}kuenya jadi bintang di acara kemarin{part}", "praise")]
+N16_EN = [("{greet}thanks a lot", "thanks"), ("{greet}the cake was delicious!", "praise"),
+          ("{greet}loved the cake yesterday", "praise"), ("{greet}you've been super helpful", "thanks"),
+          ("{greet}everyone at the party asked where I got it", "praise")]
+N16_REPLY = {
+    ("thanks", "id"): [bahasa.teks("sama_sama", bahasa.ID),
+                       "Sama-sama kak! Senang bisa bantu 😊"],
+    ("praise", "id"): [bahasa.teks("terima_kasih_pujian", bahasa.ID),
+                       "Wah, makasih banyak kak! Jadi semangat bikin kue lagi 😊"],
+    ("thanks", "en"): [bahasa.teks("sama_sama", bahasa.EN)],
+    ("praise", "en"): [bahasa.teks("terima_kasih_pujian", bahasa.EN)],
+}
+
+# N18 — ubah data pesanan sesudah tagihan terbit -> templat "tidak bisa diubah".
+# Backend tidak punya endpoint untuk mengubah pesanan; jalan satu-satunya batal
+# lalu pesan ulang. Kontras: T17/T18 (keranjang BELUM jadi tagihan).
+N18_ID = ["{greet}alamat pengirimannya mau aku ganti{part}", "{greet}tanggal ambilnya bisa diubah{part}?",
+          "{greet}bisa reschedule ga{part}?", "{greet}ganti alamat dong{part}",
+          "{greet}jadwal kirimnya mau dimajuin{part}", "{greet}aku salah tulis alamat, bisa dibenerin{part}?",
+          "{greet}tambahin satu kue lagi ke pesanan ini bisa{part}?", "{greet}tanggalnya mau diganti{part}",
+          "{greet}aku pindah rumah, kuenya dianter ke tempat baru aja{part}",
+          "{greet}acaranya diundur seminggu, kuenya ikut mundur ya{part}"]
+N18_EN = ["{greet}can I change the delivery address?", "{greet}can I move the pickup date?",
+          "{greet}the party got postponed, can the cake come later?"]
+
+
+
+# ── v11: set uji parafrase ───────────────────────────────────────────────────
+# Kalimat tulisan tangan yang maksudnya sama dengan tipe v11 tetapi TIDAK
+# memuat kata kunci aturan lama (diperiksa di audit_dataset.py). Tidak pernah
+# masuk train/validation: dipakai untuk membandingkan "v10 + aturan" dengan v11
+# pada kalimat yang dulu lolos dari aturan.
+PARAFRASE = [
+    ("T20", "id", "bisa tolong aku dilayani sama petugas tokonya?"),
+    ("T20", "id", "aku pengen ngobrol sama pegawai beneran"),
+    ("T20", "id", "ada yang jaga toko ga? mau tanya langsung ke beliau"),
+    ("T20", "id", "boleh minta kontak karyawan yang ngurus pesanan?"),
+    ("T20", "en", "could someone from your team get back to me?"),
+    ("T21", "id", "kue yang wajib dicoba di sini apa?"),
+    ("T21", "id", "yang paling banyak dipesan orang apa ya?"),
+    ("T21", "id", "aku baru pertama kali, saranin dong enaknya yang mana"),
+    ("T21", "id", "kalau buat hadiah, kue apa yang paling pas?"),
+    ("T21", "en", "what would you suggest for a first order?"),
+    ("T22", "id", "aku tinggal bayar berapa lagi?"),
+    ("T22", "id", "masih ada yang belum kubayar ga?"),
+    ("T22", "id", "total yang belum masuk berapa ya?"),
+    ("T22", "id", "utangku buat pesanan ini masih berapa?"),
+    ("T22", "en", "is anything still unpaid on my order?"),
+    ("T23", "id", "yang sudah kutransfer kapan dibalikin ke aku?"),
+    ("T23", "id", "transferan baliknya udah dikirim belum?"),
+    ("T23", "id", "pembayaranku yang kemarin nasibnya gimana?"),
+    ("T23", "id", "kapan duit aku masuk lagi ke rekening?"),
+    ("T23", "en", "when does the payment come back to my account?"),
+    ("T24", "id", "sekalian aku tuntasin bayarnya sekarang"),
+    ("T24", "id", "kirimin tagihan buat bayar yang belum lunas"),
+    ("T24", "id", "biar tenang aku bayar semuanya sekarang aja"),
+    ("T24", "id", "pengen selesaikan tagihannya hari ini"),
+    ("T24", "en", "I'd like to settle up now"),
+    ("T25", "id", "temenku cuma ngerti english, tolong dia yang dilayani ya"),
+    ("T25", "id", "yang baca chat ini suamiku, dia orang inggris"),
+    ("T25", "id", "biar enak, mulai sekarang english only ya"),
+    ("T25", "en", "my Indonesian is better than my English, so let's go with that"),
+    ("T25", "en", "from now on, Indonesian only please"),
+    ("T27", "id", "sedih sih, ga sesuai yang kubayangin"),
+    ("T27", "id", "semoga ga keulang lagi kayak gini ya"),
+    ("T27", "id", "jujur hari ini aku agak sedih sama hasilnya"),
+    ("T27", "id", "padahal udah jauh-jauh hari pesannya"),
+    ("T27", "en", "it spoiled the whole celebration, honestly"),
+    (("N16", "praise"), "id", "semua tamu nanya belinya di mana"),
+    (("N16", "praise"), "id", "habis dalam sekejap, pada rebutan"),
+    (("N16", "thanks"), "id", "kamu baik banget, sangat membantu"),
+    (("N16", "thanks"), "id", "jasamu besar hari ini hehe"),
+    (("N16", "praise"), "en", "my kids couldn't stop eating it"),
+    ("N18", "id", "kuenya dikirim ke kantor aja, jangan ke rumah"),
+    ("N18", "id", "ambilnya lusa aja ya, jangan besok"),
+    ("N18", "id", "nama penerimanya salah, bisa dibenerin?"),
+    ("N18", "id", "mau nambah satu kue lagi ke yang udah dibayar"),
+    ("N18", "en", "can the delivery go to my office instead?"),
+]
 
 # ── Composition tables ───────────────────────────────────────────────────────
 # v2 (2026-07-05): N5/N6/T10 diperbanyak — verdict harness v1 (toti-qwen-1.7b
@@ -1021,20 +1222,26 @@ TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 115, "T4": 40, "T5": 180, "T6": 35, "T
                 # v10: T15 35->50 (checkout saat keranjang belum dikonfirmasi).
                 "T14": 45, "T15": 50, "T16": 40,
                 "N1": 150, "N1x": 40, "N2": 25, "N3": 50, "N4": 60, "N5": 70, "N6": 80,
-                "N7": 45, "N8": 35, "N9": 35, "N10": 25, "N11": 20, "N12": 30, "N13": 15,
+                "N7": 45, "N8": 35, "N9": 20, "N10": 25, "N11": 20, "N12": 30, "N13": 10,
                 # v9: pengisi berpasangan kontras — teks pelanggan sama, bahasa
                 # sesi beda. Separuh id separuh en, SELALU ber-history.
                 "N14": 60,
                 # v10: update_cart dan kontrasnya — lihat komentar di T17_ID.
-                "T17": 70, "T18": 50, "T19": 25, "N15": 20}
+                "T17": 70, "T18": 50, "T19": 25, "N15": 20,
+                # v11: intent yang dulu dicegat kata kunci -- lihat komentar T20_ID.
+                # N9 35->20 (kategori "human" pindah ke T20), N13 15->10 (hanya EN).
+                "T20": 40, "T21": 40, "T22": 35, "T23": 30, "T24": 45, "T25": 35,
+                "T26": 25, "T27": 25, "N16": 40, "N18": 35}
 VAL_COUNTS = {k: max(2, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 TEST_COUNTS = {k: max(3, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
             "T8": .2, "T9": .2, "T10": .2, "T11": .25, "T12": .25, "T13": .2,
             "T14": .2, "T15": .2, "T16": .2,
             "N1": .25, "N1x": .2, "N2": .2, "N3": .25, "N4": .25, "N5": .2, "N6": .2,
-            "N7": .2, "N8": .2, "N9": .2, "N10": .2, "N11": .2, "N12": .2, "N13": .6,
-            "N14": .5, "T17": .2, "T18": .2, "T19": .2, "N15": .2}
+            "N7": .2, "N8": .2, "N9": .2, "N10": .2, "N11": .2, "N12": .2, "N13": 1.0,
+            "N14": .5, "T17": .2, "T18": .2, "T19": .2, "N15": .2,
+            "T20": .2, "T21": .2, "T22": .2, "T23": .2, "T24": .2, "T25": .35,
+            "T26": .15, "T27": .2, "N16": .25, "N18": .2}
 # v5: T5/T6/T8 multi-turn up — that is where the "escalate" history kind lives.
 # v7: T16/N11 selalu ber-history (tagihan harus sudah terbit) — diatur di _build.
 MT_SHARE = {"T1": .35, "T2": .2, "T3": .45, "T4": .25, "T5": .45, "T6": .35, "T7": 1.0,
@@ -1042,7 +1249,9 @@ MT_SHARE = {"T1": .35, "T2": .2, "T3": .45, "T4": .25, "T5": .45, "T6": .35, "T7
             "T14": .45, "T15": .7, "T16": 1.0,
             "N1": .3, "N1x": .3, "N2": .2, "N3": .3, "N4": .25, "N5": .3, "N6": .4,
             "N7": .2, "N8": .35, "N9": .3, "N10": .2, "N11": 1.0, "N12": .3, "N13": .2,
-            "N14": 1.0, "T17": 1.0, "T18": 1.0, "T19": 1.0, "N15": 1.0}
+            "N14": 1.0, "T17": 1.0, "T18": 1.0, "T19": 1.0, "N15": 1.0,
+            "T20": .4, "T21": .35, "T22": 1.0, "T23": .5, "T24": 1.0, "T25": .3,
+            "T26": .7, "T27": 1.0, "N16": .5, "N18": 1.0}
 assert set(TRAIN_COUNTS) == set(EN_SHARE) == set(MT_SHARE)
 
 # Seberapa sering baris membawa KONTEKS FAQ di pesan pelanggan. Runtime (QA 19
@@ -1222,6 +1431,22 @@ class Gen:
             total="", cara_bayar=cara, menit=30)
         return [user, text]
 
+    def h_dp(self):
+        """v11: DP sudah masuk, sisa pelunasan disebut -- konteks T22/T24."""
+        user = self.rng.choice(["udah aku bayar dp nya", "dp udah aku transfer ya",
+                                "sudah bayar DP", "dp nya udah masuk belum?"])
+        text = (bahasa.teks("bayar_diterima_singkat", bahasa.ID)
+                + bahasa.teks("sisa_pelunasan", bahasa.ID, sisa=rupiah(self.fic_price())))
+        return [user, text]
+
+    def h_maaf(self, lang):
+        """v11: keluhan yang sudah dibalas send_apology -- konteks T27."""
+        if lang == "en":
+            user = f"my cake arrived {self.rng.choice(['damaged', 'late', 'wrong'])} yesterday"
+        else:
+            user = f"kue yang kemarin {self.rng.choice(COMPLAINTS)}"
+        return [user, bahasa.teks("maaf_keluhan", lang)]
+
     def h_chat(self):
         pairs = [("halo kak", "Halo! Selamat datang di Toti Cakery 😊 Mau lihat menu atau pesan sesuatu?"),
                  ("makasih infonya", "Sama-sama kak! Kalau butuh apa-apa lagi, chat aja ya 😊"),
@@ -1246,6 +1471,8 @@ class Gen:
                 pair = self.h_detail(self.canonical(p, fl))
             elif kind == "payment":
                 pair = self.h_payment()
+            elif kind == "dp":
+                pair = self.h_dp()
             elif kind == "escalate":
                 pair = self.h_escalate()
             elif kind == "cart":
@@ -1368,6 +1595,16 @@ class Gen:
     def maybe_noise(self, text, lang, flag):
         return _typo_ops(self.rng, text) if flag else text
 
+    def gen_parafrase(self):
+        """Baris uji parafrase: _build biasa dengan pool satu kalimat."""
+        out = []
+        for tipe, lang, teks in PARAFRASE:
+            rtype, kind = tipe if isinstance(tipe, tuple) else (tipe, None)
+            entry = (teks, kind) if kind else teks
+            P = {"regime": "test", "sel": lambda _pool, e=entry: [e]}
+            out.append(self._build(rtype, "test", lang, False, False, P, 1))
+        return out
+
     # ── per-type generators ──────────────────────────────────────────────────
     def gen_type(self, rtype, split, count):
         pools = self._pools(rtype, split)
@@ -1423,6 +1660,9 @@ class Gen:
                      "T14": ["status", "chat", "payment"],
                      "N9": ["chat", "menu"],
                      "N7": ["chat"], "N8": ["chat", "menu"], "N14": ["chat"],
+                     "T20": ["chat", "menu", "status"], "T21": ["chat", "status"],
+                     "T23": ["status", "chat"], "T25": ["chat", "menu"],
+                     "T26": ["chat", "detail", "menu"], "N16": ["status", "chat", "payment"],
                      }.get(rtype, ["chat", "menu", "status"])
         return self.history(kind_pool, n)
 
@@ -1436,6 +1676,16 @@ class Gen:
             # didahului obrolan lain.
             history = self.history(["chat", "detail"], self.rng.choice([0, 0, 1])) \
                 + self.history(["payment"], 1)
+        if rtype in ("T22", "T24"):
+            # v11: DP sudah dibayar dan sisanya disebut di history.
+            history = self.history(["chat", "detail"], self.rng.choice([0, 0, 1])) \
+                + self.history(["dp"], 1)
+        if rtype == "N18":
+            history = self.history(["chat", "detail"], self.rng.choice([0, 0, 1])) \
+                + self.history(["payment"], 1)
+        if rtype == "T27":
+            u, a = self.h_maaf(lang)
+            history = [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
         s = self.slots(lang)
 
         def uniq(fn):
@@ -1664,6 +1914,54 @@ class Gen:
                 final = self.tool_turn("update_cart", {"items": [
                     {"product": surf, "qty": q if rtype == "T17" else 0}]})
             return self.make_row(split, rtype, lang, hist, text, final, noised=noise)
+
+        if rtype in ("T20", "T21", "T22", "T23", "T24", "T25", "T27", "N18"):
+            pools = {"T20": (T20_EN, T20_ID), "T21": (T21_EN, T21_ID), "T22": (T22_EN, T22_ID),
+                     "T23": (T23_EN, T23_ID), "T24": (T24_EN, T24_ID), "T25": (T25_EN, T25_ID),
+                     "T27": (T27_EN, T27_ID), "N18": (N18_EN, N18_ID)}
+            en_pool, id_pool = pools[rtype]
+            pool = sel(en_pool if lang == "en" else id_pool)
+
+            def build():
+                tpl = self.pick_tpl(f"{rtype}u{lang}", pool, P["regime"], total_count)
+                return (self.maybe_noise(render(tpl, **self.slots(lang)), lang, noise),)
+            (text,) = uniq(build)
+            final = {
+                "T20": lambda: self.tool_turn("escalate_to_admin", {"reason": rng.choice(T20_REASON)}),
+                "T21": lambda: self.tool_turn("get_menu", {}),
+                "T22": lambda: self.tool_turn("check_payment_status", {}),
+                "T23": lambda: self.tool_turn("check_payment_status", {}),
+                "T24": lambda: self.tool_turn("pay_remaining", {}),
+                # Sesi Indonesia meminta Inggris, dan sebaliknya.
+                "T25": lambda: self.tool_turn("set_language", {"language": "en" if lang == "id" else "id"}),
+                "T27": lambda: self.tool_turn("send_apology", {"keluhan": rng.choice(T27_REASON)}),
+                "N18": lambda: self.text_turn(bahasa.teks("ubah_pesanan_tidak_bisa", lang)),
+            }[rtype]()
+            return self.make_row(split, rtype, lang, history, text, final, noised=noise)
+
+        if rtype == "T26":
+            pool = sel(T26_EN if lang == "en" else T26_ID)
+
+            def build():
+                tpl = self.pick_tpl(f"T26u{lang}", pool, P["regime"], total_count)
+                sl = dict(self.slots(lang))
+                if "{prod}" in tpl:
+                    pr = self.pick_product(split)
+                    sl["prod"] = self.surface(pr, self.pick_flavour(pr, split), lang)
+                return (self.maybe_noise(render(tpl, **sl), lang, noise),)
+            (text,) = uniq(build)
+            return self.make_row(split, rtype, lang, history, text,
+                                 self.tool_turn("cancel_order", {}), noised=noise)
+
+        if rtype == "N16":
+            pool = sel(N16_EN if lang == "en" else N16_ID)
+
+            def build():
+                tpl, kind = self.pick_tpl(f"N16u{lang}", pool, P["regime"], total_count)
+                return self.maybe_noise(render(tpl, **self.slots(lang)), lang, noise), kind
+            text, kind = uniq(build)
+            return self.make_row(split, rtype, lang, history, text,
+                                 self.text_turn(rng.choice(N16_REPLY[(kind, lang)])), noised=noise)
 
         if rtype == "T8":
             pool = sel(T8_EN if lang == "en" else T8_ID)
@@ -1949,7 +2247,7 @@ def _validate_args(name: str, obj: dict) -> None:
     # v7: argumen harus cocok dengan SKEMA runtime — get_menu tidak berparameter.
     if name in ("get_menu", "get_order_status", "cancel_order", "check_payment_status",
                 "financial_report", "business_analytics", "check_cart",
-                "resend_payment_method"):
+                "resend_payment_method", "pay_remaining"):
         assert obj == {}, (name, obj)
     elif name == "get_product_detail":
         assert set(obj) == {"product"} and isinstance(obj["product"], str) and obj["product"], obj
@@ -1966,6 +2264,8 @@ def _validate_args(name: str, obj: dict) -> None:
             assert set(it) == {"product", "qty"} and isinstance(it["qty"], int) and it["qty"] >= 0, it
     elif name == "escalate_to_admin":
         assert set(obj) == {"reason"} and 5 <= len(obj["reason"].split()) <= 15, obj
+    elif name == "set_language":
+        assert obj in ({"language": "id"}, {"language": "en"}), obj
     elif name == "send_apology":
         assert set(obj) == {"keluhan"} and 5 <= len(obj["keluhan"].split()) <= 15, obj
     else:
@@ -2149,6 +2449,14 @@ def main():
             for row in rows:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
         print(f"wrote {path} ({len(rows)} rows)")
+
+    # v11: set uji parafrase, sesudah split utama supaya tidak mengubah isinya.
+    par = g.gen_parafrase()
+    self_check({"test": par})
+    with (OUT_DIR / "parafrase.jsonl").open("w", encoding="utf-8") as f:
+        for row in par:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print(f"wrote {OUT_DIR / 'parafrase.jsonl'} ({len(par)} rows)")
 
     st = stats(g.rows)
     (OUT_DIR / "stats.json").write_text(json.dumps(st, indent=2, ensure_ascii=False))

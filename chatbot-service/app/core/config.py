@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     # catalogue — measured live: it invents "Brownies 10cm Cokelat" for "brownies
     # coklat" and answers menu questions without calling get_menu. Don't go back.
     llm_model: str = "toti-qwen-1.7b-v4"
+    # v11: intent pelanggan diputuskan model, bukan aturan kata kunci di
+    # orchestrator. Nyalakan BERSAMAAN dengan model v11 (dilatih dengan prompt
+    # dan tool versi ini); v10 tetap memakai aturannya. Lihat
+    # finetune/generate_dataset.py.
+    intent_dari_model: bool = False
     embedding_model: str = "qwen3-embedding:0.6b"
     llm_temperature: float = 0.7
     llm_top_p: float = 0.8

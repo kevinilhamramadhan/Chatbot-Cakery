@@ -8,6 +8,12 @@ from app.conversation.context import get_turn_context_or_none
 from app.core.config import settings
 from app.tools.formatting import product_label, rupiah, tersedia
 
+# v11: "rekomendasi dong" tidak lagi dicegat kata kunci di orchestrator; model
+# memanggil get_menu, dan menu menyertakan tiga rekomendasinya.
+DESKRIPSI_V11 = """Ambil daftar LENGKAP menu beserta harga dan tiga rekomendasi toko.
+Gunakan saat pelanggan menanyakan menu, daftar kue, harga secara umum, atau
+minta rekomendasi tanpa menyebut nama kue."""
+
 # Kategori tanpa nama di data ditaruh paling bawah, bukan di bawah judul kosong.
 _TANPA_KATEGORI = "Lainnya"
 
@@ -62,5 +68,19 @@ async def get_menu() -> str:
         for p in sorted(grup[nama_kategori], key=lambda x: product_label(x).casefold()):
             status = "" if tersedia(p) else bahasa.teks("menu_habis", lang)
             lines.append(f"• {product_label(p)} — {rupiah(p.get('harga_jual'))}{status}")
+    if settings.intent_dari_model and (unggulan := teratas(items)):
+        lines.append("\n" + bahasa.teks("menu_rekomendasi", lang, daftar=", ".join(
+            product_label(p) for p in unggulan)))
     lines.append(bahasa.teks("menu_penutup", lang))
     return "\n".join(lines)
+
+
+
+def teratas(items: list[dict], n: int = 3) -> list[dict]:
+    """Kue yang bisa dipesan sekarang: unggulan dulu, lalu yang paling laku.
+
+    Diambil dari katalog, bukan dikarang: model tidak punya data penjualan."""
+    items = [p for p in items if tersedia(p)]
+    items.sort(key=lambda p: (not p.get("is_featured"), -(p.get("sold_count") or 0),
+                              -(p.get("rating") or 0), product_label(p).casefold()))
+    return items[:n]

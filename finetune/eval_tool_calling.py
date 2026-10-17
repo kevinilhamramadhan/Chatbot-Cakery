@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "chatbot-service"))
 from langchain_ollama import ChatOllama  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
+from app.llm.prompt import SYSTEM_PROMPT, TOOL_REMINDER  # noqa: E402
 from app.tools.registry import ALL_TOOLS, TOOLS_BY_NAME, TOOLS_UMUM  # noqa: E402
 
 # v4: rakitan pesan paritas-runtime (marker history + reminder) & skor argumen
@@ -75,6 +76,12 @@ def main():
     args = ap.parse_args()
 
     rows = [json.loads(l) for l in open(args.data, encoding="utf-8")]
+    # Dataset v11 dibuat dengan INTENT_DARI_MODEL=true, v10 tanpa. Prompt dan
+    # deskripsi tool di sini diambil dari runtime, jadi env-nya harus cocok
+    # dengan dataset; kalau tidak, modelnya diuji dengan prompt yang salah.
+    if not rows[0]["messages"][0]["content"].startswith(SYSTEM_PROMPT + "\n\n" + TOOL_REMINDER):
+        sys.exit("system prompt dataset != runtime: set INTENT_DARI_MODEL=true untuk dataset v11, "
+                 "jangan di-set untuk dataset v10")
     if args.limit:
         rows = rows[: args.limit]
 

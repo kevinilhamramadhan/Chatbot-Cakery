@@ -14,9 +14,38 @@ from app.backend_client import api as backend
 from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State
+from app.core.config import settings
 from app.tools.formatting import rupiah
 
 logger = logging.getLogger(__name__)
+
+
+async def jawab_refund(wa_number: str, lang: str) -> str | None:
+    """Kabar refund pesanan terakhir, atau None kalau tidak ada yang di-refund."""
+    order = await store.refund_terakhir(wa_number)
+    if order is None:
+        return None
+    invoice = order.nomor_invoice or f"#{order.order_ref}"
+    if order.status == store.MENUNGGU_TRANSFER:
+        surel = settings.store_support_email.strip()
+        tutup = (bahasa.teks("tutup_refund_email", lang, email=surel) if surel
+                 else bahasa.teks("tutup_refund_umum", lang))
+        return bahasa.teks("refund_menunggu", lang, invoice=invoice, tutup=tutup)
+    if order.status == store.REFUND_OTOMATIS:
+        return bahasa.teks("refund_otomatis_menunggu", lang, invoice=invoice)
+    if order.status == store.KABAR_TRANSFER_TERTUNDA:
+        return bahasa.teks("refund_ditransfer", lang, invoice=invoice)
+    if order.status == "refunded":
+        return bahasa.teks("sudah_direfund", lang)
+    return None
+
+
+# v11: model yang memutuskan, bukan kata kunci orchestrator, jadi tool ini juga
+# menjawab sisa pelunasan dan kabar refund. Dipakai registry kalau
+# INTENT_DARI_MODEL menyala; v10 tetap melihat docstring lamanya.
+DESKRIPSI_V11 = """Cek pembayaran pelanggan: sudah masuk atau belum, sisa yang belum
+dibayar, atau kabar uang yang dikembalikan (refund). Untuk status PESANAN pakai
+`get_order_status`; untuk MELUNASI sisa DP pakai `pay_remaining`."""
 
 
 @tool
@@ -33,7 +62,7 @@ async def check_payment_status() -> str:
     lang = await store.get_lang(wa)
     order = await store.get_active_pending(wa)
     if order is None:
-        return bahasa.teks("tak_ada_tagihan", lang)
+        return await jawab_refund(wa, lang) or bahasa.teks("tak_ada_tagihan", lang)
     try:
         res = await backend.get_payment_status(order.order_ref, wa)
     except Exception as exc:  # noqa: BLE001

@@ -19,6 +19,15 @@ from app.core.security import mask_phone
 logger = logging.getLogger(__name__)
 
 
+# v11: permintaan bicara dengan admin/orang tidak lagi dicegat kata kunci di
+# orchestrator ("sambungkan ke admin"), jadi tool ini juga melayaninya. Tetap
+# hanya MENAWARKAN. Dipakai registry kalau INTENT_DARI_MODEL menyala.
+DESKRIPSI_V11 = """Tawarkan menyambungkan pelanggan ke admin. HANYA untuk pesanan kue
+custom (desain/rasa/ukuran/tulisan di luar menu) atau pelanggan yang MEMINTA
+dilayani admin/orang. Bukan untuk keluhan (`send_apology`) atau pertanyaan yang
+belum kamu tahu. `reason`: ringkasan singkat kebutuhannya. Hanya menawarkan."""
+
+
 @tool
 async def escalate_to_admin(reason: str) -> str:
     """Tawarkan menyambungkan pelanggan ke admin, KHUSUS untuk pesanan kue custom.

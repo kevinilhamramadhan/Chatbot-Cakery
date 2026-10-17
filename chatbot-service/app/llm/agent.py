@@ -32,7 +32,8 @@ _REPORT_RE = re.compile(r"(📊|📈|laporan keuangan|analitik bisnis)", re.IGNO
 _TOOLNAME_RE = re.compile(
     r"\b(get_menu|get_product_detail|add_to_cart|compare_products|get_order_status|"
     r"check_payment_status|cancel_order|escalate_to_admin|financial_report|"
-    r"business_analytics|check_cart|resend_payment_method|send_apology|update_cart)\b",
+    r"business_analytics|check_cart|resend_payment_method|send_apology|update_cart|"
+    r"pay_remaining|set_language)\b",
     re.IGNORECASE,
 )
 
@@ -275,7 +276,9 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
         if answer and _TOOLNAME_RE.search(answer):
             logger.warning("Reply mentioned an internal tool name — dropping it")
             return bahasa.teks("ulangi_maksud", lang)
-        if answer and _CERIA_RE.search(answer) and text_is_negative(user_text):
+        # v11: kekecewaan dikenali model, bukan daftar kata negatif.
+        if (not settings.intent_dari_model and answer and _CERIA_RE.search(answer)
+                and text_is_negative(user_text)):
             logger.warning("Cheerful reply to a disappointed message — apologising instead")
             from app.tools.keluhan import send_apology
             return await send_apology.ainvoke({"keluhan": user_text})

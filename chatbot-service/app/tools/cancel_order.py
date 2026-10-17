@@ -41,6 +41,10 @@ async def cancel_order() -> str:
     order = await store.get_active_pending(wa)
 
     if order is None:
+        # "bolu pandannya ga jadi" padahal tidak ada apa pun (kuenya tadi habis,
+        # jadi tidak pernah masuk keranjang): bukan "draft dikosongkan".
+        if not await store.get_cart(wa):
+            return bahasa.teks("tidak_jadi_kosong", lang)
         # Only a draft cart, not a finalized order.
         await store.set_cart(wa, [])
         await store.set_state(wa, State.IDLE)

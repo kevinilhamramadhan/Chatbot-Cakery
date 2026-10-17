@@ -2,6 +2,25 @@
 
 from app.core.config import settings
 
+_ESKALASI_V10 = """- `escalate_to_admin` HANYA untuk pesanan kue CUSTOM: desain, rasa, ukuran, atau
+  tulisan yang tidak ada di menu dan harus dibicarakan dengan orang. Selain itu
+  JANGAN dipakai — bukan untuk pertanyaan yang belum kamu tahu, bukan untuk
+  keluhan, bukan untuk pesanan biasa dari menu.
+"""
+
+# v11: intent yang dulu dicegat kata kunci di orchestrator kini diputuskan model
+# (settings.intent_dari_model). Teks v10 dibiarkan utuh byte demi byte: model v10
+# dilatih dengan prompt itu.
+_ESKALASI_V11 = """- `escalate_to_admin` HANYA untuk kue CUSTOM (di luar menu) ATAU pelanggan yang
+  minta dilayani admin/orang. Bukan untuk keluhan atau pertanyaan yang belum kamu tahu.
+- Minta rekomendasi -> `get_menu`. Tanya sisa bayar atau refund ->
+  `check_payment_status`. Ingin melunasi sisa DP -> `pay_remaining`.
+  Minta dibalas bahasa lain -> `set_language`.
+- Ubah alamat/tanggal/isi pesanan yang tagihannya sudah terbit tidak bisa:
+  jelaskan, sarankan ketik *batal* lalu pesan ulang.
+- Terima kasih, pujian, basa-basi -> balas singkat tanpa tool.
+"""
+
 SYSTEM_PROMPT = f"""Kamu adalah asisten virtual resmi {settings.store_name}, sebuah toko kue.
 Tugasmu membantu pelanggan via WhatsApp: menjelaskan menu, detail produk, membandingkan
 produk, membantu proses pemesanan, cek status pesanan, dan menjawab pertanyaan seputar toko.
@@ -37,11 +56,7 @@ KAPAN MEMANGGIL TOOL vs MENJAWAB LANGSUNG:
 - Pelanggan menyampaikan KELUHAN atau kekecewaan (kue basi, pesanan telat, salah
   kirim, rasa tidak sesuai) -> panggil tool `send_apology`. Jangan membalas
   keluhan dengan kalimatmu sendiri.
-- `escalate_to_admin` HANYA untuk pesanan kue CUSTOM: desain, rasa, ukuran, atau
-  tulisan yang tidak ada di menu dan harus dibicarakan dengan orang. Selain itu
-  JANGAN dipakai — bukan untuk pertanyaan yang belum kamu tahu, bukan untuk
-  keluhan, bukan untuk pesanan biasa dari menu.
-- Kalau balasan terakhirmu menampilkan detail satu kue dan pelanggan menjawab
+{_ESKALASI_V11 if settings.intent_dari_model else _ESKALASI_V10}- Kalau balasan terakhirmu menampilkan detail satu kue dan pelanggan menjawab
   dengan jumlah saja ("satu aja", "2 dong", "dua ya"), itu jawaban untuk kue
   tersebut -> panggil `add_to_cart` dengan kue itu dan jumlah yang dia sebut.
 - Pertanyaan umum (jam buka, pengiriman, pembayaran, dll): jika ada KONTEKS FAQ di bawah,
