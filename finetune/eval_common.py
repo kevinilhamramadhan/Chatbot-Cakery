@@ -41,7 +41,15 @@ def _arahan_baris(system_msg: dict) -> str:
     return bahasa.arahan(bahasa.EN if isi.endswith(bahasa.arahan(bahasa.EN)) else bahasa.ID)
 
 
-def to_lc_messages(messages: list[dict]):
+FAQ_TANYA = "\n\nPertanyaan pelanggan: "
+
+
+def tanpa_konteks(text: str) -> str:
+    """Pertanyaan tanpa blok KONTEKS FAQ (ablation tanpa RAG)."""
+    return text.split(FAQ_TANYA, 1)[1] if text.startswith("KONTEKS FAQ") and FAQ_TANYA in text else text
+
+
+def to_lc_messages(messages: list[dict], rag: bool = True):
     """messages = row["messages"][:-1] (everything up to the gold turn)."""
     out = [SystemMessage(content=SYSTEM_PROMPT)]
     body = messages[1:]
@@ -57,8 +65,37 @@ def to_lc_messages(messages: list[dict]):
     # Bahasa baris dibaca dari blok system-nya sendiri (dataset menempelkannya
     # di sana), supaya eval merakit prompt yang sama persis dengan runtime.
     out.append(SystemMessage(content=TOOL_REMINDER + _arahan_baris(messages[0])))
-    out.append(HumanMessage(content=question["content"]))
+    out.append(HumanMessage(content=question["content"] if rag else tanpa_konteks(question["content"])))
     return out
+
+
+# ── Text-reply scoring (sama persis dengan run_eval di notebook) ─────────────
+
+_FAKTA = re.compile(r"\d+[.:]\d+|H-\d+|\d+-\d+|\d+ ?(?:menit|jam|hari|km|pcs|%)|\d+")
+_TIDAK_TAHU = ("belum punya", "belum ada", "tidak punya info", "belum bisa jawab", "belum tahu",
+               "tidak tahu", "don't have", "not sure", "no information", "belum pegang")
+_EN = re.compile(r"\b(i'?m|i am|you'?re|your|ready|help|great|whenever|both|"
+                 r"still|here|want|would|like|let|know|see|list|the|anything|"
+                 r"welcome|how|what|which|please|sorry|thanks|thank)\b", re.I)
+_ID = re.compile(r"\b(aku|kak|kubantu|silakan|saja|mau|kalau|tinggal|bisa)\b", re.I)
+
+
+def fakta_terpenuhi(gold: str, jawab: str) -> bool:
+    """N1: semua fakta kunci jawaban acuan ada di jawaban; tanpa angka: >= separuh kata isi."""
+    fakta = set(_FAKTA.findall(gold))
+    if fakta:
+        return all(f in jawab for f in fakta)
+    kata = set(re.findall(r"[a-z]{4,}", gold.lower()))
+    return bool(kata) and len(kata & set(re.findall(r"[a-z]{4,}", jawab.lower()))) / len(kata) >= 0.5
+
+
+def mengaku_tidak_tahu(jawab: str) -> bool:
+    """N1x: mengaku belum punya info, bukan mengarang."""
+    return any(k in jawab.lower() for k in _TIDAK_TAHU)
+
+
+def bahasa_salah(lang: str, jawab: str) -> bool:
+    return bool(_EN.search(jawab)) if lang == "id" else bool(_ID.search(jawab))
 
 
 def gold_of(row: dict):
