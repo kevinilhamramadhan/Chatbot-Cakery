@@ -82,6 +82,8 @@ def jawaban_untuk(faq: dict, lang: str) -> str | None:
     """Teks baku FAQ ini dalam bahasa sesi; None kalau versi bahasanya tidak ada."""
     if bahasa.normalkan(lang) != bahasa.EN:
         return faq["jawaban"]
+    if faq.get("jawaban_en"):
+        return faq["jawaban_en"]
     entri = _paket_en().get(faq["pertanyaan"])
     if entri and entri.get("sidik_jawaban") == _sidik(faq["jawaban"]):
         return entri["jawaban_en"]

@@ -37,6 +37,10 @@ class FaqDoc:
     text: str
     pertanyaan: str = ""
     jawaban: str = ""
+    # Hanya dokumen bawaan: teks Inggrisnya sudah ada di bahasa.py, jadi tidak
+    # perlu lewat faq_en.json.
+    pertanyaan_en: str = ""
+    jawaban_en: str = ""
 
 
 def _doc_id(source: str, idx: int) -> str:
@@ -110,16 +114,18 @@ def dokumen_bawaan() -> list[FaqDoc]:
     kata kunci di orchestrator; sejak intent diputuskan model, jawabannya harus
     bisa diambil RAG, kalau tidak model mengaku belum tahu."""
     docs = []
-    for source, tanya, kunci, isi in (
-        ("bawaan-alamat", "Di mana alamat Toti Cakery?", "alamat_toko",
-         {"nama_toko": settings.store_name, "alamat_toko": settings.store_address}),
-        ("bawaan-pesan-besok", "Apakah bisa pesan untuk besok?", "bisa_pesan_besok", {}),
+    for source, tanya, tanya_en, kunci, isi in (
+        ("bawaan-alamat", "Di mana alamat Toti Cakery?", "Where is Toti Cakery's shop?",
+         "alamat_toko", {"nama_toko": settings.store_name, "alamat_toko": settings.store_address}),
+        ("bawaan-pesan-besok", "Apakah bisa pesan untuk besok?", "Can I order for tomorrow?",
+         "bisa_pesan_besok", {}),
     ):
         if kunci == "alamat_toko" and "ganti di .env" in settings.store_address:
             continue
         jawab = bahasa.teks(kunci, bahasa.ID, **isi)
         docs.append(FaqDoc(source=source, text=f"Q: {tanya}\nA: {jawab}",
-                           pertanyaan=tanya, jawaban=jawab))
+                           pertanyaan=tanya, jawaban=jawab, pertanyaan_en=tanya_en,
+                           jawaban_en=bahasa.teks(kunci, bahasa.EN, **isi)))
     return docs
 
 
@@ -165,6 +171,7 @@ def fingerprint(docs: list[FaqDoc]) -> str:
     for d in sorted(docs, key=lambda d: d.source):
         h.update(d.source.encode())
         h.update(d.text.encode())
+        h.update((d.pertanyaan_en + d.jawaban_en).encode())
     h.update(
         json.dumps(
             {
@@ -173,8 +180,9 @@ def fingerprint(docs: list[FaqDoc]) -> str:
                 "chunk_overlap": settings.rag_chunk_overlap,
                 "collection": settings.chroma_collection,
                 # Naikkan kalau bentuk chunk berubah, supaya indeks lama dibangun
-                # ulang. 2 = satu chunk pertanyaan + satu chunk tanya-jawab.
-                "skema": 2,
+                # ulang. 2 = satu chunk pertanyaan + satu chunk tanya-jawab;
+                # 3 = dokumen bawaan ditambah chunk pertanyaan Inggris.
+                "skema": 3,
             },
             sort_keys=True,
         ).encode()
@@ -217,8 +225,14 @@ def ingest_documents(docs: list[FaqDoc]) -> int:
             # FAQ; yang panjang kadang lebih mirip dengan isi jawabannya. Dua
             # chunk, skor FAQ = yang tertinggi (lihat store.retrieve).
             chunks = [d.pertanyaan, d.text]
-            metas = [{"source": d.source, "chunk": i, "pertanyaan": d.pertanyaan,
-                      "jawaban": d.jawaban, "dokumen": d.text} for i in range(2)]
+            meta = {"source": d.source, "pertanyaan": d.pertanyaan,
+                    "jawaban": d.jawaban, "dokumen": d.text}
+            if d.pertanyaan_en:
+                # Pertanyaan Inggris ke pertanyaan Indonesia skornya rendah
+                # ("where is your shop?" 0,39, di bawah ambang 0,40).
+                chunks.append(d.pertanyaan_en)
+                meta["jawaban_en"] = d.jawaban_en
+            metas = [{**meta, "chunk": i} for i in range(len(chunks))]
         else:
             chunks = splitter.split_text(d.text)
             metas = [{"source": d.source, "chunk": i} for i in range(len(chunks))]

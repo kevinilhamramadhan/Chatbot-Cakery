@@ -62,7 +62,8 @@ class RetrievalResult:
         Kosong untuk dokumen tanpa pasangan tanya-jawab (berkas lokal bebas)."""
         threshold = settings.rag_similarity_threshold
         return [
-            {"pertanyaan": m["pertanyaan"], "jawaban": m["jawaban"], "skor": sim}
+            {"pertanyaan": m["pertanyaan"], "jawaban": m["jawaban"], "skor": sim,
+             "jawaban_en": m.get("jawaban_en")}
             for m, sim in zip(self.metadatas, self.similarities)
             if sim >= threshold and (m or {}).get("jawaban")
         ]

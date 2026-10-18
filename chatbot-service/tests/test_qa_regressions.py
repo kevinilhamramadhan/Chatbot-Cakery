@@ -861,6 +861,18 @@ async def test_faq_falls_back_to_local_files_when_backend_has_none(patch_externa
     assert "bawaan-pesan-besok" in {d.source for d in docs}
 
 
+def test_dokumen_bawaan_punya_jawaban_inggris():
+    """Tanpa jawaban Inggris, sesi Inggris menerjemahkan sendiri ("The fastest to
+    order tomorrow", produksi 19 Okt 2026)."""
+    from app.rag import faq_baku, faq_source
+
+    besok = next(d for d in faq_source.dokumen_bawaan() if d.source == "bawaan-pesan-besok")
+    assert besok.pertanyaan_en and besok.jawaban_en.startswith("Yes")
+    faq = {"pertanyaan": besok.pertanyaan, "jawaban": besok.jawaban, "jawaban_en": besok.jawaban_en}
+    assert faq_baku.jawaban_untuk(faq, "en") == besok.jawaban_en
+    assert faq_baku.jawaban_untuk(faq, "id") == besok.jawaban
+
+
 def test_faq_fingerprint_changes_when_an_answer_is_edited():
     """Refresh berkala membandingkan sidik jari ini; kalau tidak berubah saat
     teksnya berubah, editan admin tidak akan pernah ter-embed ulang."""
