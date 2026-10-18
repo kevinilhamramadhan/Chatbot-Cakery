@@ -12,7 +12,8 @@ from app.tools.formatting import product_label, rupiah, tersedia
 # memanggil get_menu, dan menu menyertakan tiga rekomendasinya.
 DESKRIPSI_V11 = """Ambil daftar LENGKAP menu beserta harga dan tiga rekomendasi toko.
 Gunakan saat pelanggan menanyakan menu, daftar kue, harga secara umum, atau
-minta rekomendasi tanpa menyebut nama kue."""
+minta rekomendasi tanpa menyebut nama kue. Harga SATU kue yang disebut namanya:
+pakai get_product_detail."""
 
 # Kategori tanpa nama di data ditaruh paling bawah, bukan di bawah judul kosong.
 _TANPA_KATEGORI = "Lainnya"

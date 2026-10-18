@@ -337,8 +337,12 @@ T3_EN_V6 = ["{greet}the {prod} is 50k right?", "{greet}isn't the {prod} 100 thou
 # pelanggan; resolver kode yang menanyakan varian kalau lebih dari satu.
 T3_ID_V7 = ["{greet}fotonya ada ga? mau lihat {prod} nya{part}", "{greet}mau lihat {prod} nya dong{part}",
             "{greet}kirim foto {prod}{part}"]
-T3_ID = T3_ID_V7 + T3_ID_V6 + T3_ID + T3_ID_V5
-T3_EN = T3_EN_V6 + T3_EN + T3_EN_V5
+# v12: template harga dipindah ke DEPAN. Sampai v11 mereka di ekor pool, jadi
+# hanya ada di split test; v11 menjawab "harga bolu pandan berapa?" dengan
+# get_menu (16/36 di riset03, 18 Okt 2026). Ekor test diberi frasa harga baru.
+T3_ID = T3_ID_V5 + T3_ID_V7 + T3_ID_V6 + T3_ID + [
+    "{greet}{prod} dibanderol berapa{part}?", "{greet}kalau {prod} kena berapa{part}?"]
+T3_EN = T3_EN_V5 + T3_EN_V6 + T3_EN + ["{greet}how much does the {prod} cost?"]
 
 T4_ID = ["{greet}bagusan mana {prodA} sama {prodB}{part}?", "{greet}bedanya {prodA} dan {prodB} apa{part}?",
          "{greet}bandingin {prodA} sama {prodB}{part}", "{greet}enakan {prodA} atau {prodB}{part}?",
@@ -879,14 +883,17 @@ T15_EN = T15_EN[:3] + ["{greet}checkout please", "{greet}I'm ready to pay",
 #   T18 satu kue dibuang           -> update_cart(qty=0)   (BUKAN cancel_order)
 #   T19 "tambah N lagi"            -> add_to_cart(qty=N)   (selisih, BUKAN update_cart)
 #   N15 "kurangi" tanpa angka      -> tanya jumlah akhirnya (BUKAN menebak)
-T17_ID = ["{prod} nya jadi {qty}{unit} aja{part}", "ganti {prod} jadi {qty}{unit}{part}",
+T17_ID = ["eh salah, {prod} nya {qty}{unit} aja{part}", "maksudku {prod} {qty}{unit}, bukan yang tadi{part}",
+          "{prod} cukup segini aja: {qty}{unit}{part}", "{prod} ku jadikan {qty}{unit} ya{part}",
+          "{prod} nya jadi {qty}{unit} aja{part}", "ganti {prod} jadi {qty}{unit}{part}",
           "ubah {prod} jadi {qty}{unit}{part}", "eh {prod} nya {qty}{unit} aja deh, bukan segitu",
           "{prod} kebanyakan, jadiin {qty}{unit}{part}", "kurangi {prod} jadi {qty}{unit}{part}",
           "{prod} cukup {qty}{unit} aja{part}", "revisi ya, {prod} jadi {qty}{unit}{part}",
           "jumlah {prod} diganti {qty}{unit}{part}", "naikin {prod} jadi {qty}{unit}{part}",
           "{prod} nya dibikin {qty}{unit} aja{part}", "salah jumlah, {prod} harusnya {qty}{unit}{part}",
           "{greet}{prod} dijadiin {qty}{unit} bisa{part}?", "koreksi: {prod} {qty}{unit} saja{part}"]
-T17_EN = ["make the {prod} {qty} instead", "change the {prod} to {qty}{part}",
+T17_EN = ["oops, {prod} should be {qty}{part}", "let's do {qty} {prod} instead of that",
+          "make the {prod} {qty} instead", "change the {prod} to {qty}{part}",
           "can you change {prod} to {qty}?", "reduce the {prod} to {qty}{part}",
           "update {prod} to {qty}{part}", "actually make it {qty} {prod}",
           "I meant {qty} {prod}, not that many", "set the {prod} to {qty}{part}"]
@@ -924,12 +931,15 @@ QTY_EN_POLOS = [q for q in QTY_EN if " " not in q[0]]
 
 # T16 — kirim ulang cara bayar. resend_payment_method juga nol baris sampai v6.
 # Selalu sesudah tagihan terbit (history "payment").
-T16_ID = ["{greet}kode qr nya kirim ulang dong{part}", "{greet}nomor VA nya mana ya{part}?",
+T16_ID = ["{greet}tagihannya masih berlaku kan{part}?", "{greet}belum telat kan kalau bayar sekarang{part}?",
+          "{greet}aku belum bayar, masih aman kan{part}?", "{greet}mau transfer sekarang, caranya kirim lagi{part}",
+          "{greet}kode qr nya kirim ulang dong{part}", "{greet}nomor VA nya mana ya{part}?",
           "{greet}belum sempat bayar, masih bisa ga{part}?", "{greet}qris nya ilang, kirim lagi{part}",
           "{greet}tagihannya kirim ulang{part}", "{greet}aku mau bayar sekarang, kodenya mana{part}?",
           "{greet}link pembayarannya ga kebuka, kirim lagi{part}", "{greet}minta nomor rekening VA nya lagi{part}",
           "{greet}masih bisa dibayar kan tagihannya{part}?", "{greet}lupa nomor VA nya{part}"]
-T16_EN = ["{greet}can you resend the payment code?", "{greet}I lost the QR code, send it again",
+T16_EN = ["{greet}is the invoice still valid?", "{greet}am I too late to pay?",
+          "{greet}can you resend the payment code?", "{greet}I lost the QR code, send it again",
           "{greet}I haven't paid yet, can I still pay?", "{greet}what was the VA number again?"]
 
 # N10 — pelanggan BUKAN Owner minta laporan. Tool laporan tidak dimuat untuk
@@ -948,10 +958,13 @@ N10_REPLY = {
 
 # N11 — ganti metode bayar SESUDAH tagihan terbit. Kode tidak mendukungnya;
 # QA W4 dijawab "nggak bisa, satu pelanggan satu pesanan" (salah alasan).
-N11_ID = ["{greet}ganti ke transfer bank aja deh{part}", "{greet}bisa ganti ke qris ga{part}?",
+N11_ID = ["{greet}bayarnya mau pakai VA aja{part}", "{greet}qris nya ga bisa, ganti cara lain ya{part}",
+          "{greet}DP nya ga jadi, langsung lunas aja{part}", "{greet}bisa tukar ke qris aja{part}?",
+          "{greet}ganti ke transfer bank aja deh{part}", "{greet}bisa ganti ke qris ga{part}?",
           "{greet}aku mau ganti cara bayar{part}", "{greet}VA nya ganti bank lain bisa{part}?",
           "{greet}ga jadi qris, pakai VA aja{part}", "{greet}bisa ubah jadi bayar lunas{part}?"]
-N11_EN = ["{greet}can I switch to bank transfer instead?", "{greet}can I change the payment method?"]
+N11_EN = ["{greet}I'd rather pay in full instead of the deposit", "{greet}can I use QRIS instead?",
+          "{greet}can I switch to bank transfer instead?", "{greet}can I change the payment method?"]
 N11_REPLY = {
     "id": ["Cara bayar tidak bisa diganti setelah tagihan terbit kak 🙏 Kalau mau ganti, ketik *batal* untuk membatalkan tagihan ini, lalu pesan ulang dan pilih cara bayar yang baru.",
            "Tagihannya sudah terbit dengan cara bayar yang tadi dipilih, jadi tidak bisa diubah ya kak 🙏 Ketik *batal* lalu pesan lagi kalau mau pakai cara bayar lain."],
@@ -980,7 +993,9 @@ N12_REPLY = {
 # berbahasa Inggris yang sesinya sudah Inggris: cukup dijawab.
 N13_ID = []
 N13_EN = ["{greet}do you speak English?", "{greet}can we talk in English?",
-          "{greet}is English okay here?", "{greet}sorry, I don't speak Indonesian"]
+          "{greet}is English okay here?"]
+# v12: "sorry, I don't speak Indonesian" dibuang: maknanya minta ganti bahasa
+# (T25), jadi v11 memanggil set_language dan dinilai salah.
 N13_REPLY = {
     "id": ["Bisa kak 😊 Aku bisa membalas dalam Bahasa Indonesia maupun Inggris — tulis saja pakai bahasa yang nyaman buatmu."],
     "en": ["Yes, of course! 😊 I can chat in English or Indonesian. How can I help — menu, orders, or anything about the shop?",
@@ -1048,13 +1063,16 @@ T22_EN = ["{greet}how much is the remaining balance?", "{greet}how much do I sti
           "{greet}what's left to pay?", "{greet}is there anything outstanding on my order?"]
 
 # T23 — kabar refund -> check_payment_status.
-T23_ID = ["{greet}uangku kapan kembali{part}?", "{greet}refund nya udah diproses belum{part}?",
+T23_ID = ["{greet}pesananku dibatalin, duitku gimana{part}?", "{greet}uangku dibalikin kapan{part}?",
+          "{greet}dana pesanan yang batal udah ditransfer balik{part}?", "{greet}pembayaranku yang kemarin balik ga{part}?",
+          "{greet}uangku kapan kembali{part}?", "{greet}refund nya udah diproses belum{part}?",
           "{greet}dananya udah dikembalikan belum{part}?", "{greet}duitnya kapan dibalikin{part}?",
           "{greet}pengembalian dana ku gimana{part}?", "{greet}refund aku udah masuk belum{part}?",
           "{greet}uang pesanan yang dibatalin kapan balik{part}?",
           "{greet}transferan dari toko buat pesanan yang dibatalin udah dikirim{part}?",
           "{greet}uang yang sudah kubayar bakal diganti kapan{part}?"]
-T23_EN = ["{greet}when will I get my money back?", "{greet}has my refund been processed?",
+T23_EN = ["{greet}did you send back the money for my cancelled order?",
+          "{greet}when will I get my money back?", "{greet}has my refund been processed?",
           "{greet}where is my refund?", "{greet}the order got called off, what happens to what I paid?"]
 
 # T24 — melunasi sisa DP -> pay_remaining. Kontras: T16 (tagihan pertama belum
@@ -1106,7 +1124,10 @@ T27_REASON = ["Pelanggan masih kecewa setelah permintaan maaf sebelumnya",
 
 # N16 — terima kasih dan pujian -> dibalas teks, tanpa tool. Terukur: "makasih
 # ya" dijawab "Yang mau kubagiakan ya?", pujian dijawab send_apology.
-N16_ID = [("{greet}makasih ya{part}", "thanks"), ("{greet}kuenya kemarin enak banget{part}", "praise"),
+N16_ID = [("{greet}tamu pada nanya beli di mana{part}", "praise"), ("{greet}ga nyesel pesan di sini{part}", "praise"),
+          ("{greet}kuenya cepet habis, pada doyan{part}", "praise"), ("{greet}oke makasih infonya{part}", "thanks"),
+          ("{greet}sip, terbantu banget{part}", "thanks"), ("{greet}acara kemarin makin seru gara-gara kuenya{part}", "praise"),
+          ("{greet}makasih ya{part}", "thanks"), ("{greet}kuenya kemarin enak banget{part}", "praise"),
           ("{greet}terima kasih banyak{part}", "thanks"), ("{greet}suka banget sama kuenya{part}", "praise"),
           ("{greet}thx{part}", "thanks"), ("{greet}mantap kuenya{part}", "praise"),
           ("{greet}makasih udah dibantu{part}", "thanks"), ("{greet}anak aku seneng banget sama kuenya{part}", "praise"),
@@ -1114,7 +1135,8 @@ N16_ID = [("{greet}makasih ya{part}", "thanks"), ("{greet}kuenya kemarin enak ba
           ("{greet}sangat membantu, kamu baik banget{part}", "thanks"),
           ("{greet}keluarga di rumah pada nambah terus, ludes{part}", "praise"),
           ("{greet}kuenya jadi bintang di acara kemarin{part}", "praise")]
-N16_EN = [("{greet}thanks a lot", "thanks"), ("{greet}the cake was delicious!", "praise"),
+N16_EN = [("{greet}the kids loved it", "praise"), ("{greet}great service, cheers", "thanks"),
+          ("{greet}thanks a lot", "thanks"), ("{greet}the cake was delicious!", "praise"),
           ("{greet}loved the cake yesterday", "praise"), ("{greet}you've been super helpful", "thanks"),
           ("{greet}everyone at the party asked where I got it", "praise")]
 N16_REPLY = {
@@ -1129,13 +1151,16 @@ N16_REPLY = {
 # N18 — ubah data pesanan sesudah tagihan terbit -> templat "tidak bisa diubah".
 # Backend tidak punya endpoint untuk mengubah pesanan; jalan satu-satunya batal
 # lalu pesan ulang. Kontras: T17/T18 (keranjang BELUM jadi tagihan).
-N18_ID = ["{greet}alamat pengirimannya mau aku ganti{part}", "{greet}tanggal ambilnya bisa diubah{part}?",
+N18_ID = ["{greet}kuenya bisa dikirim minggu depan aja{part}?", "{greet}acaranya pindah tempat, alamatnya ganti ya{part}",
+          "{greet}ambilnya mundur ke lusa bisa{part}?", "{greet}isi pesanannya mau ditukar sama kue lain{part}",
+          "{greet}alamat pengirimannya mau aku ganti{part}", "{greet}tanggal ambilnya bisa diubah{part}?",
           "{greet}bisa reschedule ga{part}?", "{greet}ganti alamat dong{part}",
           "{greet}jadwal kirimnya mau dimajuin{part}", "{greet}aku salah tulis alamat, bisa dibenerin{part}?",
           "{greet}tambahin satu kue lagi ke pesanan ini bisa{part}?", "{greet}tanggalnya mau diganti{part}",
           "{greet}aku pindah rumah, kuenya dianter ke tempat baru aja{part}",
           "{greet}acaranya diundur seminggu, kuenya ikut mundur ya{part}"]
-N18_EN = ["{greet}can I change the delivery address?", "{greet}can I move the pickup date?",
+N18_EN = ["{greet}can you deliver to my office instead?", "{greet}we pushed the event back, can you hold the cake?",
+          "{greet}can I change the delivery address?", "{greet}can I move the pickup date?",
           "{greet}the party got postponed, can the cake come later?"]
 
 
@@ -1232,6 +1257,8 @@ TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 115, "T4": 40, "T5": 180, "T6": 35, "T
                 # N9 35->20 (kategori "human" pindah ke T20), N13 15->10 (hanya EN).
                 "T20": 40, "T21": 40, "T22": 35, "T23": 30, "T24": 45, "T25": 35,
                 "T26": 25, "T27": 25, "N16": 40, "N18": 35}
+# v12: tipe yang turun di eval v11 (riset03, 18 Okt 2026) ditambah.
+TRAIN_COUNTS.update({"T17": 90, "T16": 60, "N11": 40, "T23": 45, "N16": 60, "N18": 50, "T20": 50})
 VAL_COUNTS = {k: max(2, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 TEST_COUNTS = {k: max(3, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
