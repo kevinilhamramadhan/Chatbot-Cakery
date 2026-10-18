@@ -633,7 +633,11 @@ N7_REPLY = {
 # dengan penolakan out-of-scope (seolah pelanggan menanyakan hal di luar toko),
 # dan "kok gak dibales sih" dijawab kalimat ngawur. Di WhatsApp keduanya normal:
 # orang memanggil dulu, baru bicara.
-N8_ID = [("kak{part}", "hail"), ("kok gak dibales sih{part}?", "impatient"),
+# v13: "ada orang?" adalah sapaan memastikan ada yang membalas, bukan minta
+# admin (T20 "mau dilayani orang"); v12 memanggil escalate_to_admin 7/12.
+N8_ID = [("ada orang{part}?", "impatient"), ("ada yang bales ga{part}?", "impatient"),
+         ("ada yang jaga chat ini{part}?", "impatient"), ("halo, ada orangnya{part}?", "impatient"),
+         ("kak{part}", "hail"), ("kok gak dibales sih{part}?", "impatient"),
          ("min{part}", "hail"), ("halo masih ada{part}?", "impatient"),
          ("ka{part}", "hail"), ("masih online ga{part}?", "impatient"),
          ("bang{part}", "hail"), ("udah dibaca belum kak{part}?", "impatient"),
@@ -643,7 +647,8 @@ N8_ID = [("kak{part}", "hail"), ("kok gak dibales sih{part}?", "impatient"),
          ("hai{part}", "hail"), ("kak masih buka ga chatnya{part}?", "impatient"),
          ("mbak{part}", "hail"), ("ada orang ga di sini{part}?", "impatient"),
          ("assalamualaikum kak{part}", "hail"), ("hallo kak{part}", "hail")]
-N8_EN = [("hey", "hail"), ("anyone there?", "impatient"),
+N8_EN = [("is anybody here?", "impatient"), ("hello, anyone?", "impatient"),
+         ("hey", "hail"), ("anyone there?", "impatient"),
          ("hello?", "hail"), ("are you still there?", "impatient"),
          ("excuse me", "hail"), ("still no reply?", "impatient")]
 N8_REPLY = {
@@ -1041,7 +1046,9 @@ T20_REASON = ["Pelanggan minta bicara langsung dengan admin toko",
               "Pelanggan meminta disambungkan ke admin Toti Cakery"]
 
 # T21 — rekomendasi -> get_menu (menu v11 menyertakan tiga rekomendasi).
-T21_ID = ["{greet}rekomendasi kue yang enak dong{part}", "{greet}yang paling laris apa{part}?",
+T21_ID = ["{greet}buat yang baru pertama coba, enaknya apa{part}?", "{greet}kue andalan buat dicoba duluan apa{part}?",
+          "{greet}aku belum pernah beli, mulai dari kue apa ya{part}?",
+          "{greet}rekomendasi kue yang enak dong{part}", "{greet}yang paling laris apa{part}?",
           "{greet}best seller nya apa aja{part}?", "{greet}kue favorit di sini apa{part}?",
           "{greet}andalan toti cakery apa{part}?", "{greet}yang paling populer yang mana{part}?",
           "{greet}rekomen dong buat ultah{part}", "{greet}menu yang paling recommended apa{part}?",
@@ -1049,7 +1056,8 @@ T21_ID = ["{greet}rekomendasi kue yang enak dong{part}", "{greet}yang paling lar
           "{greet}bingung mau pilih yang mana, saranin dong{part}",
           "{greet}kue yang paling sering dibeli orang apa{part}?",
           "{greet}kalau baru pertama kali beli, cocoknya coba yang mana{part}?"]
-T21_EN = ["{greet}what do you recommend?", "{greet}what's your best seller?",
+T21_EN = ["{greet}what's a good first cake to try?", "{greet}never ordered before, where should I start?",
+          "{greet}what do you recommend?", "{greet}what's your best seller?",
           "{greet}which cake is most popular?", "{greet}I can't decide, any suggestions?",
           "{greet}what should a first-timer try?"]
 
@@ -1063,7 +1071,9 @@ T22_EN = ["{greet}how much is the remaining balance?", "{greet}how much do I sti
           "{greet}what's left to pay?", "{greet}is there anything outstanding on my order?"]
 
 # T23 — kabar refund -> check_payment_status.
-T23_ID = ["{greet}pesananku dibatalin, duitku gimana{part}?", "{greet}uangku dibalikin kapan{part}?",
+T23_ID = ["{greet}uang dari pesanan yang batal udah dikirim balik belum{part}?",
+          "{greet}pesananku dicancel, dananya kapan masuk lagi{part}?",
+          "{greet}pesananku dibatalin, duitku gimana{part}?", "{greet}uangku dibalikin kapan{part}?",
           "{greet}dana pesanan yang batal udah ditransfer balik{part}?", "{greet}pembayaranku yang kemarin balik ga{part}?",
           "{greet}uangku kapan kembali{part}?", "{greet}refund nya udah diproses belum{part}?",
           "{greet}dananya udah dikembalikan belum{part}?", "{greet}duitnya kapan dibalikin{part}?",
@@ -1077,7 +1087,10 @@ T23_EN = ["{greet}did you send back the money for my cancelled order?",
 
 # T24 — melunasi sisa DP -> pay_remaining. Kontras: T16 (tagihan pertama belum
 # dibayar -> resend_payment_method) dan T22 (bertanya jumlah -> cek bayar).
-T24_ID = ["{greet}mau lunasi{part}", "{greet}aku mau lunasin sekarang{part}",
+T24_ID = ["{greet}aku mau selesaikan pembayarannya{part}", "{greet}sekalian bayar semuanya sekarang ya{part}",
+          "{greet}tagih sisanya sekarang aja{part}", "{greet}kirim tagihan sisanya{part}",
+          "{greet}aku bayar penuh sekarang deh{part}",
+          "{greet}mau lunasi{part}", "{greet}aku mau lunasin sekarang{part}",
           "{greet}pelunasan dong{part}", "{greet}mau bayar sisanya{part}",
           "{greet}bayar kekurangannya sekarang ya{part}", "{greet}gimana cara lunasinnya{part}?",
           "{greet}minta tagihan pelunasan{part}", "{greet}sisanya mau aku bayar sekarang{part}",
@@ -1085,7 +1098,8 @@ T24_ID = ["{greet}mau lunasi{part}", "{greet}aku mau lunasin sekarang{part}",
           "{greet}aku mau beresin pembayarannya sekarang{part}",
           "{greet}kirim tagihan buat bayar yang belum lunas{part}",
           "{greet}biar ga kepikiran, aku bayar full sekarang aja{part}"]
-T24_EN = ["{greet}I want to pay the balance", "{greet}how do I pay the rest?",
+T24_EN = ["{greet}send me the bill for the rest", "{greet}I'll pay everything now",
+          "{greet}I want to pay the balance", "{greet}how do I pay the rest?",
           "{greet}let me settle the remaining amount", "{greet}I'd like to clear what I owe now"]
 
 # T25 — minta ganti bahasa -> set_language. Baris sesi Indonesia meminta
@@ -1259,6 +1273,8 @@ TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 115, "T4": 40, "T5": 180, "T6": 35, "T
                 "T26": 25, "T27": 25, "N16": 40, "N18": 35}
 # v12: tipe yang turun di eval v11 (riset03, 18 Okt 2026) ditambah.
 TRAIN_COUNTS.update({"T17": 90, "T16": 60, "N11": 40, "T23": 45, "N16": 60, "N18": 50, "T20": 50})
+# v13: sisa kelemahan eval v12 (riset03, 18 Okt 2026).
+TRAIN_COUNTS.update({"N8": 50, "T21": 50, "T23": 55, "T24": 60, "T6": 45})
 VAL_COUNTS = {k: max(2, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 TEST_COUNTS = {k: max(3, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
