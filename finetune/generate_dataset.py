@@ -1138,7 +1138,16 @@ T27_REASON = ["Pelanggan masih kecewa setelah permintaan maaf sebelumnya",
 
 # N16 — terima kasih dan pujian -> dibalas teks, tanpa tool. Terukur: "makasih
 # ya" dijawab "Yang mau kubagiakan ya?", pujian dijawab send_apology.
-N16_ID = [("{greet}tamu pada nanya beli di mana{part}", "praise"), ("{greet}ga nyesel pesan di sini{part}", "praise"),
+# v13: pujian yang menyebut kue dan cerita "kemarin" dibaca keluhan di produksi
+# (19 Okt 2026, v12: "brownies kemarin dihabisin anak-anak dalam sejam" ->
+# submit_complaint lalu takeover admin).
+N16_ID = [("{greet}{prod} kemarin langsung dihabisin anak-anak{part}", "praise"),
+          ("{greet}{prod} nya ludes sebelum acaranya selesai{part}", "praise"),
+          ("{greet}{prod} kemarin diserbu tamu, aku sampai ga kebagian{part}", "praise"),
+          ("{greet}suami aku nambah {prod} terus dari kemarin{part}", "praise"),
+          ("{greet}{prod} yang kemarin enak parah{part}", "praise"),
+          ("{greet}baru buka kotak {prod}, langsung habis setengah{part}", "praise"),
+          ("{greet}tamu pada nanya beli di mana{part}", "praise"), ("{greet}ga nyesel pesan di sini{part}", "praise"),
           ("{greet}kuenya cepet habis, pada doyan{part}", "praise"), ("{greet}oke makasih infonya{part}", "thanks"),
           ("{greet}sip, terbantu banget{part}", "thanks"), ("{greet}acara kemarin makin seru gara-gara kuenya{part}", "praise"),
           ("{greet}makasih ya{part}", "thanks"), ("{greet}kuenya kemarin enak banget{part}", "praise"),
@@ -1149,7 +1158,10 @@ N16_ID = [("{greet}tamu pada nanya beli di mana{part}", "praise"), ("{greet}ga n
           ("{greet}sangat membantu, kamu baik banget{part}", "thanks"),
           ("{greet}keluarga di rumah pada nambah terus, ludes{part}", "praise"),
           ("{greet}kuenya jadi bintang di acara kemarin{part}", "praise")]
-N16_EN = [("{greet}the kids loved it", "praise"), ("{greet}great service, cheers", "thanks"),
+N16_EN = [("{greet}the {prod} was gone in an hour", "praise"),
+          ("{greet}my kids finished the {prod} in minutes", "praise"),
+          ("{greet}everyone fought over the {prod} yesterday", "praise"),
+          ("{greet}the kids loved it", "praise"), ("{greet}great service, cheers", "thanks"),
           ("{greet}thanks a lot", "thanks"), ("{greet}the cake was delicious!", "praise"),
           ("{greet}loved the cake yesterday", "praise"), ("{greet}you've been super helpful", "thanks"),
           ("{greet}everyone at the party asked where I got it", "praise")]
@@ -1225,6 +1237,7 @@ PARAFRASE = [
     (("N16", "thanks"), "id", "kamu baik banget, sangat membantu"),
     (("N16", "thanks"), "id", "jasamu besar hari ini hehe"),
     (("N16", "praise"), "en", "my kids couldn't stop eating it"),
+    (("N16", "praise"), "id", "brownies kemarin abis dalam sekejap sama bocil-bocil"),
     ("N18", "id", "kuenya dikirim ke kantor aja, jangan ke rumah"),
     ("N18", "id", "ambilnya lusa aja ya, jangan besok"),
     ("N18", "id", "nama penerimanya salah, bisa dibenerin?"),
@@ -1274,7 +1287,7 @@ TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 115, "T4": 40, "T5": 180, "T6": 35, "T
 # v12: tipe yang turun di eval v11 (riset03, 18 Okt 2026) ditambah.
 TRAIN_COUNTS.update({"T17": 90, "T16": 60, "N11": 40, "T23": 45, "N16": 60, "N18": 50, "T20": 50})
 # v13: sisa kelemahan eval v12 (riset03, 18 Okt 2026).
-TRAIN_COUNTS.update({"N8": 50, "T21": 50, "T23": 55, "T24": 60, "T6": 45})
+TRAIN_COUNTS.update({"N8": 50, "T21": 50, "T23": 55, "T24": 60, "T6": 45, "N16": 75})
 VAL_COUNTS = {k: max(2, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 TEST_COUNTS = {k: max(3, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
@@ -2001,7 +2014,10 @@ class Gen:
 
             def build():
                 tpl, kind = self.pick_tpl(f"N16u{lang}", pool, P["regime"], total_count)
-                return self.maybe_noise(render(tpl, **self.slots(lang)), lang, noise), kind
+                sl = dict(self.slots(lang))
+                if "{prod}" in tpl:
+                    sl["prod"] = self.surface(self.pick_product(split), None, lang)
+                return self.maybe_noise(render(tpl, **sl), lang, noise), kind
             text, kind = uniq(build)
             return self.make_row(split, rtype, lang, history, text,
                                  self.text_turn(rng.choice(N16_REPLY[(kind, lang)])), noised=noise)

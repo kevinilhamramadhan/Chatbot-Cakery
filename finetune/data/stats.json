@@ -1,6 +1,6 @@
 {
   "train": {
-    "total": 2290,
+    "total": 2305,
     "per_type": {
       "N1": 150,
       "N10": 25,
@@ -9,7 +9,7 @@
       "N13": 10,
       "N14": 60,
       "N15": 20,
-      "N16": 60,
+      "N16": 75,
       "N18": 50,
       "N1x": 40,
       "N2": 25,
@@ -49,14 +49,14 @@
       "T9": 30
     },
     "tool_rows": 1405,
-    "non_tool_rows": 885,
+    "non_tool_rows": 900,
     "en_share": 0.222,
-    "multi_turn_share": 0.533,
+    "multi_turn_share": 0.536,
     "noised_share": 0.222,
-    "konteks_share": 0.645
+    "konteks_share": 0.633
   },
   "validation": {
-    "total": 229,
+    "total": 231,
     "per_type": {
       "N1": 15,
       "N10": 2,
@@ -65,7 +65,7 @@
       "N13": 2,
       "N14": 6,
       "N15": 2,
-      "N16": 6,
+      "N16": 8,
       "N18": 5,
       "N1x": 4,
       "N2": 2,
@@ -105,14 +105,14 @@
       "T9": 3
     },
     "tool_rows": 141,
-    "non_tool_rows": 88,
-    "en_share": 0.227,
-    "multi_turn_share": 0.533,
-    "noised_share": 0.183,
-    "konteks_share": 0.62
+    "non_tool_rows": 90,
+    "en_share": 0.225,
+    "multi_turn_share": 0.524,
+    "noised_share": 0.186,
+    "konteks_share": 0.619
   },
   "test": {
-    "total": 237,
+    "total": 239,
     "per_type": {
       "N1": 15,
       "N10": 3,
@@ -121,7 +121,7 @@
       "N13": 3,
       "N14": 6,
       "N15": 3,
-      "N16": 6,
+      "N16": 8,
       "N18": 5,
       "N1x": 4,
       "N2": 3,
@@ -161,10 +161,10 @@
       "T9": 3
     },
     "tool_rows": 144,
-    "non_tool_rows": 93,
-    "en_share": 0.249,
-    "multi_turn_share": 0.532,
-    "noised_share": 0.181,
-    "konteks_share": 0.603
+    "non_tool_rows": 95,
+    "en_share": 0.247,
+    "multi_turn_share": 0.531,
+    "noised_share": 0.184,
+    "konteks_share": 0.598
   }
 }
