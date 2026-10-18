@@ -855,7 +855,10 @@ async def test_faq_falls_back_to_local_files_when_backend_has_none(patch_externa
 
     docs, asal = await faq_source.current_docs()
     assert asal == "berkas lokal"
-    assert len(docs) >= 5 and all(d.source.endswith(".txt") for d in docs)
+    assert len(docs) >= 5 and all(d.source.endswith(".txt") or d.source.startswith("bawaan-")
+                                  for d in docs)
+    # Dulu dijawab aturan kata kunci; sejak intent dari model harus ada di RAG.
+    assert "bawaan-pesan-besok" in {d.source for d in docs}
 
 
 def test_faq_fingerprint_changes_when_an_answer_is_edited():

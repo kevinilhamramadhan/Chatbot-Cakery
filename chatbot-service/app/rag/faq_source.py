@@ -19,6 +19,7 @@ from pathlib import Path
 import httpx
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from app.conversation import bahasa
 from app.core.config import settings
 from app.rag.store import get_collection
 
@@ -104,12 +105,30 @@ def local_faq_docs() -> list[FaqDoc]:
     return docs
 
 
+def dokumen_bawaan() -> list[FaqDoc]:
+    """Fakta toko yang tidak ada di tabel FAQ. Sampai v10 keduanya dijawab aturan
+    kata kunci di orchestrator; sejak intent diputuskan model, jawabannya harus
+    bisa diambil RAG, kalau tidak model mengaku belum tahu."""
+    docs = []
+    for source, tanya, kunci, isi in (
+        ("bawaan-alamat", "Di mana alamat Toti Cakery?", "alamat_toko",
+         {"nama_toko": settings.store_name, "alamat_toko": settings.store_address}),
+        ("bawaan-pesan-besok", "Apakah bisa pesan untuk besok?", "bisa_pesan_besok", {}),
+    ):
+        if kunci == "alamat_toko" and "ganti di .env" in settings.store_address:
+            continue
+        jawab = bahasa.teks(kunci, bahasa.ID, **isi)
+        docs.append(FaqDoc(source=source, text=f"Q: {tanya}\nA: {jawab}",
+                           pertanyaan=tanya, jawaban=jawab))
+    return docs
+
+
 async def current_docs() -> tuple[list[FaqDoc], str]:
     """The FAQ the bot should be answering from, plus where it came from."""
     docs = await fetch_backend_faq()
     if docs:
-        return docs, "backend"
-    return local_faq_docs(), "berkas lokal"
+        return docs + dokumen_bawaan(), "backend"
+    return local_faq_docs() + dokumen_bawaan(), "berkas lokal"
 
 
 # Sidik jari hasil ingest terakhir, ditaruh di dalam direktori Chroma supaya ia
