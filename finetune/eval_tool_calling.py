@@ -73,13 +73,16 @@ def main():
                     help="paritas produksi: baris pelanggan hanya diberi 11 tool, baris Owner 13 (ikut tools_json baris)")
     ap.add_argument("--no-think", action="store_true", help="matikan mode thinking model (baseline tanpa penalaran)")
     ap.add_argument("--records", default="", help="simpan keluaran per baris (JSONL) ke path ini")
+    ap.add_argument("--lintas-versi", action="store_true",
+                    help="uji model lama pada dataset versi lain dengan prompt dan tool runtime saat ini "
+                         "(mis. v10 tanpa INTENT_DARI_MODEL pada test/parafrase v11)")
     args = ap.parse_args()
 
     rows = [json.loads(l) for l in open(args.data, encoding="utf-8")]
     # Dataset v11 dibuat dengan INTENT_DARI_MODEL=true, v10 tanpa. Prompt dan
     # deskripsi tool di sini diambil dari runtime, jadi env-nya harus cocok
     # dengan dataset; kalau tidak, modelnya diuji dengan prompt yang salah.
-    if not rows[0]["messages"][0]["content"].startswith(SYSTEM_PROMPT + "\n\n" + TOOL_REMINDER):
+    if not args.lintas_versi and not rows[0]["messages"][0]["content"].startswith(SYSTEM_PROMPT + "\n\n" + TOOL_REMINDER):
         sys.exit("system prompt dataset != runtime: set INTENT_DARI_MODEL=true untuk dataset v11, "
                  "jangan di-set untuk dataset v10")
     if args.limit:
@@ -97,7 +100,7 @@ def main():
         **({"reasoning": False} if args.no_think else {}),
     )
     llm_all, llm_umum = base.bind_tools(ALL_TOOLS), base.bind_tools(TOOLS_UMUM)
-    n_umum = len(TOOLS_UMUM)
+    khusus_owner = {t.name for t in ALL_TOOLS} - {t.name for t in TOOLS_UMUM}
     rec = open(args.records, "w", encoding="utf-8") if args.records else None
 
     per_type = defaultdict(lambda: {"n": 0, "sel": 0, "param": 0, "irrelevant_ok": 0,
@@ -112,7 +115,10 @@ def main():
         try:
             t1 = time.time()
             llm = llm_all
-            if args.tools_per_row and len(json.loads(row["tools_json"])) <= n_umum:
+            # Baris Owner dikenali dari tool khusus Owner di tools_json-nya, bukan dari
+            # jumlahnya: jumlah tool berbeda antarversi (v10 12, v11 14).
+            if args.tools_per_row and not khusus_owner & {
+                    t["function"]["name"] for t in json.loads(row["tools_json"])}:
                 llm = llm_umum
             resp = llm.invoke(msgs)
             latensi.append(time.time() - t1)
