@@ -20,7 +20,7 @@ CONFIRM_WORDS = {
     "sudah", "udah", "udh", "sdh", "sudah sesuai", "sesuai", "betul", "benar", "bener", "ya", "yes",
     "ok", "oke", "okay", "lanjut", "lanjutkan", "fix", "gas", "iya", "setuju",
     "confirm", "boleh", "siap", "sip", "yup", "deal", "yep", "yeah",
-    "checkout",
+    "checkout", "cukup", "y",
 }
 CANCEL_WORDS = {
     "batal", "batalkan", "cancel", "gajadi", "gak jadi", "ga jadi", "tidak jadi",

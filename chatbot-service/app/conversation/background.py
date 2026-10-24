@@ -496,7 +496,7 @@ async def notify_cancelled(order_id: int) -> bool | None:
     if order is None or not await store.klaim_status(order.id, "pending", "cancelled"):
         return None
     lang = await store.get_lang(order.wa_number)
-    if not await _notify(order.wa_number, bahasa.teks("pesanan_dibatalkan", lang,
+    if not await _notify(order.wa_number, bahasa.teks("pesanan_dibatalkan_invoice", lang,
                                                       invoice=_label(order))):
         await store.update_pending_order(order.id, status="pending")  # lepas klaim
         return False

@@ -2121,3 +2121,36 @@ def test_paket_faq_inggris_di_repo_terbaca_dan_lengkap():
                                     for v in paket.values())
     assert faq_source._pisah_tanya_jawab("Q: Buka?\nA: Ya.\nSetiap hari.") == ("Buka?", "Ya.\nSetiap hari.")
     assert faq_source._pisah_tanya_jawab("catatan bebas") == ("", "")
+
+
+# ── Uji e2e produksi 25 Okt 2026 (v12) ───────────────────────────────────────
+def test_templat_bahasa_tanpa_kunci_ganda():
+    """Kunci ganda di literal dict diam-diam menimpa yang pertama: batal keranjang
+    sempat dibalas "Pesanan *{invoice}* dibatalkan" mentah."""
+    import ast
+    from pathlib import Path
+
+    import app.conversation.bahasa as bahasa_mod
+
+    pohon = ast.parse(Path(bahasa_mod.__file__).read_text(encoding="utf-8"))
+    for node in ast.walk(pohon):
+        if isinstance(node, ast.Dict) and len(node.keys) > 50:
+            kunci = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+            assert len(kunci) == len(set(kunci)), {k for k in kunci if kunci.count(k) > 1}
+    assert "{" not in bahasa_mod.teks("pesanan_dibatalkan", "en")
+
+
+async def test_menu_kategori_beda_huruf_jadi_satu(patch_externals):
+    from app.backend_client import products as products_api
+    from app.tools.get_menu import get_menu
+
+    async def katalog(only_active=True, kategori=None):
+        return [{"nama_produk": "Kue A", "kategori": "Cake", "harga_jual": 1000, "is_available": True},
+                {"nama_produk": "Kue B", "kategori": "cake", "harga_jual": 2000, "is_available": True}]
+    patch_externals["monkeypatch"].setattr(products_api, "list_products", katalog)
+    assert (await get_menu.ainvoke({})).count("*Cake*") == 1
+
+
+def test_cukup_dan_y_berarti_setuju():
+    from app.conversation.states import text_is_confirm
+    assert text_is_confirm("cukup") and text_is_confirm("y")

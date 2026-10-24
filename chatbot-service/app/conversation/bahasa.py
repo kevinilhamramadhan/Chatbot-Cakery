@@ -936,7 +936,7 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Order *{invoice}* was cancelled automatically because the payment deadline "
              "passed. Feel free to order again any time 🙏"),
     },
-    "pesanan_dibatalkan": {
+    "pesanan_dibatalkan_invoice": {
         ID: "Pesanan *{invoice}* dibatalkan. Silakan pesan lagi kapan saja ya 🙏",
         EN: "Order *{invoice}* has been cancelled. Feel free to order again any time 🙏",
     },

@@ -51,7 +51,8 @@ async def get_menu() -> str:
 
     grup: dict[str, list[dict]] = {}
     for p in items:
-        grup.setdefault(_kategori(p), []).append(p)
+        # "Cake" dan "cake" satu kelompok; dulu judul *Cake* tampil dua kali.
+        grup.setdefault(_kategori(p).title(), []).append(p)
 
     # Kategori diurutkan menurut abjad, tapi "Lainnya" selalu terakhir.
     urutan = sorted(grup, key=lambda k: (k == _TANPA_KATEGORI, k.casefold()))
@@ -65,7 +66,7 @@ async def get_menu() -> str:
         # Kapitalisasi disamakan saat ditampilkan: katalog memuat "Brownies",
         # "cake", "cookies", dan "Chiffon" berdampingan, dan pelanggan tidak
         # perlu ikut melihat ketidakrapian data itu.
-        lines.append(f"\n*{nama_kategori.title()}*")
+        lines.append(f"\n*{nama_kategori}*")
         for p in sorted(grup[nama_kategori], key=lambda x: product_label(x).casefold()):
             status = "" if tersedia(p) else bahasa.teks("menu_habis", lang)
             lines.append(f"• {product_label(p)} — {rupiah(p.get('harga_jual'))}{status}")
