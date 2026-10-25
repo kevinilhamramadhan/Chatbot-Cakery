@@ -438,7 +438,10 @@ T7_DETAIL_EN = T7_DETAIL_EN_V6 + [
     "okay I'll take {qty}", "let's go with that, {qty} please", "sounds good, {qty} of those"]
 T7_ADD_EN = ["also add {qty} {prod}", "add {qty} {prod} as well", "and {qty} {prod} too please"]
 
-T8_ID = ["{greet}pesananku udah sampai mana{part}?", "{greet}orderanku gimana statusnya{part}?",
+# v14: "kok belum ada konfirmasi?" dijawab resend_payment_method oleh v13.
+T8_ID = ["{greet}kok belum ada konfirmasi{part}?", "{greet}pesananku udah dikonfirmasi belum{part}?",
+         "{greet}kok pesananku belum diproses juga{part}?",
+         "{greet}pesananku udah sampai mana{part}?", "{greet}orderanku gimana statusnya{part}?",
          "{greet}kue ku udah jadi belum{part}?", "{greet}status pesanan{part}?",
          "{greet}pembayaranku udah masuk belum{part}?", "{greet}udah diproses belum ya pesananku{part}?",
          "{greet}kapan pesananku siap{part}?", "{greet}cek order ku{part}",
@@ -462,7 +465,10 @@ T9_EN = ["{greet}please cancel my order", "{greet}I want to cancel my order",
 
 CUSTOM_THEMES = ["dinosaurus", "princess", "mobil balap", "bola", "unicorn", "superhero",
                  "bunga vintage", "karakter kartun", "luar angkasa", "kucing lucu"]
-COMPLAINTS = ["penyok saat sampai", "datang terlambat", "rusak kemasannya", "kurang sesuai pesanan"]
+# v14: keluhan rasa/tekstur ("kue yang saya beli kemarin agak keras") dijawab
+# templat pujian oleh v13 (e2e riset03, 25 Okt 2026).
+COMPLAINTS = ["agak keras", "keras banget", "bantat", "rasanya agak asam", "kemanisan banget",
+              "penyok saat sampai", "datang terlambat", "rusak kemasannya", "kurang sesuai pesanan"]
 T10_ID = [("{greet}bisa buat kue ultah custom tema {theme}{part}?",
            "Pelanggan ingin kue ulang tahun custom tema {theme}"),
           ("{greet}mau pesan wedding cake {tiers} tingkat bisa{part}?",
@@ -494,7 +500,11 @@ T10_EN = [("{greet}can you make a custom birthday cake with a dinosaur theme?",
 # keluhan punya balasannya sendiri yang kalimatnya tetap, dan eskalasi khusus
 # kue custom. Terukur sebelum tool ini ada: "kuenya kemarin basi, aku kecewa
 # banget" dijawab "Wah, makasih banyak kak! Senang banget kalau suka 😊".
-T14_ID = [("{greet}kue yang kemarin {complaint}, gimana nih{part}?",
+T14_ID = [("{greet}kue yang saya beli kemarin {complaint}{part}",
+           "Pelanggan komplain kue pesanannya {complaint}"),
+          ("{greet}kak, {complaint} kuenya{part}",
+           "Pelanggan komplain kue pesanannya {complaint}"),
+          ("{greet}kue yang kemarin {complaint}, gimana nih{part}?",
            "Pelanggan komplain kue pesanannya {complaint}"),
           ("{greet}pesananku kayaknya salah kirim, tolong{part}",
            "Pelanggan komplain pesanan diduga salah kirim"),
@@ -978,7 +988,11 @@ N11_REPLY = {
 
 # N12 — pesan pendek/ambigu saat TIDAK ada keranjang atau pesanan. QA: "order"
 # dan "oke gas" memicu cancel_order, "1" memicu add_to_cart tanpa produk.
-N12_ID = [("order{part}", "ask"), ("oke gas{part}", "ask"), ("gas{part}", "ask"), ("1", "ask"),
+# v14: nama orang saat idle ("Rina", "Siti Aminah") dioper ke admin oleh v13
+# (e2e riset03, 25 Okt 2026, 3 dari 3 ulangan).
+N12_ID = [("Rina", "ack"), ("Siti Aminah", "ack"), ("Budi{part}", "ack"), ("Dewi Lestari", "ack"),
+          ("Andi Pratama", "ack"), ("Bu Ratna", "ack"), ("Yohanes", "ack"), ("Putri Ayu{part}", "ack"),
+          ("order{part}", "ask"), ("oke gas{part}", "ask"), ("gas{part}", "ask"), ("1", "ask"),
           (".....", "ask"), ("sip{part}", "ack"), ("ok{part}", "ack"), ("p", "ask"),
           ("oke deh{part}", "ack"), ("ya{part}", "ask"), ("lanjut{part}", "ask"), ("2", "ask"),
           ("siap{part}", "ack"), ("pesan{part}", "ask")]
@@ -1046,7 +1060,10 @@ T20_REASON = ["Pelanggan minta bicara langsung dengan admin toko",
               "Pelanggan meminta disambungkan ke admin Toti Cakery"]
 
 # T21 — rekomendasi -> get_menu (menu v11 menyertakan tiga rekomendasi).
-T21_ID = ["{greet}buat yang baru pertama coba, enaknya apa{part}?", "{greet}kue andalan buat dicoba duluan apa{part}?",
+# v14: "yang murah yang mana?" dijawab tidak tahu oleh v12 dan v13.
+T21_ID = ["{greet}yang murah yang mana{part}?", "{greet}ada yang lebih murah{part}?",
+          "{greet}kue yang harganya terjangkau apa aja{part}?",
+          "{greet}buat yang baru pertama coba, enaknya apa{part}?", "{greet}kue andalan buat dicoba duluan apa{part}?",
           "{greet}aku belum pernah beli, mulai dari kue apa ya{part}?",
           "{greet}rekomendasi kue yang enak dong{part}", "{greet}yang paling laris apa{part}?",
           "{greet}best seller nya apa aja{part}?", "{greet}kue favorit di sini apa{part}?",
@@ -1288,6 +1305,10 @@ TRAIN_COUNTS = {"T1": 70, "T2": 30, "T3": 115, "T4": 40, "T5": 180, "T6": 35, "T
 TRAIN_COUNTS.update({"T17": 90, "T16": 60, "N11": 40, "T23": 45, "N16": 60, "N18": 50, "T20": 50})
 # v13: sisa kelemahan eval v12 (riset03, 18 Okt 2026).
 TRAIN_COUNTS.update({"N8": 50, "T21": 50, "T23": 55, "T24": 60, "T6": 45, "N16": 75})
+# v14: v13 lebih jarang memanggil tool (eval riset03, 25 Okt 2026, 3 ulangan):
+# T25, T14, T20, T23, T22, T27, dan T3 (harga satu kue -> get_menu) turun.
+TRAIN_COUNTS.update({"T25": 50, "T14": 60, "T20": 60, "T23": 65, "T22": 45, "T27": 35,
+                     "T3": 140, "T8": 65, "T21": 60, "N12": 45})
 VAL_COUNTS = {k: max(2, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 TEST_COUNTS = {k: max(3, round(v / 10)) for k, v in TRAIN_COUNTS.items()}
 EN_SHARE = {"T1": .2, "T2": .2, "T3": .2, "T4": .2, "T5": .2, "T6": .2, "T7": .2,
