@@ -41,6 +41,7 @@ from app.conversation.states import (
     text_is_praise,
     text_mau_lunasi,
     text_perintah_lunasi,
+    text_perintah_sudah_sesuai,
     text_ubah_pesanan,
 )
 from app.core.config import settings
@@ -338,6 +339,12 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         # Templat kita sendiri berbunyi "Ketik *lunasi*" -- sama seperti *batal*,
         # kata yang kita suruh ketik tidak boleh bergantung pada model.
         reply = Reply(text=jawab, media=_media_giliran())
+    elif (state == State.IDLE and text_perintah_sudah_sesuai(text)
+          and not await store.get_cart(wa_number)):
+        # "Ketik *sudah sesuai*" juga kata dari templat kita sendiri. Dengan
+        # keranjang kosong model menjawabnya sebagai pujian ("jadi semangat!")
+        # atau menolaknya sebagai di luar topik (e2e v12, 25 Okt 2026).
+        reply = Reply(text=bahasa.teks("keranjang_kosong_tool", lang))
     else:
         reply = None
         if not settings.intent_dari_model:

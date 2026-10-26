@@ -209,3 +209,15 @@ def test_faq_baku_inggris_memakai_ambang_sendiri(monkeypatch):
     assert faq_baku.pilih(kandidat, "", "en", True) == ("TEKS BAKU", "skor")
     assert faq_baku.pilih(kandidat, "", "en") is None      # pesan Indonesia di sesi Inggris
     assert faq_baku.pilih(kandidat, "", "id") is None
+
+
+async def test_templat_tagihan_terkunci_tanpa_pesanan_dibuang(monkeypatch):
+    from app.conversation import bahasa
+
+    _mock_retrieval(monkeypatch, 0.0)
+    _mock_llm(monkeypatch, AIMessage(content=(
+        "Maaf kak, data pesanan (alamat, jumlah, atau cara bayar) tidak bisa diubah "
+        "setelah tagihannya terbit 🙏")))
+    set_turn_context(TurnContext(wa_number=WA, user_text="Jl. Melati 3"))
+    out = await agent_mod.run_agent(WA, "Jl. Melati 3", history=[])
+    assert out == bahasa.teks("ulangi_maksud", bahasa.ID)

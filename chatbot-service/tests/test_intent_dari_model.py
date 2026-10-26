@@ -77,3 +77,15 @@ async def test_batal_dengan_keranjang_kosong(patch_externals):
     set_turn_context(TurnContext(wa_number=WA, user_text="bolu pandannya ga jadi"))
     out = await cancel_order.ainvoke({})
     assert out == bahasa.teks("tidak_jadi_kosong", bahasa.ID)
+
+
+@pytest.mark.parametrize("pesan", ["sudah sesuai", "Sudah sesuai!", "confirm"])
+async def test_sudah_sesuai_dengan_keranjang_kosong(patch_externals, monkeypatch, v11, pesan):
+    _mock_agent(monkeypatch, answer="Terima kasih kak, jadi semangat!")
+    r = await handle_message(WA, pesan)
+    assert r.text == bahasa.teks("keranjang_kosong_tool", bahasa.normalkan(await store.get_lang(WA)))
+
+
+async def test_sudah_sesuai_dalam_kalimat_tetap_ke_model(patch_externals, monkeypatch, v11):
+    _mock_agent(monkeypatch, answer="(model)")
+    assert (await handle_message(WA, "kuenya sudah sesuai pesanan, makasih")).text == "(model)"

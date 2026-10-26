@@ -168,6 +168,11 @@ def text_perintah_lunasi(text: str) -> bool:
     return " ".join(_tokens(text)) in ("lunasi", "pay balance")
 
 
+def text_perintah_sudah_sesuai(text: str) -> bool:
+    """Persis kata yang disuruh ketik oleh ringkasan keranjang."""
+    return " ".join(_tokens(text)) in ("sudah sesuai", "confirm")
+
+
 def text_tanya_cara_lunasi(text: str) -> bool:
     """"sisanya dibayar gimana?", "how do I pay the remaining balance"."""
     words = set(_tokens(text))

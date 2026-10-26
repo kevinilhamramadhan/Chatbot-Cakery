@@ -36,6 +36,9 @@ _TOOLNAME_RE = re.compile(
     r"pay_remaining|set_language)\b",
     re.IGNORECASE,
 )
+# Templat N18 ("data pesanan tidak bisa diubah setelah tagihannya terbit").
+_DIUBAH_RE = re.compile(r"(bisa diubah|be changed)", re.IGNORECASE)
+_TAGIHAN_RE = re.compile(r"(tagihan|invoice)", re.IGNORECASE)
 
 # Konstanta versi Indonesianya dipertahankan untuk uji; jalur sungguhan memakai
 # _di_luar_cakupan() supaya ikut bahasa pelanggan.
@@ -272,6 +275,14 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
             # Model menyalin potongan riwayatnya sendiri, lengkap dengan penanda
             # dari _history_view: "Batas waktu pembayaran …(dipotong)".
             logger.warning("Reply echoed a truncated history line — dropping it")
+            return bahasa.teks("ulangi_maksud", lang)
+        # Templat N18 hanya benar kalau tagihannya memang ada. Terukur di e2e
+        # v12 (25 Okt 2026): "Jl. Melati 3", "diantar", "rumah" yang dikirim di
+        # luar checkout dijawab "tidak bisa diubah setelah tagihannya terbit"
+        # 9-10 kali per run, padahal nomornya tidak punya pesanan sama sekali.
+        if (answer and _DIUBAH_RE.search(answer) and _TAGIHAN_RE.search(answer)
+                and await store.get_active_pending(wa_number) is None):
+            logger.warning("Reply says the invoice is locked but there is no active order — dropping it")
             return bahasa.teks("ulangi_maksud", lang)
         if answer and _TOOLNAME_RE.search(answer):
             logger.warning("Reply mentioned an internal tool name — dropping it")
