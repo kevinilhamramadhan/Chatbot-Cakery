@@ -24,6 +24,12 @@ def to_chat_id(wa_number: str) -> str:
     return f"{digits}@c.us"
 
 
+class NomorTakTerkirim(Exception):
+    """WhatsApp tidak mengenal nomor ini ("No LID for user"): mengulang tidak
+    akan pernah berhasil. Terukur 26 Okt 2026: satu kabar batal diulang tiap
+    30 detik selama berjam-jam ke nomor yang tidak terdaftar di WhatsApp."""
+
+
 class WhatsAppClient:
     def __init__(self) -> None:
         self._base = settings.wwebjs_base_url.rstrip("/")
@@ -34,6 +40,8 @@ class WhatsAppClient:
         url = f"{self._base}/client/sendMessage/{self._session}"
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(url, json=payload, headers=self._headers)
+            if resp.status_code == 500 and "No LID for user" in resp.text:
+                raise NomorTakTerkirim(payload.get("chatId", ""))
             resp.raise_for_status()
             return resp.json()
 

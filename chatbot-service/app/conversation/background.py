@@ -20,7 +20,7 @@ from app.conversation.states import State
 from app.core.config import settings
 from app.core.security import canonical_wa_number, mask_phone, sanitize_relay, wa_digits
 from app.tools.formatting import rupiah
-from app.whatsapp_client.client import whatsapp_client
+from app.whatsapp_client.client import NomorTakTerkirim, whatsapp_client
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,11 @@ async def _notify(wa_number: str, text: str) -> bool:
     try:
         await whatsapp_client.send_text(wa_number, text)
         await store.log_message(wa_number, "out", text, intent="proactive")
+        return True
+    except NomorTakTerkirim:
+        # Dianggap selesai: pemanggil yang mengulang saat gagal akan berputar selamanya.
+        logger.error("Nomor %s tidak dikenal WhatsApp — kabar dilewati",
+                     mask_phone(wa_number))
         return True
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to notify %s: %s", mask_phone(wa_number), exc)

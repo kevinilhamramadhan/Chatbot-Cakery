@@ -1473,3 +1473,25 @@ def test_webhook_gagal_kirim_bisa_diulang(patch_externals):
     assert c.post("/webhook/internal/orders/956/ready", headers=kepala).status_code == 503
     patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", kirim_asli)
     assert c.post("/webhook/internal/orders/956/ready", headers=kepala).json()["status"] == "ok"
+
+
+async def test_nomor_tak_dikenal_whatsapp_tidak_diulang(patch_externals):
+    """Gateway menjawab "No LID for user": kabar batal tidak diulang tiap siklus."""
+    from app.whatsapp_client.client import NomorTakTerkirim, whatsapp_client
+
+    percobaan = []
+
+    async def tak_dikenal(wa, text):
+        percobaan.append(wa)
+        raise NomorTakTerkirim(wa)
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", tak_dikenal)
+    await store.create_pending_order(
+        wa_number=WA, order_ref="957", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method="pickup",
+        expires_at=dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1))
+    patch_externals["orders"][957] = {"id": 957, "status": "cancelled",
+                                      "invoice": {"status": "unpaid"}}
+    await background._check_once()
+    await background._check_once()
+    assert len(percobaan) == 1 and await store.get_active_pending(WA) is None
