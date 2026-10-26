@@ -115,9 +115,9 @@ def test_internal_takeover_requires_key(client):
 
 
 def test_internal_ready_works_with_key(client, monkeypatch):
-    async def fake_notify(order_id):
-        return False
-    monkeypatch.setattr("app.conversation.background.notify_ready", fake_notify)
+    async def fake_notify(order_id, event):
+        return None
+    monkeypatch.setattr("app.conversation.background.kabar_pesanan", fake_notify)
     r = client.post(
         "/webhook/internal/orders/1/ready",
         headers={"X-Internal-Key": settings.internal_api_key},
@@ -126,7 +126,8 @@ def test_internal_ready_works_with_key(client, monkeypatch):
 
 
 
-@pytest.mark.parametrize("event", ["processing", "completed", "created", "cancelled"])
+@pytest.mark.parametrize("event", ["processing", "completed", "created", "cancelled",
+                                   "paid", "delivered", "picked_up", "overdue", "refunded"])
 def test_internal_order_events_require_key(client, event):
     assert client.post(f"/webhook/internal/orders/1/{event}").status_code == 404
 

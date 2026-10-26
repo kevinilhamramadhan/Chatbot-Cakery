@@ -219,6 +219,16 @@ async def get_active_pending(wa_number: str) -> PendingOrder | None:
         )
 
 
+async def pesanan_by_ref(order_ref) -> PendingOrder | None:
+    """Baris terbaru untuk id pesanan backend ini, apa pun statusnya."""
+    async with async_session_factory() as db:
+        return await db.scalar(
+            select(PendingOrder)
+            .where(PendingOrder.order_ref == str(order_ref))
+            .order_by(PendingOrder.id.desc())
+        )
+
+
 async def refund_terakhir(wa_number: str) -> PendingOrder | None:
     """Pesanan terbaru nomor ini yang dananya sedang atau sudah dikembalikan."""
     async with async_session_factory() as db:

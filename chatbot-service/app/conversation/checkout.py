@@ -220,7 +220,14 @@ async def finalize_order(wa_number: str) -> str:
             logger.warning("could not cancel unpayable order %s", order_id)
         return bahasa.teks("tagihan_tanpa_cara_bayar", lang)
 
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.payment_timeout_minutes)
+    # Batas bayarnya milik backend (payment_expires_at, sama dengan masa berlaku
+    # tagihan Midtrans); PAYMENT_TIMEOUT_MINUTES hanya cadangan untuk backend lama.
+    sekarang = datetime.now(timezone.utc)
+    batas = order.get("payment_expires_at")
+    expires_at = (datetime.fromisoformat(batas) if batas
+                  else sekarang + timedelta(minutes=settings.payment_timeout_minutes))
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
     # QRIS dikirim sebagai GAMBAR, bukan tautan. Pelanggan di WhatsApp tidak bisa
     # men-scan URL: dia harus membukanya di browser lalu memotretnya dengan HP
     # lain. Tautannya tetap disimpan di kolom qris_url supaya bisa dikirim ulang
@@ -265,5 +272,5 @@ async def finalize_order(wa_number: str) -> str:
         total=(bahasa.teks("total_pesanan_dp", lang, total=rupiah(total))
                if payment_type == "dp" else ""),
         cara_bayar=pay_line,
-        menit=settings.payment_timeout_minutes,
+        menit=max(1, round((expires_at - sekarang).total_seconds() / 60)),
     )

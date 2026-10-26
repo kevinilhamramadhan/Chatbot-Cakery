@@ -262,50 +262,34 @@ async def deactivate(phone: str, x_internal_key: str | None = Header(default=Non
     return {"status": "ok", "phone": mask_phone(phone), "human_takeover_active": False}
 
 
-@router.post("/internal/orders/{order_id}/ready")
-async def mark_ready(order_id: int, x_internal_key: str | None = Header(default=None)):
-    """Trigger the proactive 'order is ready' message (PROMPT §10.13).
-
-    Stands in for the backend status webhook, which is out of scope here.
-    """
-    _require_internal_key(x_internal_key)
-    ok = await background.notify_ready(order_id)
-    return {"status": "ok" if ok else "not_found", "order_id": order_id}
-
-
-@router.post("/internal/orders/{order_id}/processing")
-async def mark_processing(order_id: int, x_internal_key: str | None = Header(default=None)):
-    """Seller memindahkan pesanan ke in_process: kabari pelanggan kuenya mulai dibuat."""
-    _require_internal_key(x_internal_key)
-    ok = await background.notify_processing(order_id)
-    return {"status": "ok" if ok else "not_found", "order_id": order_id}
+# Idempotency-Key backend (order:{id}:{event}) yang sudah atau sedang
+# ditangani. Backend mengulang sampai 3 kali dalam hitungan detik, juga ketika
+# jawaban kita lewat 5 detik padahal pesannya sudah terkirim — tanpa ini
+# pelanggan menerima kabar yang sama dua kali.
+# ponytail: di memori, umur 1 jam; restart di tengah ulangan bisa mengirim dua
+# kali (tabel kalau itu terjadi). Umurnya sengaja pendek: kuncinya tidak memuat
+# apa pun selain event, jadi "paid" untuk DP dan untuk pelunasannya sama.
+_UMUR_KUNCI = 3600
+_kunci_diterima: dict[str, float] = {}
 
 
-@router.post("/internal/orders/{order_id}/completed")
-async def mark_completed(order_id: int, x_internal_key: str | None = Header(default=None)):
-    """Seller menandai pesanan selesai: kabari pelanggan dan lepas pesanannya."""
-    _require_internal_key(x_internal_key)
-    ok = await background.notify_completed(order_id)
-    return {"status": "ok" if ok else "not_found", "order_id": order_id}
-
-
-@router.post("/internal/orders/{order_id}/cancelled")
-async def mark_cancelled(order_id: int, x_internal_key: str | None = Header(default=None)):
-    """Backend membatalkan pesanan yang belum dibayar: kabari pelanggan.
-
-    503 kalau kabarnya gagal terkirim, supaya backend mengulang; ulangan sesudah
-    berhasil dijawab not_found tanpa mengirim apa pun.
-    """
-    _require_internal_key(x_internal_key)
-    ok = await background.notify_cancelled(order_id)
-    if ok is False:
-        raise HTTPException(status_code=503, detail="notification not sent")
-    return {"status": "ok" if ok else "not_found", "order_id": order_id}
+def _klaim_kunci(kunci: str | None) -> bool:
+    if not kunci:
+        return True
+    sekarang = time.monotonic()
+    for k, t in list(_kunci_diterima.items()):
+        if sekarang - t > _UMUR_KUNCI:
+            del _kunci_diterima[k]
+    if kunci in _kunci_diterima:
+        return False
+    _kunci_diterima[kunci] = sekarang
+    return True
 
 
 @router.post("/internal/orders/{order_id}/created")
 async def mark_created(order_id: int, tasks: BackgroundTasks,
-                       x_internal_key: str | None = Header(default=None)):
+                       x_internal_key: str | None = Header(default=None),
+                       idempotency_key: str | None = Header(default=None)):
     """Pesanan baru masuk (chatbot atau website): kabari seller lewat WhatsApp.
 
     Dijalankan di belakang supaya backend tidak ikut menunggu: webhook ini
@@ -313,33 +297,49 @@ async def mark_created(order_id: int, tasks: BackgroundTasks,
     nomor seller bisa lebih lama dari batas waktu backend (5 detik).
     """
     _require_internal_key(x_internal_key)
-    tasks.add_task(background.notify_created, order_id)
+    if _klaim_kunci(idempotency_key):
+        tasks.add_task(background.notify_created, order_id)
     return {"status": "accepted", "order_id": order_id}
 
 
-@router.post("/internal/orders/{order_id}/paid")
-async def mark_paid(order_id: int, x_internal_key: str | None = Header(default=None)):
-    """Kabari pelanggan begitu pembayarannya masuk, tanpa menunggu polling.
-
-    Status pembayarannya tetap dipastikan ke backend di dalam notify_paid —
-    webhook ini pemicu, bukan sumber kebenaran soal uang.
-    """
-    _require_internal_key(x_internal_key)
-    ok = await background.notify_paid(order_id)
-    return {"status": "ok" if ok else "not_found", "order_id": order_id}
-
-
 @router.post("/internal/orders/{order_id}/refunded")
-async def mark_refunded(order_id: int, x_internal_key: str | None = Header(default=None)):
+async def mark_refunded(order_id: int, x_internal_key: str | None = Header(default=None),
+                        idempotency_key: str | None = Header(default=None)):
     """Kabari pelanggan begitu refund selesai — tanpa menunggu siklus polling.
 
-    Pola persis sama dengan /ready yang sudah dipakai backend. Polling 30 detik
-    tetap berjalan sebagai jaring pengaman, jadi kalau panggilan ini gagal atau
-    chatbot sedang restart, kabarnya cuma telat, tidak hilang.
+    Kegagalan kirim tidak perlu diulang backend: notify_refunded sendiri
+    menyimpannya untuk diulang polling.
     """
     _require_internal_key(x_internal_key)
+    if not _klaim_kunci(idempotency_key):
+        return {"status": "duplicate", "order_id": order_id}
     ok = await background.notify_refunded(order_id)
     return {"status": "ok" if ok else "not_found", "order_id": order_id}
+
+
+_EVENT_PESANAN = frozenset({"paid", "processing", "ready", "delivered", "picked_up",
+                            "completed", "cancelled", "overdue"})
+
+
+@router.post("/internal/orders/{order_id}/{event}")
+async def order_event(order_id: int, event: str,
+                      x_internal_key: str | None = Header(default=None),
+                      idempotency_key: str | None = Header(default=None)):
+    """Perubahan status pesanan dari backend: kabari pelanggannya.
+
+    Tidak membawa body; detailnya dibaca ulang dari backend. 503 kalau kabarnya
+    gagal terkirim, dan kuncinya dilepas supaya ulangan backend dicoba lagi.
+    """
+    _require_internal_key(x_internal_key)
+    if event not in _EVENT_PESANAN:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not _klaim_kunci(idempotency_key):
+        return {"status": "duplicate", "order_id": order_id}
+    hasil = await background.kabar_pesanan(order_id, event)
+    if hasil is False:
+        _kunci_diterima.pop(idempotency_key or "", None)
+        raise HTTPException(status_code=503, detail="notification not sent")
+    return {"status": "ok" if hasil else "not_found", "order_id": order_id}
 
 
 # ── Nomor WhatsApp chatbot, diatur Owner dari Admin Site lewat backend ────────

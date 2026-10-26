@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     # ── Payment tracking ──────────────────────────────────────────────────────
     # (Charging happens in the backend -> Midtrans; we only poll status here.)
     payment_check_interval_seconds: int = 30
-    payment_timeout_minutes: int = 30
+    payment_timeout_minutes: int = 60
     # Pengingat sekali sebelum tagihan hangus; 0 = tidak mengingatkan.
     payment_reminder_minutes: int = 10
     # Nomor yang dikabari kalau backend menolak kunci layanan chatbot (401/403),

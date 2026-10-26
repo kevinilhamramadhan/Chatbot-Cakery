@@ -173,6 +173,7 @@ backend → chatbot ke `/webhook/internal/*` membawa `X-Internal-Key`
 | POST | `/customers` | simpan/ambil pelanggan (`nomor_wa`, `nama`, `alamat`) |
 | POST | `/orders` | buat pesanan |
 | GET | `/orders/latest?nomor_wa=` | status pesanan terakhir |
+| GET | `/orders/{id}` | detail pesanan untuk kabar status (`orders:read`) |
 | POST | `/orders/{id}/cancel` | batalkan (stok kembali) |
 | POST | `/payments`, GET `/payments/{order_id}/status` | charge Midtrans + polling |
 | GET/POST | `/customers/{nomor}/takeover` | status takeover admin |
@@ -187,14 +188,17 @@ Chatbot tidak pernah memanggil Midtrans langsung.
 
 | Path | Kapan |
 |---|---|
-| `POST /webhook/internal/orders/{id}/ready` | admin menandai pesanan siap |
-| `POST /webhook/internal/orders/{id}/paid` | pembayaran lunas |
+| `POST /webhook/internal/orders/{id}/created` | pesanan baru (dikabarkan ke seller) |
+| `POST /webhook/internal/orders/{id}/{event}` | `paid`, `processing`, `ready`, `delivered`, `picked_up`, `completed`, `cancelled`, `overdue`: dikabarkan ke pelanggan, termasuk pesanan website (nomor dari `GET /orders/{id}`) |
 | `POST /webhook/internal/orders/{id}/refunded` | dana refund sudah ditransfer |
 | `POST /webhook/internal/takeover/{nomor}/deactivate` | admin selesai menangani |
 | `GET /webhook/internal/wa/status`, `/wa/qr`, `POST /wa/ganti-nomor` | halaman WhatsApp Chatbot di Admin Site |
 
-Semua endpoint kabar bersifat idempoten; `{"status": "not_found"}` berarti
-pesanannya bukan dari WhatsApp, bukan error.
+Semua endpoint kabar bersifat idempoten: ulangan dengan `Idempotency-Key` yang
+sama dijawab `duplicate` tanpa mengirim apa pun, dan `{"status": "not_found"}`
+berarti tidak ada yang perlu dikabari, bukan error. 503 berarti kabarnya gagal
+terkirim dan boleh diulang. Batal karena lewat batas bayar diputuskan backend
+(`payment_expires_at`); chatbot tidak membatalkan sendiri.
 
 **Nomor telepon kanonik** di kedua sisi: buang selain angka, awalan `0` → `62`,
 `620` → `62`, harus diawali `62`, panjang 10–15 digit.

@@ -86,7 +86,8 @@ async def create_order(customer_id: int, items: list[dict], metode_pengiriman: s
         d = r.json()
         inv = d.get("invoice") or {}
         return {"order_id": d.get("id"), "nomor_invoice": inv.get("nomor_invoice"),
-                "total_harga_pesanan": d.get("total_harga_pesanan"), "status": d.get("status")}
+                "total_harga_pesanan": d.get("total_harga_pesanan"), "status": d.get("status"),
+                "payment_expires_at": d.get("payment_expires_at")}
 
 
 async def create_payment(order_id, amount, channel: str = "bank_transfer",

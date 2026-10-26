@@ -18,7 +18,7 @@ from app.backend_client import api as backend
 from app.conversation import bahasa, rbac, store, tanggal
 from app.conversation.states import State
 from app.core.config import settings
-from app.core.security import mask_phone, sanitize_relay, wa_digits
+from app.core.security import canonical_wa_number, mask_phone, sanitize_relay, wa_digits
 from app.tools.formatting import rupiah
 from app.whatsapp_client.client import whatsapp_client
 
@@ -319,30 +319,20 @@ async def _check_once() -> None:
     now = datetime.now(timezone.utc)
 
     for order in pending:
-        # 1) Timeout -> auto-cancel + notify.
+        # 1) Lewat batas bayar: yang membatalkan backend (worker lifecycle-nya
+        # memastikan dulu transaksi Midtrans tidak lagi pending), di sini cukup
+        # membaca ulang. Dulu chatbot membatalkan sendiri di menit ke-30 padahal
+        # QR-nya masih bisa dibayar sampai payment_expires_at.
         if now >= _aware(order.expires_at):
-            # Cancel upstream too. Marking only the local row "expired" left the
-            # order pending forever in the backend and on Admin Site, while the
-            # customer had already been told it was cancelled.
-            cancelled = True
             try:
-                await backend.cancel_order(order.order_ref, order.wa_number)
+                terbaru = await backend.get_order(order.order_ref)
             except Exception as exc:  # noqa: BLE001
-                cancelled = False
-                logger.warning("could not cancel expired order %s upstream: %s",
-                               order.order_ref, exc)
-            await store.update_pending_order(order.id, status="expired")
-            await store.set_state(order.wa_number, State.IDLE)
-            lang = await store.get_lang(order.wa_number)
-            if cancelled:
-                text = bahasa.teks("batal_otomatis", lang, invoice=_label(order))
-            else:
-                surel = settings.store_support_email.strip()
-                lanjut = (bahasa.teks("batas_lewat_bukti_email", lang, email=surel) if surel
-                          else bahasa.teks("batas_lewat_bukti_kontak", lang))
-                text = bahasa.teks("batas_lewat", lang, invoice=_label(order), lanjut=lanjut)
-            await _notify(order.wa_number, text)
-            continue
+                logger.warning("cek pesanan kedaluwarsa %s gagal: %s", order.order_ref, exc)
+                continue
+            if terbaru and _kunci_batal(terbaru):
+                await notify_cancelled(order.order_ref, terbaru)
+                continue
+            # Masih pending di backend: tetap dipantau pembayarannya di bawah.
 
         # 1b) Sekali diingatkan sebelum hangus.
         # ponytail: penandanya di memori; kalau service restart di jendela
@@ -466,8 +456,8 @@ async def notify_processing(order_id: int) -> bool:
                                                       label=_label(order)))
 
 
-async def notify_completed(order_id: int) -> bool:
-    """Pesanan diselesaikan seller (webhook backend /completed).
+async def notify_completed(order_id: int, status: str = "completed") -> bool:
+    """Pesanan diserahkan/diselesaikan seller (webhook delivered, picked_up, completed).
 
     Sama dengan yang dilakukan polling _lepas_pesanan_selesai, hanya tanpa
     menunggu siklusnya.
@@ -476,32 +466,157 @@ async def notify_completed(order_id: int) -> bool:
     order = next((o for o in orders if o.order_ref == str(order_id)), None)
     if order is None:
         return False
-    await _lepas(order, "completed")
+    await _lepas(order, status)
     return True
 
 
-async def notify_cancelled(order_id: int) -> bool | None:
-    """Backend membatalkan pesanan yang belum dibayar (webhook /cancelled).
+def _kunci_batal(o: dict) -> str | None:
+    """Templat kabar batal sesuai sebabnya, atau None kalau pesanannya tidak batal.
 
-    Backend menembaknya saat pembayaran Midtrans kedaluwarsa atau ditolak dan
-    pesanannya masih pending. Ini BUKAN kabar refund: belum ada uang yang masuk.
-    None = tidak ada pesanan pending dengan id itu (sudah dikabari, atau bukan
-    pesanan lewat WhatsApp); False = kabarnya gagal terkirim.
-
-    Idempotency-Key dari backend (order:{id}:cancelled) satu-satu dengan
-    perpindahan pending -> cancelled, jadi klaim status itu yang menahan ulangan.
+    Backend memakai satu event `cancelled` untuk semua sebab, jadi sebabnya
+    dibaca dari status pesanan dan invoice-nya. `refunded` punya kabarnya sendiri.
     """
-    orders = await store.list_orders_by_status("pending")
+    status = str(o.get("status") or "").lower()
+    if status == "cancelled_settlement_expired":
+        return "batal_pelunasan_lewat"
+    if status != "cancelled":
+        return None
+    invoice = str((o.get("invoice") or {}).get("status") or o.get("payment_status") or "").lower()
+    if invoice in ("paid", "partial"):
+        return "batal_sudah_bayar"
+    batas = o.get("payment_expires_at")
+    if batas and _aware(datetime.fromisoformat(batas)) <= datetime.now(timezone.utc):
+        return "batal_otomatis"
+    return "pesanan_dibatalkan_invoice"
+
+
+async def notify_cancelled(order_id, terbaru: dict | None = None) -> bool | None:
+    """Pesanan lewat WhatsApp dibatalkan backend (webhook /cancelled atau polling).
+
+    None = tidak ada yang perlu dikabari (bukan pesanan aktif, sudah dikabari,
+    atau backend tidak menyebutnya batal); False = kabarnya gagal terkirim.
+    Klaim status yang menahan ulangan backend dan polling yang tiba berbarengan.
+    """
+    orders = await store.list_orders_by_status(*store.ACTIVE_ORDER_STATUSES)
     order = next((o for o in orders if o.order_ref == str(order_id)), None)
-    if order is None or not await store.klaim_status(order.id, "pending", "cancelled"):
+    if order is None:
+        return None
+    if terbaru is None:
+        try:
+            terbaru = await backend.get_order(order_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("detail pesanan batal %s gagal diambil: %s", order_id, exc)
+            return False
+    kunci = _kunci_batal(terbaru or {})
+    if kunci is None:
+        return None
+    asal = order.status
+    ke = "expired" if kunci == "batal_otomatis" else "cancelled"
+    if not await store.klaim_status(order.id, asal, ke):
         return None
     lang = await store.get_lang(order.wa_number)
-    if not await _notify(order.wa_number, bahasa.teks("pesanan_dibatalkan_invoice", lang,
-                                                      invoice=_label(order))):
-        await store.update_pending_order(order.id, status="pending")  # lepas klaim
+    if not await _notify(order.wa_number, bahasa.teks(kunci, lang, invoice=_label(order))):
+        await store.update_pending_order(order.id, status=asal)  # lepas klaim
         return False
     await store.set_state(order.wa_number, State.IDLE)
-    logger.info("Pesanan %s dibatalkan backend — pelanggan sudah dikabari", order.order_ref)
+    logger.info("Pesanan %s dibatalkan backend (%s) — pelanggan sudah dikabari",
+                order.order_ref, kunci)
+    return True
+
+
+# Event website yang sudah dikabari, untuk dua aturan di _teks_web: "diproses"
+# tidak menyusul "dibayar" yang baru terkirim, dan "selesai" tidak menyusul
+# "diantar"/"diambil". Pesanan lewat WhatsApp memakai baris pending_orders.
+# ponytail: di memori; restart di antara dua event bisa mengirim kabar
+# berdempetan. Kolom/tabel kalau itu mengganggu.
+_kabar_web: dict[tuple[int, str], float] = {}
+
+
+async def _teks_web(o: dict, event: str, lang: str) -> str | None:
+    """Kabar untuk pesanan dari website, dari detail pesanan di backend."""
+    oid = int(o.get("id") or 0)
+    inv = (o.get("invoice") or {}).get("nomor_invoice") or f"#{oid}"
+    sekarang = time.monotonic()
+    if event == "paid":
+        status_inv = str((o.get("invoice") or {}).get("status") or o.get("payment_status") or "").lower()
+        if status_inv not in ("paid", "partial"):
+            return None
+        teks = bahasa.teks("bayar_diterima", lang, jumlah=rupiah(o.get("amount_paid")))
+        if status_inv == "partial":
+            batas = ""
+            if o.get("settlement_due_date"):
+                waktu = datetime.fromisoformat(o["settlement_due_date"]).astimezone(tanggal.WIB)
+                batas = bahasa.teks("batas_pelunasan", lang,
+                                    waktu=tanggal.tampil(waktu.isoformat(), lang))
+            teks += bahasa.teks("sisa_pelunasan_web", lang,
+                                sisa=rupiah(o.get("amount_due")), batas=batas)
+        return teks
+    if event == "processing":
+        lunas = _kabar_web.get((oid, "paid"))
+        if lunas is not None and sekarang - lunas < _JEDA_SESUDAH_LUNAS:
+            return None
+        return bahasa.teks("pesanan_diproses", lang, label=inv)
+    if event == "ready":
+        kunci = ("pesanan_siap_kirim" if o.get("metode_pengiriman") == "delivery"
+                 else "pesanan_siap_ambil")
+        return (bahasa.teks("pesanan_siap", lang, label=inv)
+                + bahasa.teks(kunci, lang, nama_toko=settings.store_name,
+                              alamat_toko=settings.store_address))
+    if event in ("delivered", "picked_up", "completed"):
+        if event == "completed" and ((oid, "delivered") in _kabar_web
+                                     or (oid, "picked_up") in _kabar_web):
+            return None
+        return bahasa.teks("pesanan_selesai", lang, invoice=inv, toko=settings.store_name)
+    if event == "cancelled":
+        kunci = _kunci_batal(o)
+        return bahasa.teks(kunci, lang, invoice=inv) if kunci else None
+    if event == "overdue":
+        return bahasa.teks("pesanan_terlambat", lang, invoice=inv)
+    return None
+
+
+async def kabar_pesanan(order_id: int, event: str) -> bool | None:
+    """Webhook status pesanan dari backend, untuk pesanan dari mana pun.
+
+    Pesanan lewat WhatsApp diurus lewat baris pending_orders-nya (status lokal,
+    klaim anti-dobel, polling cadangan). Pesanan website tidak punya baris itu:
+    nomor dan detailnya dibaca dari GET /orders/{id}.
+    True = dikabari/ditangani; None = tidak ada yang perlu dikabari;
+    False = gagal (backend boleh mengulang).
+    """
+    lokal = await store.pesanan_by_ref(order_id)
+    if lokal is not None:
+        if lokal.status not in store.ACTIVE_ORDER_STATUSES:
+            return None  # pesanan WhatsApp yang sudah ditutup dan dikabari
+        if event == "cancelled":
+            return await notify_cancelled(order_id)
+        if event == "overdue":
+            return await _notify(lokal.wa_number, bahasa.teks(
+                "pesanan_terlambat", await store.get_lang(lokal.wa_number),
+                invoice=_label(lokal)))
+        jalur = {"paid": notify_paid, "processing": notify_processing,
+                 "ready": notify_ready, "completed": notify_completed}
+        if event in ("delivered", "picked_up"):
+            ok = await notify_completed(order_id, event)
+        else:
+            ok = await jalur[event](order_id)
+        return True if ok else None
+
+    try:
+        o = await backend.get_order(order_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("detail pesanan %s gagal diambil: %s", order_id, exc)
+        return False
+    nomor = canonical_wa_number(((o or {}).get("customer") or {}).get("nomor_wa") or "")
+    if not nomor:
+        return None
+    wa = f"{nomor}@c.us"
+    teks = await _teks_web(o, event, await store.get_lang(wa))
+    if teks is None:
+        return None
+    if not await _notify(wa, teks):
+        return False
+    _kabar_web[(int(order_id), event)] = time.monotonic()
     return True
 
 

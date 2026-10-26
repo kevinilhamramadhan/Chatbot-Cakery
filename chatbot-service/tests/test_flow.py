@@ -87,6 +87,11 @@ def patch_externals(monkeypatch):
     async def f_set_takeover(wa, active, expires_at):
         return {"nomor_wa": wa, "human_takeover_active": active}
 
+    orders = {}  # GET /orders/{id}: isi per uji
+
+    async def f_get_order(order_id):
+        return orders.get(int(order_id))
+
     async def f_admin():
         # Penerima takeover datang dari user backend yang handles_takeover.
         return ["628999000111"]
@@ -100,10 +105,10 @@ def patch_externals(monkeypatch):
                      "create_payment": f_create_payment, "get_payment_status": f_payment_status,
                      "get_latest_order": f_latest, "cancel_order": f_cancel,
                      "set_takeover": f_set_takeover, "get_takeover_admin_numbers": f_admin,
-                     "get_takeover_status": f_takeover_status}.items():
+                     "get_takeover_status": f_takeover_status, "get_order": f_get_order}.items():
         monkeypatch.setattr(backend, name, fn)
     return {"sent": sent, "backend": backend, "monkeypatch": monkeypatch,
-            "charges": charges}
+            "charges": charges, "orders": orders}
 
 
 async def _seed_cart_awaiting_confirmation(items):
@@ -612,12 +617,23 @@ async def test_takeover_ended_on_admin_site_unsuppresses(patch_externals):
 
 # ── Background worker: timeout + paid detection ───────────────────────────────
 async def test_background_timeout_cancels(patch_externals):
+    """Lewat batas bayar: chatbot menunggu backend membatalkan, lalu mengabari."""
     past = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)
     await store.create_pending_order(
         wa_number=WA, order_ref="200", payment_type="full", total_amount=100, amount_due=100,
         items_json="[]", customer_json="{}", delivery_method="pickup", expires_at=past,
     )
+    patch_externals["orders"][200] = {"id": 200, "status": "pending",
+                                      "invoice": {"status": "unpaid"},
+                                      "payment_expires_at": past.isoformat()}
     await background._check_once()
+    assert await store.get_active_pending(WA) is not None    # Midtrans masih pending
+    assert patch_externals["sent"] == []
+
+    patch_externals["orders"][200]["status"] = "cancelled"
+    await background._check_once()
+    await background._check_once()
+    assert sum("dibatalkan otomatis" in t for _, t in patch_externals["sent"]) == 1
     assert await store.get_active_pending(WA) is None
     assert any("dibatalkan otomatis" in t for _, t in patch_externals["sent"])
 
@@ -1348,9 +1364,112 @@ async def test_webhook_cancelled_mengabari_sekali(patch_externals):
         items_json="[]", customer_json="{}", delivery_method="pickup", status="pending",
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
     )
+    patch_externals["orders"][902] = {"id": 902, "status": "cancelled",
+                                      "invoice": {"status": "unpaid"}}
     assert await background.notify_cancelled(902) is True
     assert await store.get_active_pending(WA) is None
     sent = patch_externals["sent"]
     assert len(sent) == 1 and "dibatalkan" in sent[0][1] and "refund" not in sent[0][1].lower()
     assert await background.notify_cancelled(902) is None         # retry backend: tidak dobel
     assert len(sent) == 1
+
+
+# ── Webhook status pesanan untuk pesanan dari mana pun ───────────────────────
+def _pesanan_web(oid, **kw):
+    o = {"id": oid, "status": "pending", "metode_pengiriman": "pickup",
+         "invoice": {"nomor_invoice": f"INV-{oid}", "status": "unpaid"},
+         "customer": {"nama": "Bu Web", "nomor_wa": "0812-3456-7890"},
+         "amount_paid": "0", "amount_due": "200000"}
+    o.update(kw)
+    return o
+
+
+async def test_pesanan_website_dikabari_dari_detail_backend(patch_externals):
+    orders, sent = patch_externals["orders"], patch_externals["sent"]
+    orders[950] = _pesanan_web(950, invoice={"nomor_invoice": "INV-950", "status": "partial"},
+                               amount_paid="100000", amount_due="100000",
+                               settlement_due_date="2026-11-01T11:00:00Z")
+    assert await background.kabar_pesanan(950, "paid") is True
+    assert sent[-1][0] == "6281234567890@c.us"
+    assert "Rp100.000" in sent[-1][1] and "Minggu, 1 November 2026 pukul 18.00 WIB" in sent[-1][1]
+    assert "lunasi" not in sent[-1][1]                  # perintah itu hanya untuk pesanan WA
+
+    orders[950]["status"] = "in_process"
+    assert await background.kabar_pesanan(950, "processing") is None   # baru dikabari lunas
+    assert await background.kabar_pesanan(950, "overdue") is True
+    assert "menghubungimu" in sent[-1][1] and "refund" not in sent[-1][1].lower()
+
+    orders[950]["status"] = "picked_up"
+    assert await background.kabar_pesanan(950, "picked_up") is True
+    assert await background.kabar_pesanan(950, "completed") is None    # tidak dobel
+    assert len(sent) == 3
+
+
+async def test_sebab_batal_dibaca_dari_status_backend(patch_externals):
+    orders, sent = patch_externals["orders"], patch_externals["sent"]
+    lewat = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)).isoformat()
+    orders[951] = _pesanan_web(951, status="cancelled", payment_expires_at=lewat)
+    orders[952] = _pesanan_web(952, status="cancelled_settlement_expired",
+                               invoice={"nomor_invoice": "INV-952", "status": "partial"})
+    orders[953] = _pesanan_web(953, status="refunded")
+    assert await background.kabar_pesanan(951, "cancelled") is True
+    assert "batas waktu pembayaran" in sent[-1][1]
+    assert await background.kabar_pesanan(952, "cancelled") is True
+    assert "pelunasan" in sent[-1][1]
+    assert await background.kabar_pesanan(953, "cancelled") is None    # kabar refund terpisah
+
+
+async def test_pesanan_wa_lunas_dibatalkan_seller(patch_externals):
+    await store.create_pending_order(
+        wa_number=WA, order_ref="954", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method="pickup", status="paid",
+        expires_at=dt.datetime.now(dt.timezone.utc))
+    patch_externals["orders"][954] = {"id": 954, "status": "cancelled",
+                                      "invoice": {"status": "paid"}}
+    assert await background.kabar_pesanan(954, "cancelled") is True
+    assert await store.get_active_pending(WA) is None
+    assert "Seller akan menghubungimu" in patch_externals["sent"][-1][1]
+    assert await background.kabar_pesanan(954, "overdue") is None      # sudah ditutup
+
+
+def test_webhook_status_dideduplikasi_per_idempotency_key(patch_externals):
+    from fastapi.testclient import TestClient
+
+    from app.core.config import settings
+    from app.main import app
+    from app.webhook import routes
+
+    routes._kunci_diterima.clear()
+    patch_externals["orders"][955] = _pesanan_web(955, status="ready")
+    kepala = {"X-Internal-Key": settings.internal_api_key,
+              "Idempotency-Key": "order:955:ready"}
+    c = TestClient(app)  # tanpa `with`: rute saja, tanpa lifespan (worker, Ollama)
+    assert c.post("/webhook/internal/orders/955/ready", headers=kepala).json()["status"] == "ok"
+    assert c.post("/webhook/internal/orders/955/ready",
+                  headers=kepala).json()["status"] == "duplicate"
+    assert c.post("/webhook/internal/orders/955/shipped", headers=kepala).status_code == 404
+    assert sum("siap" in t for _, t in patch_externals["sent"]) == 1
+
+
+def test_webhook_gagal_kirim_bisa_diulang(patch_externals):
+    from fastapi.testclient import TestClient
+
+    from app.core.config import settings
+    from app.main import app
+    from app.webhook import routes
+    from app.whatsapp_client.client import whatsapp_client
+
+    routes._kunci_diterima.clear()
+    patch_externals["orders"][956] = _pesanan_web(956, status="ready")
+    kirim_asli = whatsapp_client.send_text
+
+    async def mati(wa, text):
+        raise RuntimeError("gateway mati")
+
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", mati)
+    kepala = {"X-Internal-Key": settings.internal_api_key,
+              "Idempotency-Key": "order:956:ready"}
+    c = TestClient(app)
+    assert c.post("/webhook/internal/orders/956/ready", headers=kepala).status_code == 503
+    patch_externals["monkeypatch"].setattr(whatsapp_client, "send_text", kirim_asli)
+    assert c.post("/webhook/internal/orders/956/ready", headers=kepala).json()["status"] == "ok"

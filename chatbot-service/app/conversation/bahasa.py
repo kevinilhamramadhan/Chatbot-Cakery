@@ -940,19 +940,34 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Pesanan *{invoice}* dibatalkan. Silakan pesan lagi kapan saja ya 🙏",
         EN: "Order *{invoice}* has been cancelled. Feel free to order again any time 🙏",
     },
-    "batas_lewat_bukti_email": {
-        ID: "kirim bukti transfernya ke {email} ya",
-        EN: "please send the proof of transfer to {email}",
+    "batal_sudah_bayar": {
+        ID: ("Pesanan *{invoice}* dibatalkan. Seller akan menghubungimu untuk membahas "
+             "pembayaran yang sudah masuk 🙏"),
+        EN: ("Order *{invoice}* has been cancelled. The seller will contact you about the "
+             "payment you already made 🙏"),
     },
-    "batas_lewat_bukti_kontak": {
-        ID: "sampaikan bukti transfernya ke kontak resmi kami ya",
-        EN: "please send the proof of transfer to our official contact",
+    "batal_pelunasan_lewat": {
+        ID: ("Pesanan *{invoice}* dibatalkan karena sisa pelunasannya belum kami terima "
+             "sampai batas waktunya. Kalau ada pertanyaan soal DP yang sudah dibayar, "
+             "balas pesan ini ya 🙏"),
+        EN: ("Order *{invoice}* has been cancelled because the remaining balance was not "
+             "received by the deadline. If you have questions about the deposit you "
+             "paid, just reply to this message 🙏"),
     },
-    "batas_lewat": {
-        ID: ("Batas waktu pembayaran pesanan *{invoice}* sudah lewat, jadi pesanannya "
-             "tidak kami proses. Kalau kamu terlanjur membayar, {lanjut} 🙏"),
-        EN: ("The payment deadline for order *{invoice}* has passed, so we are not "
-             "processing it. If you have already paid, {lanjut} 🙏"),
+    "pesanan_terlambat": {
+        ID: ("Mohon maaf, pesanan *{invoice}* belum bisa kami serahkan sesuai tanggal "
+             "yang dijadwalkan 🙏 Seller akan segera menghubungimu untuk menyepakati "
+             "tindak lanjutnya."),
+        EN: ("We're sorry, order *{invoice}* could not be handed over on the scheduled "
+             "date 🙏 The seller will contact you shortly to agree on the next steps."),
+    },
+    "sisa_pelunasan_web": {
+        ID: "\nSisa pelunasan: *{sisa}*{batas}, bisa dibayar lewat website.",
+        EN: "\nRemaining balance: *{sisa}*{batas}, payable on the website.",
+    },
+    "batas_pelunasan": {
+        ID: ", paling lambat {waktu} WIB",
+        EN: ", due by {waktu} WIB",
     },
     # ── Laporan Owner ────────────────────────────────────────────────────────
     "laporan_ditolak": {

@@ -82,8 +82,14 @@ def patch_externals(monkeypatch):
     monkeypatch.setattr(backend, "cancel_order", f_cancel)
     monkeypatch.setattr(backend, "get_takeover_status", f_takeover_status)
     monkeypatch.setattr(backend, "get_payment_status", f_payment_status)
+    orders = {}
+
+    async def f_get_order(order_id):
+        return orders.get(int(order_id))
+
+    monkeypatch.setattr(backend, "get_order", f_get_order)
     return {"sent": sent, "cancelled": cancelled, "backend": backend,
-            "monkeypatch": monkeypatch, "originals": originals}
+            "monkeypatch": monkeypatch, "originals": originals, "orders": orders}
 
 
 def _mock_agent(monkeypatch, answer="(jawaban agent)"):
@@ -367,10 +373,11 @@ async def test_channel_understands_wallet_names(patch_externals, typed, expected
     assert captured["channel"] == expected
 
 
-# ── P2-3 · an expired order is cancelled on the backend too ──────────────────
+# ── P2-3 · an expired order is cancelled by the backend, not by us ───────────
 async def test_expired_order_is_cancelled_upstream(patch_externals):
-    """Live gap: the local row went "expired" and the customer was told the
-    order was cancelled, while the backend kept it pending forever."""
+    """Dulu chatbot membatalkan sendiri di menit ke-30 padahal QR Midtrans masih
+    berlaku sampai payment_expires_at. Sekarang backend yang membatalkan;
+    pelanggan baru dikabari setelah backend menyebutnya batal."""
     await store.create_pending_order(
         wa_number=WA, order_ref="9002", payment_ref="MID", payment_type="full",
         total_amount=100000, amount_due=100000, items_json="[]", customer_json="{}",
@@ -378,7 +385,11 @@ async def test_expired_order_is_cancelled_upstream(patch_externals):
         expires_at=dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1),
     )
     await background._check_once()
-    assert patch_externals["cancelled"] == ["9002"]
+    assert patch_externals["cancelled"] == [] and patch_externals["sent"] == []
+    patch_externals["orders"][9002] = {"id": 9002, "status": "cancelled",
+                                       "invoice": {"status": "unpaid"}}
+    await background._check_once()
+    assert patch_externals["cancelled"] == []
     assert any("9002" in text for _, text in patch_externals["sent"])
 
 
