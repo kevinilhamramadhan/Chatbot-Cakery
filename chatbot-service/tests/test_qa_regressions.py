@@ -2165,3 +2165,19 @@ async def test_menu_kategori_beda_huruf_jadi_satu(patch_externals):
 def test_cukup_dan_y_berarti_setuju():
     from app.conversation.states import text_is_confirm
     assert text_is_confirm("cukup") and text_is_confirm("y")
+
+
+async def test_sudah_sesuai_bukan_persetujuan_tawaran_admin(patch_externals):
+    """e2e v12 S4 (27 Okt 2026): tawaran admin menggantung, pelanggan mengetik
+    perintah keranjang "sudah sesuai", dan chat dioper ke admin."""
+    from app.tools.escalate import escalate_to_admin
+
+    _mock_agent(patch_externals["monkeypatch"], "(model)")
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom"}))
+
+    await handle_message(WA, "sudah sesuai")
+
+    assert await store.is_takeover_active(WA) is False
+    assert patch_externals["sent"] == []

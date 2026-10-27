@@ -281,6 +281,10 @@ async def handle_message(wa_number: str, text: str) -> Reply:
             # bot langsung bungkam. Aturan yang sama sudah dipakai di langkah
             # konfirmasi keranjang.
             and not mentions_quantity(text)
+            # "sudah sesuai" adalah perintah keranjang dari templat kita sendiri.
+            # Terukur e2e v12 (27 Okt 2026): tawaran admin dari jawaban FAQ
+            # pembatalan diterima oleh "sudah sesuai" tiga giliran kemudian.
+            and not text_perintah_sudah_sesuai(text)
         ):
             await store.set_pending_escalation(wa_number, None)
             reply = Reply(text=await escalation.start_takeover(
