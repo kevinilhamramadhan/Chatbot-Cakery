@@ -711,6 +711,28 @@ async def test_payment_instructions_can_be_sent_again(patch_externals):
     assert "Rp50.000" in out
 
 
+async def test_resent_payment_deadline_follows_the_stored_expiry(patch_externals, monkeypatch):
+    """Live 27 Okt: tagihan menyebut batas 60 menit (payment_expires_at backend),
+    tetapi kirim ulang cara bayar menyebut 30 menit dari PAYMENT_TIMEOUT_MINUTES."""
+    from app.core.config import settings
+    from app.tools.payment_info import resend_payment_method
+
+    monkeypatch.setattr(settings, "payment_timeout_minutes", 30)
+    await store.create_pending_order(
+        wa_number=WA, order_ref="30002", payment_ref="MID2", payment_type="full",
+        total_amount=95000, amount_due=95000, nomor_invoice="INV-SISA",
+        pay_instruction="Virtual Account: 123",
+        items_json="[]", customer_json="{}", delivery_method="pickup",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=45, seconds=10),
+    )
+    set_turn_context(TurnContext(wa_number=WA))
+
+    out = await resend_payment_method.ainvoke({})
+
+    assert "45 menit" in out
+    assert "30 menit" not in out
+
+
 # ── Jumlah yang tidak pernah ditulis pelanggan ───────────────────────────────
 async def test_quantity_the_customer_never_wrote_is_refused(patch_externals):
     """Live: "pesan bolu beberapa aja" -> add_to_cart(qty=2). Angka itu tidak

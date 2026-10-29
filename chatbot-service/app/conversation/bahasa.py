@@ -669,11 +669,11 @@ _TEMPLAT: dict[str, dict[str, str]] = {
     "kirim_ulang_bayar": {
         ID: ("Ini lagi ya untuk pesanan *{invoice}*:\n\n"
              "{label} yang harus dibayar: *{jumlah}*\n\n{cara_bayar}\n\n"
-             "Batas waktu pembayaran {menit} menit sejak pesanan dibuat. "
+             "Sisa waktu pembayaran {menit} menit lagi. "
              "Ketik *batal* kalau ingin membatalkan."),
         EN: ("Here it is again for order *{invoice}*:\n\n"
              "{label} to pay: *{jumlah}*\n\n{cara_bayar}\n\n"
-             "The payment deadline is {menit} minutes from when the order was made. "
+             "You have {menit} minutes left to pay. "
              "Type *cancel* if you'd like to cancel."),
     },
     "bayar_diterima_singkat": {

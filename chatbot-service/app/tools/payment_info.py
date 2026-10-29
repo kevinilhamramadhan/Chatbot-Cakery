@@ -1,17 +1,19 @@
 """Tool: resend_payment_method — repeats the payment instructions.
 
 The QRIS link and VA number were sent exactly once, at checkout. On WhatsApp
-that message is buried within minutes, and the customer only has 30 minutes to
-pay; "kode qr nya kirim ulang dong" came back as a bare order status with no way
-to pay. The instructions are snapshotted on the pending order at checkout, so
-repeating them costs nothing and never invents a second charge.
+that message is buried within minutes, and the customer only has until the
+backend's payment deadline to pay; "kode qr nya kirim ulang dong" came back as a
+bare order status with no way to pay. The instructions are snapshotted on the
+pending order at checkout, so repeating them costs nothing and never invents a
+second charge.
 """
+
+from datetime import datetime, timezone
 
 from langchain_core.tools import tool
 
 from app.conversation import bahasa, checkout, store
 from app.conversation.context import get_turn_context
-from app.core.config import settings
 from app.tools.formatting import rupiah
 
 
@@ -39,8 +41,16 @@ async def resend_payment_method() -> str:
     # pay_instruction lama masih memuat tautannya apa adanya.
     if order.qris_url:
         checkout.kirim_gambar_qris(order.qris_url, lang)
+    # Sisa waktunya dihitung dari batas yang tersimpan saat checkout
+    # (payment_expires_at backend), bukan dari PAYMENT_TIMEOUT_MINUTES: nilai
+    # cadangan itu bisa berbeda dari batas sebenarnya, dan pelanggan lalu membaca
+    # dua batas waktu yang berlainan untuk tagihan yang sama.
+    expires_at = order.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    sisa = (expires_at - datetime.now(timezone.utc)).total_seconds()
     return bahasa.teks(
         "kirim_ulang_bayar", lang, invoice=invoice,
         label=bahasa.teks("label_dp" if order.payment_type == "dp" else "label_bayar_penuh", lang),
         jumlah=rupiah(order.amount_due), cara_bayar=order.pay_instruction,
-        menit=settings.payment_timeout_minutes)
+        menit=max(1, round(sisa / 60)))
