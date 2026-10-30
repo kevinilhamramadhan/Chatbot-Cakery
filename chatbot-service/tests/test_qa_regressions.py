@@ -2416,3 +2416,29 @@ async def test_batal_ditolak_backend_menyebut_kapan_batal_sendiri(patch_external
     out = await proses_pembatalan(WA)
 
     assert "batal sendiri dalam sekitar 30 menit" in out or "dalam sekitar 29 menit" in out
+
+
+async def test_tanggal_pengganti_hari_libur_tidak_membuang_tanggal_lama(patch_externals):
+    """e2e v12 30 Okt 2026: tanggal sah sudah dicatat, lalu "besok lusa" (hari
+    Minggu) membuang tanggal itu dan langkah bayar macet di "tanggal belum
+    terbaca"."""
+    from app.conversation.orchestrator import handle_message as hm
+
+    hari = dt.date.today() + dt.timedelta(days=3)
+    while hari.weekday() != 6:
+        hari += dt.timedelta(days=1)
+    minggu = f"{hari.day:02d}/{hari.month:02d} jam 10"
+    assert tanggal.periksa(minggu)[1] == "hari_libur"
+
+    sah = tanggal.periksa("lusa jam 10")[0] or tanggal.periksa("senin depan jam 10")[0]
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat",
+                               "harga": 50000.0, "qty": 1}])
+    await store.set_customer(WA, {"nama": "Rina", "alamat": "Jl. Melati 3",
+                                  "metode_pengiriman": "pickup", "nomor_hp": "628123456789",
+                                  "tanggal": sah})
+    await store.set_state(WA, State.COLLECTING_IDENTITY)
+
+    r = await hm(WA, minggu)
+
+    assert (await store.get_customer(WA))["tanggal"] == sah
+    assert tanggal.tampil(sah, "id") in r.text

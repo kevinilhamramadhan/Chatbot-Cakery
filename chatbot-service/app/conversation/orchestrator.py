@@ -855,7 +855,19 @@ async def _handle_identity(wa_number: str, text: str, lang: str) -> Reply:
     # ditanya metode bayar). UAT 17 Okt: tanggal baru diabaikan diam-diam.
     # Hanya tanggal sah atau yang jelas tanggal (libur, kejauhan, jam tutup);
     # "bayar sekarang" terbaca hari ini dan tidak boleh mengulang langkah tanggal.
-    if tanggal.periksa(text)[1] not in ("tidak_terbaca", "terlalu_cepat"):
+    alasan_baru = tanggal.periksa(text)[1]
+    if alasan_baru and alasan_baru not in ("tidak_terbaca", "terlalu_cepat"):
+        # Tanggal pengganti jelas tanggal tetapi tidak bisa dipakai (libur,
+        # kejauhan, jam tutup). e2e v12 30 Okt 2026: "besok lusa" jatuh hari
+        # Minggu, tanggal yang sudah sah ikut dibuang, dan jawaban "DP aja" lalu
+        # dibaca sebagai tanggal yang tidak terbaca berulang-ulang.
+        lanjut = (_payment_type_prompt(lang) if "payment_type" not in cust
+                  else _channel_prompt(lang))
+        return Reply(text=bahasa.teks(f"tanggal_{alasan_baru}", lang) + "\n\n"
+                     + bahasa.teks("tanggal_lama_tetap", lang,
+                                   tanggal=tanggal.tampil(cust["tanggal"], lang))
+                     + "\n\n" + lanjut)
+    if alasan_baru not in ("tidak_terbaca", "terlalu_cepat"):
         for kunci in ("tanggal", "payment_type"):
             cust.pop(kunci, None)
         await store.set_customer(wa_number, cust)

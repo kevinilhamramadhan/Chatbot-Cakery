@@ -265,6 +265,10 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Got it, noted for *{tanggal}*.\n"
              "(Want to change it? Just type the new date.)"),
     },
+    "tanggal_lama_tetap": {
+        ID: "Jadi tanggalnya tetap *{tanggal}* ya. Mau ganti? Ketik tanggal lain.",
+        EN: "So the date stays *{tanggal}*. Want to change it? Type another date.",
+    },
     "tanya_jenis_bayar": {
         ID: ("Mau bayar *penuh* atau *DP 50%*? Ketik salah satu ya.\n"
              "(DP 50% = bayar separuh dulu sekarang)"),
