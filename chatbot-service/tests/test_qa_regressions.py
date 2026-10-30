@@ -11,7 +11,7 @@ import json
 import httpx
 import pytest
 
-from app.conversation import background, store, tanggal
+from app.conversation import background, bahasa, store, tanggal
 from app.conversation.context import TurnContext, set_turn_context
 from app.conversation.orchestrator import handle_message
 from app.conversation.states import State
@@ -2386,6 +2386,59 @@ async def test_yang_murah_jawaban_model_berisi_harga_dibiarkan(patch_externals, 
     assert r.text == "Yang paling terjangkau Brownies Coklat, Rp50.000 kak"
 
 
+async def test_minta_admin_ditawari_walau_model_tidak_paham(patch_externals, monkeypatch):
+    """Uji UAT 31 Okt 2026 (v12): "mau ngobrol sama admin" dijawab "Boleh
+    diulang maksudnya kak?". Pengaman kata kunci lama hanya hidup bila
+    INTENT_DARI_MODEL mati, jadi di produksi tidak pernah jalan."""
+    from app.conversation import escalation
+    monkeypatch.setattr(settings_module, "intent_dari_model", True)
+    _mock_agent(monkeypatch, "Boleh diulang maksudnya kak? Aku bisa bantu soal menu 😊")
+
+    r = await handle_message(WA, "mau ngobrol sama admin")
+
+    assert r.text == escalation.teks_tawaran(bahasa.ID)
+    assert (await store.get_or_create_session(WA)).pending_escalation
+
+
+def _menu_penuh() -> str:
+    from app.core.config import settings
+    return (bahasa.teks("menu_judul", bahasa.ID, toko=settings.store_name)
+            + "\n\n*Cake*\n• Bolu Pandan — Rp75.000\n• Brownies Coklat — Rp50.000")
+
+
+async def test_yang_paling_murah_dijawab_menu_penuh_diganti_termurah(patch_externals, monkeypatch):
+    """Uji UAT 31 Okt 2026: model menjawab "yang paling murah" dengan seluruh
+    menu. Menunya memuat "Rp", jadi pengaman termurah dulu tidak pernah jalan."""
+    monkeypatch.setattr(settings_module, "intent_dari_model", True)
+    _mock_agent(monkeypatch, _menu_penuh())
+
+    r = await handle_message(WA, "yang paling murah yang mana?")
+
+    assert r.text.startswith(bahasa.teks("termurah", bahasa.ID, daftar="").split("\n")[0])
+    assert r.text.index("Brownies Coklat") < r.text.index("Bolu Pandan")
+
+
+async def test_yang_paling_laris_dijawab_menu_penuh_diganti_rekomendasi(patch_externals, monkeypatch):
+    """Uji UAT 31 Okt 2026: "yang paling laris apa?" dijawab seluruh menu,
+    padahal yang ditanya paling banyak tiga kue."""
+    monkeypatch.setattr(settings_module, "intent_dari_model", True)
+    _mock_agent(monkeypatch, _menu_penuh())
+
+    r = await handle_message(WA, "yang paling laris apa?")
+
+    assert r.text.startswith(bahasa.teks("rekomendasi", bahasa.ID, daftar="").split("\n")[0])
+    assert not r.text.startswith(_menu_penuh().split("\n")[0])
+
+
+async def test_minta_menu_tetap_menu_penuh(patch_externals, monkeypatch):
+    monkeypatch.setattr(settings_module, "intent_dari_model", True)
+    _mock_agent(monkeypatch, _menu_penuh())
+
+    r = await handle_message(WA, "lihat menunya dong")
+
+    assert r.text == _menu_penuh()
+
+
 async def test_sudah_sesuai_bukan_jawaban_konfirmasi_batal(patch_externals):
     """e2e v12 30 Okt 2026: "sudah sesuai" saat bot bertanya "jadi dibatalkan?"
     dibaca sebagai ya dan pembatalan dijalankan."""
@@ -2442,3 +2495,23 @@ async def test_tanggal_pengganti_hari_libur_tidak_membuang_tanggal_lama(patch_ex
 
     assert (await store.get_customer(WA))["tanggal"] == sah
     assert tanggal.tampil(sah, "id") in r.text
+
+
+async def test_menu_cadangan_tidak_menawarkan_kue_yang_habis(monkeypatch):
+    """Uji UAT 31 Okt 2026: "pesan croissant 2" dijawab daftar menu yang memuat
+    Brownies Coklat tanpa tanda habis, padahal menu biasa menandainya tidak
+    tersedia. Daftar cadangan ini isinya "yang bisa kamu pesan"."""
+    from app.backend_client import products as products_api
+    from app.tools.formatting import menu_fallback
+
+    async def f_list(only_active=True):
+        return [{"nama_produk": "Bolu Pandan", "harga_jual": 75000},
+                {"nama_produk": "Brownies Coklat", "harga_jual": 50000,
+                 "is_in_stock": False}]
+
+    monkeypatch.setattr(products_api, "list_products", f_list)
+
+    teks = await menu_fallback("Maaf, aku tidak menemukan croissant di menu.", bahasa.ID)
+
+    assert "Bolu Pandan" in teks
+    assert "Brownies Coklat" not in teks

@@ -357,12 +357,29 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         if reply is None:
             # IDLE / AWAITING_PAYMENT / ORDER_ACTIVE -> LLM agent (with tools).
             reply = await _run_agent_turn(wa_number, text)
-            if (text_tanya_termurah(text) and "Rp" not in (reply.text or "")
-                    and not mentions_quantity(text)):
+            menu_penuh = (reply.text or "").startswith(
+                bahasa.teks("menu_judul", lang, toko=settings.store_name))
+            if (text_tanya_termurah(text) and not mentions_quantity(text)
+                    and ("Rp" not in (reply.text or "") or menu_penuh)):
                 # e2e v12 (27 Okt 2026): "yang murah yang mana?" ditolak model
                 # 6 dari 6 kali ("belum punya infonya"), padahal harga ada di
-                # katalog. Jawaban model yang sudah memuat harga dibiarkan.
+                # katalog. Jawaban model yang sudah memuat harga dibiarkan,
+                # kecuali berupa seluruh menu (uji UAT 31 Okt 2026): yang ditanya
+                # satu-dua kue termurah, bukan daftar 40 kue.
                 reply = Reply(text=await _termurah(lang))
+            elif (menu_penuh and text_asks_recommendation(text)
+                    and not mentions_quantity(text) and not await _pemilik(wa_number)):
+                # "yang paling laris apa?" dijawab seluruh menu (uji UAT 31 Okt
+                # 2026). Menu memang memuat tiga rekomendasi di bawahnya, tapi
+                # pelanggan bertanya kue mana, bukan meminta daftar lengkap.
+                reply = Reply(text=await _rekomendasi(lang))
+            elif (text_minta_admin(text)
+                    and not (await store.get_or_create_session(wa_number)).pending_escalation):
+                # Uji UAT 31 Okt 2026 (v12): "mau ngobrol sama admin" dijawab
+                # "boleh diulang maksudnya?". Kalau model sudah menawarkan admin
+                # (escalate_to_admin), tawarannya tersimpan dan ini dilewati.
+                await store.set_pending_escalation(wa_number, text)
+                reply = Reply(text=escalation.teks_tawaran(lang))
     _log_turn(wa_number, state, started)
 
     if reply.text:

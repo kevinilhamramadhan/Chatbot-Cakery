@@ -19,8 +19,11 @@ def v11(monkeypatch):
 
 @pytest.mark.parametrize("pesan", [
     "makasih ya", "enak banget kuenya", "rekomendasi dong", "bisa kurang ga harganya",
-    "mau ngobrol sama admin", "tolong pakai bahasa inggris", "sisanya berapa?",
+    "tolong pakai bahasa inggris", "sisanya berapa?",
 ])
+# "mau ngobrol sama admin" tidak lagi di sini: uji UAT 31 Okt 2026 menunjukkan v12
+# menjawabnya "boleh diulang?", jadi bila model tidak menawarkan admin, orchestrator
+# yang menawarkan (test_minta_admin_ditawari_walau_model_tidak_paham).
 async def test_kata_kunci_tidak_lagi_mencegat(patch_externals, monkeypatch, v11, pesan):
     _mock_agent(monkeypatch, answer="(model)")
     r = await handle_message(WA, pesan)

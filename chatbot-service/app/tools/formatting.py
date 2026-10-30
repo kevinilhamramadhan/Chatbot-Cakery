@@ -133,6 +133,10 @@ async def menu_fallback(lead: str, lang: str | None = None) -> str:
         items = []
     from app.conversation import bahasa
 
+    # Hanya yang bisa dipesan sekarang: daftar ini menjawab "adanya apa?", dan
+    # kue habis yang tampil tanpa tanda (uji UAT 31 Okt 2026) mengundang pesanan
+    # yang ditolak di langkah berikutnya.
+    items = [p for p in items if tersedia(p)]
     if not items:
         return bahasa.teks("menu_fallback_kosong", lang, lead=lead)
     lines = "\n".join(
