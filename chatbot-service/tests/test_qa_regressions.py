@@ -2384,3 +2384,35 @@ async def test_yang_murah_jawaban_model_berisi_harga_dibiarkan(patch_externals, 
     r = await handle_message(WA, "yang murah yang mana?")
 
     assert r.text == "Yang paling terjangkau Brownies Coklat, Rp50.000 kak"
+
+
+async def test_sudah_sesuai_bukan_jawaban_konfirmasi_batal(patch_externals):
+    """e2e v12 30 Okt 2026: "sudah sesuai" saat bot bertanya "jadi dibatalkan?"
+    dibaca sebagai ya dan pembatalan dijalankan."""
+    await _seed_awaiting_payment(order_ref="163")
+    await store.set_state(WA, State.AWAITING_CANCEL_CONFIRMATION)
+
+    r = await handle_message(WA, "sudah sesuai")
+
+    assert patch_externals["cancelled"] == []
+    assert "*ya*" in r.text
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_CANCEL_CONFIRMATION
+
+
+async def test_batal_ditolak_backend_menyebut_kapan_batal_sendiri(patch_externals):
+    from app.tools.cancel_order import proses_pembatalan
+
+    await _seed_awaiting_payment(order_ref="163")
+
+    async def f_cancel(order_ref, wa=None):
+        raise httpx.HTTPStatusError("409", request=None, response=None)
+
+    async def f_refund(order_ref, reason, wa_number=""):
+        return None
+
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "cancel_order", f_cancel)
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "refund_order", f_refund)
+
+    out = await proses_pembatalan(WA)
+
+    assert "batal sendiri dalam sekitar 30 menit" in out or "dalam sekitar 29 menit" in out

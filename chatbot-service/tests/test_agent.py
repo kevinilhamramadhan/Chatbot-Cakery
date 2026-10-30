@@ -221,3 +221,43 @@ async def test_templat_tagihan_terkunci_tanpa_pesanan_dibuang(monkeypatch):
     set_turn_context(TurnContext(wa_number=WA, user_text="Jl. Melati 3"))
     out = await agent_mod.run_agent(WA, "Jl. Melati 3", history=[])
     assert out == bahasa.teks("ulangi_maksud", bahasa.ID)
+
+
+async def _tagihan_qris():
+    import datetime as dt
+
+    from app.conversation import store
+
+    await store.create_pending_order(
+        wa_number=WA, order_ref="161", payment_ref="MID", payment_type="full",
+        total_amount=190000, amount_due=190000, nomor_invoice="INV-161",
+        pay_instruction="💳 Virtual Account: *62137415432*", items_json="[]",
+        customer_json="{}", delivery_method="pickup",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=50))
+
+
+_TERKUNCI = AIMessage(content=("Tagihannya sudah terbit dengan cara bayar yang tadi dipilih, "
+                               "jadi tidak bisa diubah ya kak 🙏"))
+
+
+async def test_minta_qr_saat_tagihan_ada_dikirimi_cara_bayar(monkeypatch):
+    """e2e v12 30 Okt 2026: "qr nya mana?" dijawab "tidak bisa diubah"."""
+    await _tagihan_qris()
+    _mock_retrieval(monkeypatch, 0.0)
+    _mock_llm(monkeypatch, _TERKUNCI)
+    set_turn_context(TurnContext(wa_number=WA, user_text="qr nya mana?"))
+
+    out = await agent_mod.run_agent(WA, "qr nya mana?", history=[])
+
+    assert "62137415432" in out and "INV-161" in out
+
+
+async def test_minta_ganti_cara_bayar_tetap_dijawab_terkunci(monkeypatch):
+    await _tagihan_qris()
+    _mock_retrieval(monkeypatch, 0.0)
+    _mock_llm(monkeypatch, _TERKUNCI)
+    set_turn_context(TurnContext(wa_number=WA, user_text="boleh ganti jadi qris?"))
+
+    out = await agent_mod.run_agent(WA, "boleh ganti jadi qris?", history=[])
+
+    assert "tidak bisa diubah" in out

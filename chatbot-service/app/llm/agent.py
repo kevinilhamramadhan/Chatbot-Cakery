@@ -39,6 +39,11 @@ _TOOLNAME_RE = re.compile(
 # Templat N18 ("data pesanan tidak bisa diubah setelah tagihannya terbit").
 _DIUBAH_RE = re.compile(r"(bisa diubah|be changed)", re.IGNORECASE)
 _TAGIHAN_RE = re.compile(r"(tagihan|invoice)", re.IGNORECASE)
+_MINTA_CARA_BAYAR_RE = re.compile(
+    r"\b(qr|qris|qrnya|va|vanya|virtual account|kode bayar|nomor rekening|rekening|"
+    r"link bayar|link pembayaran|cara bayar|payment link)\b", re.IGNORECASE)
+_UBAH_RE = re.compile(r"\b(ganti|ubah|diubah|tukar|pindah|pakai|pake|change|switch|use)\b",
+                      re.IGNORECASE)
 
 # Konstanta versi Indonesianya dipertahankan untuk uji; jalur sungguhan memakai
 # _di_luar_cakupan() supaya ikut bahasa pelanggan.
@@ -284,6 +289,16 @@ async def run_agent(wa_number: str, user_text: str, history: list[dict]) -> str:
                 and await store.get_active_pending(wa_number) is None):
             logger.warning("Reply says the invoice is locked but there is no active order — dropping it")
             return bahasa.teks("ulangi_maksud", lang)
+        # Tagihannya ada, tetapi pelanggan meminta cara bayarnya, bukan
+        # mengubah apa pun. e2e v12 (30 Okt 2026): "qr nya mana?" saat
+        # menunggu pembayaran dijawab "tidak bisa diubah".
+        if (answer and _DIUBAH_RE.search(answer) and _TAGIHAN_RE.search(answer)
+                and _MINTA_CARA_BAYAR_RE.search(user_text or "")
+                and not _UBAH_RE.search(user_text or "")):
+            from app.tools.payment_info import resend_payment_method
+
+            logger.warning("Locked-invoice template for a payment-instrument request — resending it")
+            return await resend_payment_method.ainvoke({})
         if answer and _TOOLNAME_RE.search(answer):
             logger.warning("Reply mentioned an internal tool name — dropping it")
             return bahasa.teks("ulangi_maksud", lang)

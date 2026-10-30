@@ -638,6 +638,10 @@ async def _handle_cancel_confirmation(wa_number: str, text: str, lang: str) -> R
 
     # Pertanyaannya "jadi dibatalkan?", jadi "batal"/"cancel" di sini berarti ya.
     # QA 18 Sep: "batal" dulu dibaca sebagai penolakan dan pesanannya diteruskan.
+    # "sudah sesuai" adalah perintah keranjang, bukan jawaban pertanyaan ini
+    # (e2e v12 30 Okt 2026: kalimat itu membatalkan pesanan tanpa "ya").
+    if text_perintah_sudah_sesuai(text):
+        return Reply(text=bahasa.teks("ulangi_konfirmasi_batal", lang))
     if (text_is_confirm(text) or text_is_cancel(text)) and not mentions_quantity(text):
         return Reply(text=await proses_pembatalan(wa_number))
 

@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from langchain_core.tools import tool
 
@@ -149,9 +150,17 @@ async def proses_pembatalan(wa_number: str) -> str:
         await store.set_state(wa_number, State.ORDER_ACTIVE if sudah_dibayar
                               else State.AWAITING_PAYMENT)
         if not sudah_dibayar:
-            # Belum ada uang masuk: jangan menjanjikan pengembalian dana.
+            # Belum ada uang masuk: jangan menjanjikan pengembalian dana. Backend
+            # menolak membatalkan selama transaksi Midtrans masih pending (409),
+            # padahal setiap pesanan chatbot punya transaksi itu; tagihan yang
+            # tidak dibayar dibatalkan worker backend saat batasnya lewat.
             label = order.nomor_invoice or f"#{order.order_ref}"
-            return (bahasa.teks("batal_belum_bisa", lang, label=label)
+            batas = order.expires_at if order.expires_at.tzinfo else \
+                order.expires_at.replace(tzinfo=timezone.utc)
+            menit = round((batas - datetime.now(timezone.utc)).total_seconds() / 60)
+            kapan = (bahasa.teks("batal_sendiri_menit", lang, menit=menit) if menit >= 1
+                     else bahasa.teks("batal_sendiri_segera", lang))
+            return (bahasa.teks("batal_belum_bisa", lang, label=label, kapan=kapan)
                     + _jalur_tindak_lanjut(lang))
         return bahasa.teks("batal_perlu_tim", lang) + _jalur_tindak_lanjut(lang)
 

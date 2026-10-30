@@ -468,13 +468,15 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: "There's no active order to cancel 😊",
     },
     "batal_belum_bisa": {
-        ID: ("Maaf, pesanan *{label}* belum bisa dibatalkan otomatis saat ini. "
-             "Karena belum ada pembayaran yang masuk, tidak ada dana yang perlu "
-             "dikembalikan. Cukup jangan bayar tagihan pesanan ini ya."),
-        EN: ("Sorry, order *{label}* can't be cancelled automatically right now. "
-             "No payment has come in, so there's nothing to refund. Just don't pay "
-             "this order's bill."),
+        ID: ("Maaf, pesanan *{label}* belum bisa dibatalkan lewat chat saat ini. Belum ada "
+             "pembayaran yang masuk, jadi tidak ada dana yang perlu dikembalikan: cukup jangan "
+             "bayar tagihannya, dan pesanan ini batal sendiri {kapan}."),
+        EN: ("Sorry, order *{label}* can't be cancelled from this chat right now. No money "
+             "has come in, so there's nothing to refund: just don't pay the bill, and the "
+             "order cancels itself {kapan}."),
     },
+    "batal_sendiri_menit": {ID: "dalam sekitar {menit} menit", EN: "in about {menit} minutes"},
+    "batal_sendiri_segera": {ID: "sebentar lagi", EN: "shortly"},
     "batal_perlu_tim": {
         ID: "Pembatalannya perlu diproses tim kami dulu supaya dananya bisa dikembalikan.",
         EN: "Our team needs to process this cancellation first so the money can be returned.",
