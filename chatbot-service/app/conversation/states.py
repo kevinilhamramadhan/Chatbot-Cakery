@@ -268,6 +268,12 @@ def text_asks_recommendation(text: str) -> bool:
         f in " ".join(words) for f in _REKOMENDASI_FRASA)
 
 
+def text_tanya_termurah(text: str) -> bool:
+    """"yang murah yang mana?", "paling murah apa", "cheapest one?"."""
+    return bool(set(_tokens(text)) & {"murah", "termurah", "murmer", "terjangkau",
+                                      "cheap", "cheapest", "cheaper"})
+
+
 def text_is_cancel(text: str) -> bool:
     t = " ".join(_tokens(text))
     return any(w in t for w in CANCEL_WORDS)

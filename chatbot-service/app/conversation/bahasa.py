@@ -59,6 +59,15 @@ _KATA_ID = {
 
 _PUNCT = re.compile(r"[^\w\s]+", re.UNICODE)
 
+# Subset _KATA_ID yang cukup satu kata saja untuk memindah ke Indonesia: kata
+# yang tidak dipakai pelanggan berbahasa Inggris. "ya", "ada", "apa" tidak
+# masuk karena terlalu pendek dan bisa muncul di nama atau singkatan.
+_KATA_ID_PASTI = {
+    "mau", "sudah", "udah", "berapa", "gimana", "bagaimana", "tolong", "makasih",
+    "terimakasih", "nggak", "gak", "dong", "aja", "saja", "deh", "pesan", "pesen",
+    "mesen", "pesanan", "kuenya", "harganya", "totalnya", "banget", "belum", "tidak",
+}
+
 # Berapa kata pencocok yang dibutuhkan sebelum bahasa percakapan dipindah.
 _MIN_BUKTI = 2
 
@@ -82,6 +91,11 @@ def deteksi(teks: str) -> str | None:
     # Satu kata pencocok saja tidak cukup untuk memindah bahasa seluruh
     # percakapan: jawaban sependek "send" atau "ya" terlalu sering muncul di
     # kedua bahasa. Lebih baik ikut bahasa sebelumnya daripada salah pindah.
+    # Kecuali kata yang tidak mungkin muncul di kalimat Inggris: e2e v12 (27
+    # Okt 2026) "mau 3 lapis legit premium" dan "sudah sesuai" di sesi yang
+    # sempat berbahasa Inggris tetap dijawab Inggris.
+    if skor_en == 0 and any(k in _KATA_ID_PASTI for k in kata):
+        return ID
     if menang < _MIN_BUKTI:
         return None
     return EN if skor_en > skor_id else ID
@@ -303,11 +317,29 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "Type *confirm* if that's fine, or *cancel* to cancel 🙏"),
     },
     "masih_ada_tagihan": {
-        ID: ("Kamu masih punya tagihan yang belum dibayar. Selesaikan dulu "
-             "pembayaran itu, atau ketik *batal* untuk membatalkannya, baru "
-             "kita buat pesanan baru ya 🙏"),
-        EN: ("You still have an unpaid invoice. Please finish that payment first, "
-             "or type *cancel* to cancel it, and then we can make a new order 🙏"),
+        ID: ("Nomor ini masih punya tagihan yang belum dibayar, jadi pesanan baru belum "
+             "bisa dibuat. Selesaikan dulu pembayarannya, atau tunggu sampai batas "
+             "bayarnya lewat (tagihannya batal sendiri), lalu pesan lagi ya 🙏"),
+        EN: ("This number still has an unpaid invoice, so a new order can't be made yet. "
+             "Please finish that payment first, or wait until its payment deadline "
+             "passes (it cancels itself), then order again 🙏"),
+    },
+    # Tagihan yang dibuat di luar chat ini (mis. lewat website) dan kini ikut
+    # dipantau chatbot, jadi *batal* dan kirim ulang cara bayar berlaku.
+    "masih_ada_tagihan_luar": {
+        ID: ("Nomor ini masih punya tagihan *{invoice}* sebesar {jumlah} yang belum "
+             "dibayar (dibuat sebelumnya, mis. lewat website). Selesaikan dulu "
+             "pembayarannya, atau ketik *batal* untuk membatalkannya, baru kita buat "
+             "pesanan baru ya 🙏"),
+        EN: ("This number still has an unpaid invoice *{invoice}* of {jumlah} (made "
+             "earlier, e.g. on the website). Please finish that payment first, or type "
+             "*cancel* to cancel it, and then we can make a new order 🙏"),
+    },
+    "masih_ada_pesanan_berjalan": {
+        ID: ("Pesanan *{invoice}* dari nomor ini masih berjalan dan belum lunas, jadi "
+             "pesanan baru belum bisa dibuat sampai pesanan itu selesai 🙏"),
+        EN: ("Order *{invoice}* from this number is still in progress and not fully "
+             "paid, so a new order can't be made until that one is finished 🙏"),
     },
     # {alasan} datang dari backend dan selalu berbahasa Indonesia.
     "pesanan_ditolak": {
@@ -783,6 +815,10 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Jumlahnya belum jelas untuk {nama}. Boleh sebutkan jumlahnya dalam angka utuh, mis. 2? 😊",
         EN: "The quantity for {nama} isn't clear. Could you give it as a whole number, e.g. 2? 😊",
     },
+    "kue_untuk_angka": {
+        ID: "{jumlah} untuk kue yang mana kak? Sebutkan nama kue dan jumlahnya ya, mis. *brownies 2* 😊",
+        EN: "{jumlah} of which cake? Please tell me the cake and the quantity, e.g. *brownies 2* 😊",
+    },
     "minimum_item": {ID: "{nama} minimal {minimum} pcs", EN: "{nama} minimum {minimum} pcs"},
     "minimum_pemesanan": {
         ID: "Untuk produk ini ada jumlah minimum pemesanan: {daftar}. Mau kunaikkan jumlahnya?",
@@ -1074,9 +1110,21 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Oke kak, nggak jadi ya 😊 Kalau mau pesan yang lain atau tanya sesuatu, tinggal bilang.",
         EN: "Alright, no problem 😊 Just let me know if you'd like something else.",
     },
+    "batal_bukan_di_keranjang": {
+        ID: ("Oke kak, {nama} memang tidak ada di keranjangmu, jadi keranjangnya tetap ya.\n\n"
+             "{ringkasan}\n\nKalau pesanannya sudah pas, ketik *sudah sesuai* ya — "
+             "atau *batal* kalau mau membatalkan semuanya."),
+        EN: ("Sure, {nama} isn't in your cart, so I've left the cart as it is.\n\n"
+             "{ringkasan}\n\nIf the order looks right, type *confirm* — or *cancel* "
+             "to cancel all of it."),
+    },
     "rekomendasi": {
         ID: "Rekomendasi kami yang bisa dipesan sekarang:\n{daftar}\n\nMau lihat detail salah satunya? Sebutkan namanya ya 😊",
         EN: "Our recommendations you can order right now:\n{daftar}\n\nWant details on one of them? Just say its name 😊",
+    },
+    "termurah": {
+        ID: "Yang harganya paling terjangkau dan bisa dipesan sekarang:\n{daftar}\n\nMau pesan salah satunya? Sebutkan nama kue dan jumlahnya ya 😊",
+        EN: "Our most affordable cakes you can order right now:\n{daftar}\n\nWant one of them? Just tell me the cake and how many 😊",
     },
     "menu_rekomendasi": {
         ID: "⭐ Rekomendasi kami: {daftar}",

@@ -32,6 +32,7 @@ from app.conversation.states import (
     text_tanya_refund,
     text_tanya_sisa,
     text_tanya_status_pesanan,
+    text_tanya_termurah,
     text_asks_recommendation,
     text_bisa_pesan_besok,
     text_is_cancel,
@@ -356,6 +357,12 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         if reply is None:
             # IDLE / AWAITING_PAYMENT / ORDER_ACTIVE -> LLM agent (with tools).
             reply = await _run_agent_turn(wa_number, text)
+            if (text_tanya_termurah(text) and "Rp" not in (reply.text or "")
+                    and not mentions_quantity(text)):
+                # e2e v12 (27 Okt 2026): "yang murah yang mana?" ditolak model
+                # 6 dari 6 kali ("belum punya infonya"), padahal harga ada di
+                # katalog. Jawaban model yang sudah memuat harga dibiarkan.
+                reply = Reply(text=await _termurah(lang))
     _log_turn(wa_number, state, started)
 
     if reply.text:
@@ -482,6 +489,20 @@ async def _rekomendasi(lang: str) -> str:
         return bahasa.teks("rekomendasi_kosong", lang)
     daftar = "\n".join(f"• {product_label(p)} — {rupiah(p.get('harga_jual'))}" for p in items)
     return bahasa.teks("rekomendasi", lang, daftar=daftar)
+
+
+async def _termurah(lang: str) -> str:
+    """Tiga kue termurah yang bisa dipesan sekarang, langsung dari katalog."""
+    from app.backend_client import products as products_api
+    from app.tools.formatting import product_label, rupiah, tersedia
+
+    items = [p for p in await products_api.list_products(only_active=True)
+             if tersedia(p) and p.get("harga_jual") is not None]
+    if not items:
+        return bahasa.teks("rekomendasi_kosong", lang)
+    items.sort(key=lambda p: (float(p["harga_jual"]), product_label(p).casefold()))
+    daftar = "\n".join(f"• {product_label(p)} — {rupiah(p['harga_jual'])}" for p in items[:3])
+    return bahasa.teks("termurah", lang, daftar=daftar)
 
 
 _MAKS_GILIRAN_TAWARAN = 3
@@ -643,6 +664,16 @@ async def _handle_confirmation(wa_number: str, text: str, lang: str) -> Reply:
     # dan masih ada kue lain), bukan dari tebakan maksud; modelnya yang lalu
     # memanggil update_cart.
     if text_is_cancel(text) and not await _batal_sebagian(wa_number, text):
+        cart = await store.get_cart(wa_number)
+        lain = await _batal_bukan_isi_keranjang(wa_number, text, cart)
+        if lain:
+            # e2e v12 (27 Okt 2026): "tambah lapis legit 1" ditolak karena tidak
+            # ada di menu, lalu "lapis legitnya ga jadi" mengosongkan keranjang
+            # berisi 2 brownies. Kue yang dibatalkan memang tidak pernah masuk.
+            from app.tools.add_to_cart import cart_summary
+
+            return Reply(text=bahasa.teks("batal_bukan_di_keranjang", lang, nama=lain,
+                                          ringkasan=cart_summary(cart, lang)))
         await store.set_cart(wa_number, [])
         await store.set_state(wa_number, State.IDLE)
         return Reply(text=bahasa.teks("pesanan_dibatalkan", lang))
@@ -684,6 +715,38 @@ async def _batal_sebagian(wa_number: str, text: str) -> bool:
         return False
     item, seri = _cocok_di_keranjang(text, cart)
     return item is not None or bool(seri)
+
+
+# Kata yang tidak menyebut kue apa pun dalam kalimat batal.
+_BUKAN_NAMA_KUE = {
+    "batal", "batalkan", "batalin", "cancel", "gajadi", "gak", "ga", "jadi", "tidak",
+    "stop", "nggak", "enggak", "engga", "deh", "aja", "saja", "dong", "ya", "yaa", "kak",
+    "sih", "nih", "yang", "itu", "ini", "udah", "sudah", "aku", "saya", "semua",
+    "semuanya", "pesanan", "pesanannya", "pesenan", "pesenannya", "order", "orderan",
+    "orderannya", "keranjang", "keranjangnya", "kok", "mau", "jadinya", "dulu", "lah",
+    "kayaknya", "kayanya", "mending", "tolong", "please", "my", "the", "it", "all",
+    "i", "want", "to", "nya", "sama", "juga", "yg",
+}
+
+
+async def _batal_bukan_isi_keranjang(wa_number: str, text: str, cart: list[dict]) -> str | None:
+    """Nama kue yang dibatalkan padahal tidak ada di keranjang, atau None.
+
+    Hanya kalau kalimatnya jelas menyebut sesuatu: kata berakhiran -nya
+    ("lapis legitnya") atau kata yang barusan disebut bot ("tidak menemukan
+    lapis legit di menu"). "ga jadi deh, mahal" tetap membatalkan keranjang.
+    """
+    from app.tools.update_cart import _cocok_di_keranjang
+
+    kata = [k for k in _PUNCT_RE.sub(" ", text.lower()).split() if k not in _BUKAN_NAMA_KUE]
+    if not kata or _cocok_di_keranjang(text, cart)[0] is not None:
+        return None
+    nama = " ".join(k[:-3] if k.endswith("nya") and len(k) > 5 else k for k in kata)
+    if any(k.endswith("nya") and len(k) > 5 for k in kata):
+        return nama
+    terakhir = next((m["content"] for m in reversed(await store.recent_history(wa_number, 4))
+                     if m["role"] == "assistant"), "")
+    return nama if nama in terakhir.lower() else None
 
 
 # ── Identity + payment-type collection (PROMPT §10.6-8) ───────────────────────

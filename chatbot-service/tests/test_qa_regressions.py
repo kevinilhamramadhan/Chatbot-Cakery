@@ -1107,6 +1107,8 @@ async def test_add_to_cart_menerima_argumen_tanpa_bungkus_items(patch_externals)
     from app.tools.add_to_cart import add_to_cart
 
     set_turn_context(TurnContext(wa_number=WA, user_text="satu aja"))
+    # "satu aja" menjawab detail kue yang barusan ditampilkan.
+    await store.log_message(WA, "out", "*Brownies Coklat*\nHarga: Rp50.000\nMau pesan berapa?")
     out = await add_to_cart.ainvoke({"product": "Brownies Coklat", "qty": 1})
 
     keranjang = await store.get_cart(WA)
@@ -2203,3 +2205,182 @@ async def test_sudah_sesuai_bukan_persetujuan_tawaran_admin(patch_externals):
 
     assert await store.is_takeover_active(WA) is False
     assert patch_externals["sent"] == []
+
+
+# ── e2e v12 27 Okt 2026 (v12cu1-3) ───────────────────────────────────────────
+async def test_batal_kue_yang_tidak_ada_di_keranjang_tidak_mengosongkan_keranjang(patch_externals):
+    """S1: "tambah lapis legit 1" ditolak (tidak ada di menu), lalu "lapis
+    legitnya ga jadi" mengosongkan keranjang berisi 2 brownies."""
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat",
+                               "harga": 50000.0, "qty": 2}])
+    await store.set_state(WA, State.AWAITING_CART_CONFIRMATION)
+
+    r = await handle_message(WA, "lapis legitnya ga jadi")
+
+    assert [c["qty"] for c in await store.get_cart(WA)] == [2]
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_CART_CONFIRMATION
+    assert "lapis legit" in r.text.lower() and "Brownies Coklat x2" in r.text
+
+
+@pytest.mark.parametrize("pesan", ["batal", "ga jadi deh", "browniesnya ga jadi"])
+async def test_batal_keranjang_tetap_mengosongkan(patch_externals, pesan):
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat",
+                               "harga": 50000.0, "qty": 2}])
+    await store.set_state(WA, State.AWAITING_CART_CONFIRMATION)
+
+    await handle_message(WA, pesan)
+
+    assert await store.get_cart(WA) == []
+
+
+def _tagihan_web(status_invoice="unpaid"):
+    batas = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=40)
+    return {"id": 155, "status": "pending", "total_harga_pesanan": 95000,
+            "amount_due": 95000, "metode_pengiriman": "pickup",
+            "payment_expires_at": batas.isoformat(),
+            "invoice": {"nomor_invoice": "INV-155", "status": status_invoice},
+            "items": [{"product_name": "Brownies Coklat", "jumlah": 1,
+                       "unit_price_snapshot": 95000}]}
+
+
+def _checkout_409(patch_externals, tagihan):
+    async def conflict(customer_id, items, metode_pengiriman, created_via="chatbot",
+                       fulfillment_date=None):
+        request = httpx.Request("POST", "http://backend/api/orders")
+        response = httpx.Response(409, request=request, json={
+            "detail": "Customer masih memiliki tagihan aktif yang belum lunas."})
+        raise httpx.HTTPStatusError("409", request=request, response=response)
+
+    async def latest(wa):
+        if isinstance(tagihan, Exception):
+            raise tagihan
+        return tagihan
+
+    async def f_upsert(wa, nama, alamat, phone):
+        return {"id": 1, "customer_id": 1}
+
+    mp = patch_externals["monkeypatch"]
+    mp.setattr(patch_externals["backend"], "upsert_customer", f_upsert)
+    mp.setattr(patch_externals["backend"], "create_order", conflict)
+    mp.setattr(patch_externals["backend"], "get_latest_order", latest)
+
+
+async def _isi_checkout():
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat",
+                               "harga": 50000.0, "qty": 1}])
+    await store.set_customer(WA, {"nama": "Budi", "alamat": "Jl. Test 1",
+                                  "metode_pengiriman": "pickup", "nomor_hp": "628123456789",
+                                  "tanggal": tanggal.periksa("lusa")[0],
+                                  "payment_type": "full", "channel": "qris"})
+
+
+async def test_409_tagihan_dari_luar_chat_bisa_dibatalkan(patch_externals):
+    """S2: tagihan lama nomor ini tidak tercatat di chatbot (mis. dari website).
+    Pesan 409 menyuruh "ketik batal", tetapi "batal" lalu dijawab "draft
+    dikosongkan" dan "nomor va nya mana?" dijawab "belum punya tagihan"."""
+    from app.conversation import checkout
+
+    _checkout_409(patch_externals, _tagihan_web())
+    await _isi_checkout()
+
+    out = await checkout.finalize_order(WA)
+
+    assert "INV-155" in out and "*batal*" in out
+    order = await store.get_active_pending(WA)
+    assert order is not None and order.order_ref == "155" and order.status == "pending"
+    assert order.amount_due == 95000
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_PAYMENT
+
+    r = await handle_message(WA, "batal")
+    assert "INV-155" in r.text
+    await handle_message(WA, "ya")
+    assert "155" in patch_externals["cancelled"]
+
+
+async def test_409_tagihan_dp_tidak_diambil_alih(patch_externals):
+    """DP sudah masuk dan menunggu pelunasan: tidak ada yang bisa dibatalkan
+    lewat jalur tagihan belum dibayar, jadi jangan menjanjikan *batal*."""
+    from app.conversation import checkout
+
+    _checkout_409(patch_externals, _tagihan_web("partial"))
+    await _isi_checkout()
+
+    out = await checkout.finalize_order(WA)
+
+    assert "INV-155" in out and "*batal*" not in out
+    assert await store.get_active_pending(WA) is None
+
+
+async def test_409_backend_tak_terbaca_tidak_menjanjikan_batal(patch_externals):
+    from app.conversation import checkout
+
+    _checkout_409(patch_externals, RuntimeError("backend mati"))
+    await _isi_checkout()
+
+    out = await checkout.finalize_order(WA)
+
+    assert "belum dibayar" in out.lower() and "*batal*" not in out
+    assert await store.get_active_pending(WA) is None
+
+
+async def test_angka_saja_tidak_memasukkan_kue_yang_belum_disebut(patch_externals):
+    """S4: "lapis legit premium" tidak ada, bot mengirim seluruh menu, pelanggan
+    membalas "3", dan model memasukkan kue pertama di menu (Bento Cookies x3)."""
+    from app.tools.add_to_cart import add_to_cart
+
+    await store.log_message(WA, "out", "Maaf, aku tidak menemukan lapis legit premium di menu. "
+                            "Ini menu Toti Cakery ya:\n• Brownies Coklat — Rp50.000\n"
+                            "• Bolu Pandan — Rp75.000")
+    await store.log_message(WA, "in", "3")
+    set_turn_context(TurnContext(wa_number=WA, user_text="3"))
+
+    out = await add_to_cart.ainvoke({"items": [{"product": "Brownies Coklat", "qty": 3}]})
+
+    assert await store.get_cart(WA) == []
+    assert "kue" in out.lower()
+
+
+async def test_angka_saja_sesudah_detail_kue_tetap_masuk(patch_externals):
+    from app.tools.add_to_cart import add_to_cart
+
+    await store.log_message(WA, "out", "*Bolu Pandan*\nBolu lembut aroma pandan.\n"
+                            "Harga: Rp75.000\n\nMau pesan? Sebutkan jumlahnya ya")
+    await store.log_message(WA, "in", "2")
+    set_turn_context(TurnContext(wa_number=WA, user_text="2"))
+
+    await add_to_cart.ainvoke({"items": [{"product": "Bolu Pandan", "qty": 2}]})
+
+    assert [(c["nama"], c["qty"]) for c in await store.get_cart(WA)] == [("Bolu Pandan", 2)]
+
+
+def test_kalimat_indonesia_pendek_memindah_bahasa():
+    """S4: sesi sempat berbahasa Inggris, lalu "mau 3 lapis legit premium" dan
+    "sudah sesuai" tetap dijawab Inggris karena hanya satu kata yang dikenali."""
+    from app.conversation import bahasa
+
+    assert bahasa.deteksi("mau 3 lapis legit premium") == bahasa.ID
+    assert bahasa.deteksi("sudah sesuai") == bahasa.ID
+    assert bahasa.deteksi("i want 2 brownies") == bahasa.EN
+    for kata in ("delivery", "ok", "brownies 2", "ya"):
+        assert bahasa.deteksi(kata) is None, kata
+
+
+async def test_yang_murah_dijawab_dari_katalog(patch_externals, monkeypatch):
+    """S1/S2: "yang murah yang mana?" ditolak model 6 dari 6 kali, padahal
+    harganya ada di katalog."""
+    monkeypatch.setattr(settings_module, "intent_dari_model", True)
+    _mock_agent(monkeypatch, "Untuk yang itu aku belum punya infonya kak 🙏")
+
+    r = await handle_message(WA, "yang murah yang mana?")
+
+    assert r.text.index("Brownies Coklat") < r.text.index("Bolu Pandan")
+    assert "Rp50.000" in r.text
+
+
+async def test_yang_murah_jawaban_model_berisi_harga_dibiarkan(patch_externals, monkeypatch):
+    monkeypatch.setattr(settings_module, "intent_dari_model", True)
+    _mock_agent(monkeypatch, "Yang paling terjangkau Brownies Coklat, Rp50.000 kak")
+
+    r = await handle_message(WA, "yang murah yang mana?")
+
+    assert r.text == "Yang paling terjangkau Brownies Coklat, Rp50.000 kak"

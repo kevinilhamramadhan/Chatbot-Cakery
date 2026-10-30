@@ -79,6 +79,17 @@ def _hanya_jumlah(text: str) -> bool:
     return len(kata) == 1 and mentions_quantity(kata[0])
 
 
+async def _kue_barusan_dibahas(wa: str, label: str) -> bool:
+    """Kue ini disebut di balasan bot terakhir, dan balasan itu bukan daftar.
+
+    Detail kue ("Harga: Rp75.000") dan pertanyaan jumlah memuat paling banyak
+    satu harga; menu dan daftar pilihan memuat banyak.
+    """
+    riwayat = await store.recent_history(wa, 4)
+    terakhir = next((m["content"] for m in reversed(riwayat) if m["role"] == "assistant"), "")
+    return label.casefold() in terakhir.casefold() and terakhir.count("Rp") <= 1
+
+
 @tool
 async def add_to_cart(items: list[dict] | None = None, product: str | None = None,
                       qty: int | None = None) -> str:
@@ -107,7 +118,7 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
 
     cart = await store.get_cart(wa)
     added, not_found, unavailable, ambiguous, below_min = [], [], [], [], []
-    bulk, unclear_qty = [], []
+    bulk, unclear_qty, belum_disebut = [], [], []
     for raw in items:
         name_q = str(raw.get("product") or raw.get("nama") or "").strip()
         if not name_q:
@@ -137,6 +148,16 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
         # terlanjur mengerjakan semuanya untuk kue yang tidak bisa dibuat.
         if not tersedia(p):
             unavailable.append(product_label(p))
+            continue
+        # Pesan yang isinya angka saja hanya menunjuk kue yang sedang dibahas:
+        # yang sudah di keranjang, atau satu-satunya kue di balasan terakhir.
+        # e2e v12 (27 Okt 2026): bot mengirim seluruh menu karena "lapis legit
+        # premium" tidak ada, pelanggan membalas "3", dan model memasukkan kue
+        # pertama di daftar itu (Bento Cookies x3) yang tidak pernah disebut.
+        if (_hanya_jumlah(ctx.user_text or "")
+                and not any(c.get("product_id") == p.get("id") for c in cart)
+                and not await _kue_barusan_dibahas(wa, product_label(p))):
+            belum_disebut.append(str(qty))
             continue
         harga = p.get("harga_jual")
         if harga is None:
@@ -192,6 +213,9 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
     await store.set_cart(wa, cart)
 
     if not added:
+        if belum_disebut and not (not_found or unavailable or ambiguous or below_min
+                                  or unclear_qty or bulk):
+            return bahasa.teks("kue_untuk_angka", lang, jumlah=belum_disebut[0])
         if bulk and not (not_found or unavailable or ambiguous or below_min or unclear_qty):
             return bahasa.teks("jumlah_besar_admin", lang, daftar="; ".join(bulk))
         if unclear_qty and not (not_found or unavailable or ambiguous or below_min):

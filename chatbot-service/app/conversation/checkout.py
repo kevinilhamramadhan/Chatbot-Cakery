@@ -26,6 +26,53 @@ def cart_total(cart: list[dict]) -> float:
     return sum(float(i["harga"]) * int(i["qty"]) for i in cart)
 
 
+async def _tagihan_lain(wa_number: str, lang: str) -> str:
+    """Jawaban 409: backend menolak karena nomor ini masih punya tagihan aktif.
+
+    Tagihan itu tidak tercatat di chatbot (pesanan chatbot sudah ditahan lebih
+    dulu oleh add_to_cart), jadi asalnya dari luar chat ini, biasanya website.
+    e2e v12 (27 Okt 2026): pesannya menyuruh "ketik batal", tetapi "batal" lalu
+    dijawab "draft dikosongkan" dan "nomor va nya mana?" dijawab "belum punya
+    tagihan", karena semua jalur itu membaca pending_orders. Tagihan yang belum
+    dibayar sama sekali dicatat di sana supaya batal, status, dan kabar lunas
+    berjalan seperti pesanan chatbot; yang sudah DP hanya disebutkan.
+    """
+    try:
+        o = await backend.get_latest_order(wa_number)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("tagihan aktif tidak terbaca: %s", exc)
+        o = None
+    inv = (o or {}).get("invoice") or {}
+    status_inv = str(inv.get("status") or "").lower()
+    if not o or not inv.get("nomor_invoice") or status_inv in ("paid", "refunded"):
+        return bahasa.teks("masih_ada_tagihan", lang)
+    invoice = inv["nomor_invoice"]
+    if status_inv != "unpaid" or str(o.get("status") or "").lower() != "pending":
+        return bahasa.teks("masih_ada_pesanan_berjalan", lang, invoice=invoice)
+
+    total = float(o.get("total_harga_pesanan") or inv.get("total_tagihan") or 0)
+    amount_due = float(o.get("amount_due") or total)
+    batas = o.get("payment_expires_at")
+    expires_at = (datetime.fromisoformat(batas) if batas else
+                  datetime.now(timezone.utc) + timedelta(minutes=settings.payment_timeout_minutes))
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    items = [{"nama": it.get("product_name") or it.get("custom_product_name") or "",
+              "qty": int(it.get("jumlah") or 1),
+              "harga": float(it.get("unit_price_snapshot") or 0)}
+             for it in (o.get("items") or o.get("order_items") or [])]
+    lama = await store.pesanan_by_ref(o.get("id"))
+    if lama is None or lama.status not in store.ACTIVE_ORDER_STATUSES:
+        await store.create_pending_order(
+            wa_number=wa_number, order_ref=str(o.get("id")), payment_ref=None,
+            payment_type="full", total_amount=total, amount_due=amount_due,
+            nomor_invoice=invoice, pay_instruction=None, qris_url=None,
+            items_json=json.dumps(items, ensure_ascii=False), customer_json="{}",
+            delivery_method=o.get("metode_pengiriman") or "pickup", expires_at=expires_at)
+    await store.set_state(wa_number, State.AWAITING_PAYMENT)
+    return bahasa.teks("masih_ada_tagihan_luar", lang, invoice=invoice, jumlah=rupiah(amount_due))
+
+
 def _alasan_backend(exc: httpx.HTTPStatusError) -> str:
     """Kalimat penolakan dari backend yang layak diteruskan apa adanya.
 
@@ -167,7 +214,7 @@ async def finalize_order(wa_number: str) -> str:
         if exc.response is not None and exc.response.status_code == 409:
             logger.info("backend refused a second order for this customer")
             await store.set_state(wa_number, State.IDLE)
-            return bahasa.teks("masih_ada_tagihan", lang)
+            return await _tagihan_lain(wa_number, lang)
         # 400 juga jawaban bisnis, bukan gangguan sesaat: backend menolak
         # pesanan yang stok bahannya tidak cukup. Menyuruh "coba ulangi sebentar
         # lagi" mengirim pelanggan ke pengulangan yang tidak akan pernah
