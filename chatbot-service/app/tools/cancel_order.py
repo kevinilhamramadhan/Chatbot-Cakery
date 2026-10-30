@@ -150,10 +150,11 @@ async def proses_pembatalan(wa_number: str) -> str:
         await store.set_state(wa_number, State.ORDER_ACTIVE if sudah_dibayar
                               else State.AWAITING_PAYMENT)
         if not sudah_dibayar:
-            # Belum ada uang masuk: jangan menjanjikan pengembalian dana. Backend
-            # menolak membatalkan selama transaksi Midtrans masih pending (409),
-            # padahal setiap pesanan chatbot punya transaksi itu; tagihan yang
-            # tidak dibayar dibatalkan worker backend saat batasnya lewat.
+            # Belum ada uang masuk: jangan menjanjikan pengembalian dana. Sejak
+            # backend d46c973 pesanan dengan transaksi Midtrans pending dibatalkan
+            # di gateway dulu; 409/502 tersisa hanya bila gateway gagal atau
+            # hasilnya belum pasti. Tagihan yang tidak dibayar tetap dibatalkan
+            # worker backend saat batasnya lewat.
             label = order.nomor_invoice or f"#{order.order_ref}"
             batas = order.expires_at if order.expires_at.tzinfo else \
                 order.expires_at.replace(tzinfo=timezone.utc)
