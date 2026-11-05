@@ -550,15 +550,11 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("We're very sorry for the inconvenience you experienced. Your feedback "
              "will help us do better going forward."),
     },
-    "maaf_keluhan_email": {
-        ID: ("Jika ada keluhan lebih lanjut, anda dapat mengirimkannya ke alamat "
-             "email kami di {email} agar tim kami dapat merespon dengan lebih akurat."),
-        EN: ("If you have any further complaints, you can send them to our email at "
-             "{email} so our team can respond more precisely."),
-    },
-    "maaf_keluhan_penutup": {
-        ID: "Terima kasih",
-        EN: "Thank you",
+    "tawaran_admin_keluhan": {
+        ID: ("Mau aku sambungkan ke admin supaya bisa langsung ditindaklanjuti? "
+             "Ketik *ya* untuk kusambungkan."),
+        EN: ("Would you like me to connect you to our admin so it can be followed up "
+             "right away? Type *yes* and I'll connect you."),
     },
     # ── Kabar proaktif ───────────────────────────────────────────────────────
     "pesanan_diproses": {

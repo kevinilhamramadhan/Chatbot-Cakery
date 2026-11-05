@@ -1069,7 +1069,9 @@ async def test_keluhan_dijawab_permintaan_maaf_yang_tetap(patch_externals):
     assert "bahan perbaikan" in out
     # Pelanggan yang sedang kecewa tidak dimintai cerita ulang.
     assert "nomor pesanan" not in out.lower() and "fotonya" not in out.lower()
-    assert await store.is_takeover_active(WA) is True, "keluhan langsung ditangani admin"
+    # Keputusan Kevin (5 Nov 2026): maaf lalu DITAWARI sambungan ke admin.
+    assert await store.is_takeover_active(WA) is False, "keluhan hanya menawarkan admin"
+    assert (await store.get_or_create_session(WA)).pending_escalation
 
 
 async def test_renamed_tools_terdaftar_untuk_model(patch_externals):
@@ -1082,21 +1084,16 @@ async def test_renamed_tools_terdaftar_untuk_model(patch_externals):
     } & TOOLS_BY_NAME.keys()
 
 
-async def test_balasan_keluhan_menyebut_email_kalau_disetel(patch_externals):
-    """Alamat tindak lanjut diambil dari setelan, dan tidak pernah dikarang."""
-    from app.core.config import settings
+async def test_balasan_keluhan_tidak_menyebut_email(patch_externals):
+    """Keputusan Kevin (5 Nov 2026): balasan keluhan cukup maaf dan tawaran
+    admin; alamat email tidak disebut walau STORE_SUPPORT_EMAIL disetel."""
     from app.tools import keluhan
 
     set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
     patch_externals["monkeypatch"].setattr(
         settings_module, "store_support_email", "halo@toticakery.id", raising=False)
     out = await keluhan.send_apology.ainvoke({"keluhan": "kue basi"})
-    assert "halo@toticakery.id" in out
-
-    patch_externals["monkeypatch"].setattr(
-        settings, "store_support_email", "", raising=False)
-    out = await keluhan.send_apology.ainvoke({"keluhan": "kue basi"})
-    assert "@" not in out, "tanpa setelan, jangan menyebut alamat apa pun"
+    assert "@" not in out and "email" not in out.lower()
 
 
 async def test_add_to_cart_menerima_argumen_tanpa_bungkus_items(patch_externals):
@@ -1909,24 +1906,49 @@ async def test_lid_gagal_diterjemahkan_tidak_ditulis_ke_backend(patch_externals)
     assert await store.list_orders_by_status("pending") == []
 
 
-# ── Keluhan langsung ditangani admin ─────────────────────────────────────────
-async def test_keluhan_minta_maaf_lalu_langsung_ke_admin(patch_externals):
-    """Keputusan Kevin (27 Sep 2026): keluhan dijawab template maaf DAN langsung
-    disambungkan ke admin — tidak lagi menunggu pelanggan menjawab "ya".
-    Admin menyudahinya dengan "selesai <nomor>"."""
+# ── Keluhan: maaf lalu ditawari admin ────────────────────────────────────────
+async def test_keluhan_minta_maaf_lalu_menawarkan_admin(patch_externals):
+    """Keputusan Kevin (5 Nov 2026, menggantikan 27 Sep): keluhan dijawab
+    templat maaf lalu pelanggan DITANYA mau disambungkan ke admin atau tidak.
+    Admin baru dikabari setelah pelanggan menjawab "ya"."""
     from app.conversation import bahasa
     from app.tools.keluhan import send_apology
 
+    _mock_agent(patch_externals["monkeypatch"], "Baik kak.")
     set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
     hasil = await send_apology.ainvoke({"keluhan": "kue diterima dalam keadaan basi"})
+    await store.log_message(WA, "out", hasil)
 
     assert "mohon maaf" in hasil.lower(), hasil
-    assert bahasa.teks("diteruskan_ke_admin", bahasa.ID)[:30] in hasil, hasil
-    assert await store.is_takeover_active(WA) is True
+    assert bahasa.teks("tawaran_admin_keluhan", bahasa.ID) in hasil, hasil
+    assert bahasa.teks("diteruskan_ke_admin", bahasa.ID)[:30] not in hasil, hasil
+    assert await store.is_takeover_active(WA) is False
+    ke_admin = [t for nomor, t in patch_externals["sent"] if nomor == "628999000111"]
+    assert not ke_admin, "admin belum boleh dikabari sebelum pelanggan setuju"
 
+    await handle_message(WA, "ya")
+    assert await store.is_takeover_active(WA) is True
     # Adminnya benar-benar dikabari, lengkap dengan kutipan keluhannya.
     ke_admin = [t for nomor, t in patch_externals["sent"] if nomor == "628999000111"]
     assert ke_admin and "basi" in ke_admin[0], patch_externals["sent"]
+
+
+async def test_keluhan_tawaran_admin_bisa_ditolak(patch_externals):
+    from app.tools.keluhan import send_apology
+
+    set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
+    await store.log_message(WA, "out", await send_apology.ainvoke({"keluhan": "kue basi"}))
+    await handle_message(WA, "ga usah")
+    assert await store.is_takeover_active(WA) is False
+    assert (await store.get_or_create_session(WA)).pending_escalation is None
+
+
+async def test_tawaran_admin_keluhan_dua_bahasa():
+    from app.conversation import bahasa
+
+    idn = bahasa.teks("tawaran_admin_keluhan", bahasa.ID)
+    eng = bahasa.teks("tawaran_admin_keluhan", bahasa.EN)
+    assert idn != eng and "*ya*" in idn and "*yes*" in eng
 
 
 async def test_templat_checkout_lengkap_dua_bahasa():
@@ -2002,20 +2024,13 @@ async def test_jawaban_tidak_tahu_tidak_menular_ke_giliran_berikutnya():
 
 async def test_kecewa_sesudah_permintaan_maaf_dijawab_empati(patch_externals):
     """Terukur: "saya agak kecewa sih" sesudah permintaan maaf dijawab
-    "Senang banget kalau suka".
-
-    Dijalankan sesudah admin menyudahi takeover-nya ("selesai <nomor>"): selama
-    takeover masih aktif bot memang tidak membalas apa pun, dan justru jalur
-    sesudah itulah yang dulu salah nada.
-    """
+    "Senang banget kalau suka"."""
     from app.tools.keluhan import send_apology
 
     _mock_agent(patch_externals["monkeypatch"], "Hehe, makasih banyak kak! Senang banget kalau suka 😊")
     set_turn_context(TurnContext(wa_number=WA, user_text="kuenya keras"))
     await store.log_message(WA, "out", await send_apology.ainvoke({"keluhan": "kue keras"}))
-    assert await store.is_takeover_active(WA) is True
 
-    await store.deactivate_takeover(WA)
     reply = await handle_message(WA, "saya agak kecewa sih")
     assert "senang" not in reply.text.lower()
     assert "maaf" in reply.text.lower()

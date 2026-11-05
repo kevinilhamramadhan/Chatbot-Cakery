@@ -6,41 +6,34 @@ aku kecewa banget" dijawab "Wah, makasih banyak kak! Senang banget kalau suka �
 daripada sekadar salah memanggil tool. Yang tetap jadi keputusan model adalah
 KAPAN tool ini dipakai; isinya tidak.
 
-Keluhan LANGSUNG menyalakan takeover: admin dikabari lewat WhatsApp dan bot
-berhenti membalas pelanggan itu sampai admin mengetik "selesai <nomor>".
-Keputusan Kevin (27 Sep 2026), menggantikan alur lama yang hanya menawarkan dan
-menunggu pelanggan menjawab "ya" — orang yang sedang kecewa tidak perlu diminta
-mengiyakan dulu sebelum dilayani manusia. Keluhannya juga dicatat sebagai
-WARNING supaya terlihat saat log ditengok.
+Keluhan dijawab permintaan maaf lalu pelanggan DITANYA apakah mau disambungkan
+ke admin; takeover baru menyala setelah pelanggan menjawab "ya" (orchestrator,
+lewat pending_escalation). Keputusan Kevin (5 Nov 2026), menggantikan alur
+27 Sep yang langsung menyalakan takeover dan menyebut email toko. Keluhannya
+juga dicatat sebagai WARNING supaya terlihat saat log ditengok.
 """
 
 import logging
 
 from langchain_core.tools import tool
 
-from app.conversation import bahasa, escalation, store
+from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import text_is_praise
-from app.core.config import settings
 from app.core.security import mask_phone, sanitize_relay
 
 logger = logging.getLogger(__name__)
 
+
 def _teks(lang: str) -> str:
-    """Permintaan maaf yang tetap; alamat emailnya diambil dari setelan.
+    """Permintaan maaf yang tetap, lalu tawaran sambungan ke admin.
 
     Pelanggan sengaja TIDAK diminta menceritakan ulang kejadiannya di chat:
     yang dia butuhkan saat mengeluh adalah permintaan maaf dan satu jalan tindak
-    lanjut yang jelas, bukan formulir. Kalau STORE_SUPPORT_EMAIL belum diisi,
-    kalimat emailnya dilewati — lebih baik tidak menyebut alamat sama sekali
-    daripada mengirim pelanggan ke alamat yang tidak ada.
+    lanjut yang jelas, bukan formulir.
     """
-    baris = [bahasa.teks("maaf_keluhan", lang)]
-    email = settings.store_support_email.strip()
-    if email:
-        baris.append(bahasa.teks("maaf_keluhan_email", lang, email=email))
-    baris.append(bahasa.teks("maaf_keluhan_penutup", lang))
-    return "\n\n".join(baris)
+    return (bahasa.teks("maaf_keluhan", lang) + "\n\n"
+            + bahasa.teks("tawaran_admin_keluhan", lang))
 
 
 @tool
@@ -56,19 +49,15 @@ async def send_apology(keluhan: str) -> str:
     """
     ctx = get_turn_context()
     # KAPAN tool ini dipakai memang keputusan model, tapi pujian yang dibacanya
-    # sebagai keluhan terlalu mahal untuk dibiarkan: takeover menyala dan admin
-    # dikabari "keluhan" yang tidak pernah ada.
+    # sebagai keluhan terlalu mahal untuk dibiarkan: admin bisa dikabari
+    # "keluhan" yang tidak pernah ada.
     if text_is_praise(ctx.user_text or ""):
         return bahasa.teks("terima_kasih_pujian", await store.get_lang(ctx.wa_number))
     ringkas = sanitize_relay(keluhan or "")[:200]
     logger.warning("KELUHAN dari %s: %s", mask_phone(ctx.wa_number), ringkas)
 
-    lang = await store.get_lang(ctx.wa_number)
-
-    # Permintaan maafnya tetap yang utama, lalu pelanggan LANGSUNG disambungkan
-    # ke admin. start_takeover mengabari admin dulu dan baru membungkam bot;
-    # kalau tidak ada admin yang bisa dihubungi, ia TIDAK membungkam apa pun dan
-    # mengembalikan kalimat "admin tidak tersedia" — pelanggan tidak pernah
-    # dijanjikan manusia yang tidak pernah diberi tahu.
-    return _teks(lang) + "\n\n" + await escalation.start_takeover(
-        ctx.wa_number, f"Keluhan pelanggan: {ringkas}", lang)
+    # Tawarannya disimpan seperti tawaran escalate_to_admin: kalau pelanggan
+    # menjawab "ya", orchestrator menyalakan takeover dan admin menerima
+    # ringkasan keluhan ini; "ga usah" membatalkannya.
+    await store.set_pending_escalation(ctx.wa_number, f"Keluhan pelanggan: {ringkas}")
+    return _teks(await store.get_lang(ctx.wa_number))

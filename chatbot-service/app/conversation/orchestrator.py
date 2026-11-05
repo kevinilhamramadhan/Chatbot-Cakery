@@ -305,9 +305,8 @@ async def handle_message(wa_number: str, text: str) -> Reply:
 
     # 2b) Kekecewaan susulan sesudah permintaan maaf. Terukur di gladi demo:
     # "saya agak kecewa sih" dijawab model "Senang banget kalau suka". Dilihat
-    # dari riwayat, bukan dari tawaran yang menggantung — sejak keluhan langsung
-    # disambungkan ke admin, tidak ada lagi tawaran yang bisa dijadikan penanda,
-    # dan jalur ini justru terpakai sesudah admin menyudahi takeover-nya.
+    # dari riwayat (permintaan maaf beberapa giliran terakhir), dan dipakai juga
+    # sesudah tawaran adminnya kedaluwarsa atau sesudah admin menyudahi takeover.
     if (not settings.intent_dari_model and text_is_negative(text)
             and await _baru_saja_minta_maaf(wa_number)):
         reply = Reply(text=bahasa.teks("empati_keluhan", lang))
@@ -558,7 +557,9 @@ async def _escalation_offer_expired(wa_number: str) -> bool:
     # dicocokkan — kalau hanya versi Indonesia yang dicari, tawaran berbahasa
     # Inggris tidak pernah ditemukan dan dianggap kedaluwarsa sejak giliran
     # pertama, sehingga "yes" pelanggan tidak pernah diterima.
-    penanda = tuple(bahasa.teks("tawaran_admin", l)[:40] for l in (bahasa.ID, bahasa.EN))
+    penanda = tuple(bahasa.teks(k, l)[:40]
+                    for k in ("tawaran_admin", "tawaran_admin_keluhan")
+                    for l in (bahasa.ID, bahasa.EN))
     terakhir = -1
     for i, pesan in enumerate(riwayat):
         # Dicari DI DALAM pesan, bukan di awalnya: tawaran sesudah keluhan
