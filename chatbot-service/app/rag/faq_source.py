@@ -19,6 +19,7 @@ from pathlib import Path
 import httpx
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from app.backend_client import api as backend_api
 from app.conversation import bahasa
 from app.core.config import settings
 from app.rag.store import get_collection
@@ -109,18 +110,22 @@ def local_faq_docs() -> list[FaqDoc]:
     return docs
 
 
-def dokumen_bawaan() -> list[FaqDoc]:
+def dokumen_bawaan(alamat_toko: str | None = None) -> list[FaqDoc]:
     """Fakta toko yang tidak ada di tabel FAQ. Sampai v10 keduanya dijawab aturan
     kata kunci di orchestrator; sejak intent diputuskan model, jawabannya harus
-    bisa diambil RAG, kalau tidak model mengaku belum tahu."""
+    bisa diambil RAG, kalau tidak model mengaku belum tahu.
+
+    `alamat_toko` dari Seller Site (Store Customization); kosong = tidak ada
+    dokumen alamat. Karena isinya ikut sidik jari FAQ, alamat yang diubah Owner
+    terbaca pada siklus pembaruan FAQ berikutnya."""
     docs = []
     for source, tanya, tanya_en, kunci, isi in (
         ("bawaan-alamat", "Di mana alamat Toti Cakery?", "Where is Toti Cakery's shop?",
-         "alamat_toko", {"nama_toko": settings.store_name, "alamat_toko": settings.store_address}),
+         "alamat_toko", {"nama_toko": settings.store_name, "alamat_toko": alamat_toko}),
         ("bawaan-pesan-besok", "Apakah bisa pesan untuk besok?", "Can I order for tomorrow?",
          "bisa_pesan_besok", {}),
     ):
-        if kunci == "alamat_toko" and "ganti di .env" in settings.store_address:
+        if kunci == "alamat_toko" and not alamat_toko:
             continue
         jawab = bahasa.teks(kunci, bahasa.ID, **isi)
         docs.append(FaqDoc(source=source, text=f"Q: {tanya}\nA: {jawab}",
@@ -131,10 +136,11 @@ def dokumen_bawaan() -> list[FaqDoc]:
 
 async def current_docs() -> tuple[list[FaqDoc], str]:
     """The FAQ the bot should be answering from, plus where it came from."""
+    bawaan = dokumen_bawaan(await backend_api.get_store_address())
     docs = await fetch_backend_faq()
     if docs:
-        return docs + dokumen_bawaan(), "backend"
-    return local_faq_docs() + dokumen_bawaan(), "berkas lokal"
+        return docs + bawaan, "backend"
+    return local_faq_docs() + bawaan, "berkas lokal"
 
 
 # Sidik jari hasil ingest terakhir, ditaruh di dalam direktori Chroma supaya ia

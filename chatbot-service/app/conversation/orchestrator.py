@@ -410,9 +410,10 @@ async def _aturan_kata_kunci(wa_number: str, text: str, lang: str, state: str) -
         return Reply(text=bahasa.teks("bisa_pesan_besok", lang))
     elif text_menawar(text):
         return Reply(text=bahasa.teks("belum_ada_info", lang))
-    elif text_tanya_alamat_toko(text) and "ganti di .env" not in settings.store_address:
+    elif text_tanya_alamat_toko(text) and (alamat := await backend.get_store_address()):
+        # Alamat dari Seller Site; kalau kolomnya kosong, model/FAQ yang menjawab.
         return Reply(text=bahasa.teks("alamat_toko", lang, nama_toko=settings.store_name,
-                                       alamat_toko=settings.store_address))
+                                       alamat_toko=alamat))
     elif (state != State.AWAITING_PAYMENT and text_is_gratitude(text)
           and len(text.split()) <= 4 and "?" not in text):
         # Terukur 13 Okt 2026: "makasih ya" dijawab model "Yang mau kubagiakan ya?".

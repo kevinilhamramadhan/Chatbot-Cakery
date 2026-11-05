@@ -555,6 +555,17 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "to this store address:\n*{nama_toko}*\n{alamat_toko}\n"
              "(copy the address above into your ride-hailing app)"),
     },
+    "pesanan_siap_kirim_tanpa_alamat": {
+        ID: ("\nUntuk pengiriman, silakan pesan kurir (GoSend/GrabExpress) sendiri dari "
+             "*{nama_toko}*. Kalau butuh alamat lengkap toko untuk kurirnya, balas chat ini ya."),
+        EN: ("\nFor delivery, please book a courier (GoSend/GrabExpress) yourself from "
+             "*{nama_toko}*. If you need the store's full address for the courier, just "
+             "reply to this chat."),
+    },
+    "pesanan_siap_ambil_tanpa_alamat": {
+        ID: "\nSilakan diambil di {nama_toko}.",
+        EN: "\nYou can pick it up at {nama_toko}.",
+    },
     "pesanan_siap_ambil": {
         ID: "\nSilakan diambil di {nama_toko}, {alamat_toko}.",
         EN: "\nPlease collect it at {nama_toko}, {alamat_toko}.",

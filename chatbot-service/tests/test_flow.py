@@ -101,14 +101,21 @@ def patch_externals(monkeypatch):
         return {"nomor_wa": wa, "human_takeover_active": await store.is_takeover_active(wa),
                 "is_expired": False}
 
-    for name, fn in {"upsert_customer": f_upsert, "create_order": f_create_order,
+    alamat_toko = {"nilai": "Jl. Uji No. 1, Tembalang, Semarang",  # Seller Site, per uji
+                   "asli": backend.get_store_address}
+
+    async def f_alamat():
+        return alamat_toko["nilai"]
+
+    for name, fn in {"get_store_address": f_alamat,
+                     "upsert_customer": f_upsert, "create_order": f_create_order,
                      "create_payment": f_create_payment, "get_payment_status": f_payment_status,
                      "get_latest_order": f_latest, "cancel_order": f_cancel,
                      "set_takeover": f_set_takeover, "get_takeover_admin_numbers": f_admin,
                      "get_takeover_status": f_takeover_status, "get_order": f_get_order}.items():
         monkeypatch.setattr(backend, name, fn)
     return {"sent": sent, "backend": backend, "monkeypatch": monkeypatch,
-            "charges": charges, "orders": orders}
+            "charges": charges, "orders": orders, "alamat_toko": alamat_toko}
 
 
 async def _seed_cart_awaiting_confirmation(items):
@@ -1101,7 +1108,7 @@ async def test_sapuan_13_okt(patch_externals, monkeypatch):
         raise AssertionError(f"model dipanggil untuk: {text}")
 
     monkeypatch.setattr(orch, "_run_agent_turn", model_tidak_boleh_dipanggil)
-    monkeypatch.setattr(orch.settings, "store_address", "Jalan Batam")
+    patch_externals["alamat_toko"]["nilai"] = "Jalan Batam"
     assert text_asks_recommendation("yang murah yang mana?")
     assert text_menawar("bisa kurang ga harganya?") and not text_menawar("gulanya kurang ga?")
     assert "catatanku" in (await handle_message(WA, "ada diskon?")).text
@@ -1488,3 +1495,99 @@ async def test_nomor_tak_dikenal_whatsapp_tidak_diulang(patch_externals):
     await background._check_once()
     await background._check_once()
     assert len(percobaan) == 1 and await store.get_active_pending(WA) is None
+
+
+# ── Alamat toko dari Seller Site (5 Nov 2026) ────────────────────────────────
+# Keputusan Kevin: STORE_ADDRESS di .env dihapus; alamat dibaca dari kolom
+# store_address di Store Customization (GET /public/store-customization).
+
+async def test_kabar_siap_memakai_alamat_dari_seller_site(patch_externals):
+    from app.core.config import settings
+
+    assert not hasattr(settings, "store_address"), "alamat tidak lagi dari .env"
+    patch_externals["alamat_toko"]["nilai"] = "Jl. Kenanga No. 7, Tembalang, Semarang"
+    await _seed_siap(patch_externals, "delivery")
+    teks = patch_externals["sent"][-1][1]
+    assert "Jl. Kenanga No. 7, Tembalang, Semarang" in teks and "GoSend" in teks
+
+
+async def test_kabar_siap_tanpa_alamat_tidak_menulis_none(patch_externals):
+    patch_externals["alamat_toko"]["nilai"] = None
+    for metode in ("delivery", "pickup"):
+        await _seed_siap(patch_externals, metode)
+        teks = patch_externals["sent"][-1][1]
+        assert "None" not in teks and "{" not in teks and "siap" in teks.lower(), teks
+        await store.update_pending_order((await store.get_active_pending(WA)).id,
+                                         status="selesai")
+
+
+async def _seed_siap(patch_externals, metode):
+    ref = str(800 + len(patch_externals["sent"]))
+    await store.create_pending_order(
+        wa_number=WA, order_ref=ref, payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method=metode,
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    await store.update_pending_order((await store.get_active_pending(WA)).id, status="paid")
+    assert await background.notify_ready(int(ref)) is True
+
+
+async def test_tanya_alamat_dijawab_dari_seller_site(patch_externals, monkeypatch):
+    from app.conversation import orchestrator as orch
+
+    async def model(wa, text):
+        return orch.Reply(text="MODEL")
+
+    monkeypatch.setattr(orch, "_run_agent_turn", model)
+    patch_externals["alamat_toko"]["nilai"] = "Jl. Kenanga No. 7, Semarang"
+    assert "Jl. Kenanga No. 7" in (await handle_message(WA, "alamat tokonya dimana?")).text
+    patch_externals["alamat_toko"]["nilai"] = None
+    r = await handle_message(WA, "alamat tokonya dimana?")
+    assert "None" not in r.text
+
+
+async def test_dokumen_bawaan_alamat_ikut_seller_site():
+    from app.rag import faq_source
+
+    docs = faq_source.dokumen_bawaan("Jl. Kenanga No. 7, Semarang")
+    assert any("Jl. Kenanga No. 7" in d.jawaban for d in docs)
+    assert not any(d.source == "bawaan-alamat" for d in faq_source.dokumen_bawaan(None))
+
+
+async def test_get_store_address_membaca_endpoint_publik(patch_externals, monkeypatch):
+    import httpx
+
+    from app.backend_client import api as api_mod
+
+    panggilan = []
+    balasan = {"store_address": "  Jl. Kenanga No. 7  "}
+
+    def handler(request):
+        panggilan.append(str(request.url))
+        if balasan is None:
+            return httpx.Response(503)
+        return httpx.Response(200, json=balasan)
+
+    real_client = httpx.AsyncClient
+
+    def factory(*a, **kw):
+        kw.pop("timeout", None)
+        return real_client(transport=httpx.MockTransport(handler), **kw)
+
+    monkeypatch.setattr(api_mod.httpx, "AsyncClient", factory)
+    baca = patch_externals["alamat_toko"]["asli"]
+    monkeypatch.setattr(api_mod, "_alamat_cache", None)
+    assert await baca() == "Jl. Kenanga No. 7"
+    assert panggilan[0].endswith("/public/store-customization")
+    assert await baca() == "Jl. Kenanga No. 7"
+    assert len(panggilan) == 1, "dibaca ulang paling cepat tiap 60 detik"
+
+    # Kedaluwarsa + backend galat: pakai nilai terakhir yang diketahui.
+    monkeypatch.setattr(api_mod, "_alamat_cache", (-1e9, "Jl. Kenanga No. 7"))
+    balasan = None
+    assert await baca() == "Jl. Kenanga No. 7"
+
+    # Kolomnya kosong di Seller Site: None, bukan string kosong.
+    monkeypatch.setattr(api_mod, "_alamat_cache", None)
+    balasan = {"store_address": None}
+    assert await baca() is None

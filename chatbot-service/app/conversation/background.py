@@ -412,6 +412,19 @@ async def notify_paid(order_id: int) -> bool:
     return False
 
 
+async def _teks_ambil_kirim(dikirim: bool, lang: str) -> str:
+    """Petunjuk ambil/kirim di kabar pesanan siap, dengan alamat dari Seller Site.
+
+    Kolom alamat di Store Customization bisa kosong; kabarnya tetap terkirim
+    tanpa alamat daripada menulis "None" atau alamat karangan.
+    """
+    alamat = await backend.get_store_address()
+    kunci = "pesanan_siap_kirim" if dikirim else "pesanan_siap_ambil"
+    if not alamat:
+        return bahasa.teks(kunci + "_tanpa_alamat", lang, nama_toko=settings.store_name)
+    return bahasa.teks(kunci, lang, nama_toko=settings.store_name, alamat_toko=alamat)
+
+
 async def notify_ready(order_id: int) -> bool:
     """Send the proactive 'order is ready' message (PROMPT §10.13)."""
     # order_id from the backend push = our pending_orders.order_ref (backend id).
@@ -427,10 +440,7 @@ async def notify_ready(order_id: int) -> bool:
 
     lang = await store.get_lang(order.wa_number)
     msg = bahasa.teks("pesanan_siap", lang, label=_label(order))
-    kunci = ("pesanan_siap_kirim" if order.delivery_method == "delivery"
-             else "pesanan_siap_ambil")
-    msg += bahasa.teks(kunci, lang, nama_toko=settings.store_name,
-                       alamat_toko=settings.store_address)
+    msg += await _teks_ambil_kirim(order.delivery_method == "delivery", lang)
     await _notify(order.wa_number, msg)
     return True
 
@@ -549,11 +559,8 @@ async def _teks_web(o: dict, event: str, lang: str) -> str | None:
     if event == "processing":
         return bahasa.teks("pesanan_diproses", lang, label=inv)
     if event == "ready":
-        kunci = ("pesanan_siap_kirim" if o.get("metode_pengiriman") == "delivery"
-                 else "pesanan_siap_ambil")
         return (bahasa.teks("pesanan_siap", lang, label=inv)
-                + bahasa.teks(kunci, lang, nama_toko=settings.store_name,
-                              alamat_toko=settings.store_address))
+                + await _teks_ambil_kirim(o.get("metode_pengiriman") == "delivery", lang))
     if event in ("delivered", "picked_up", "completed"):
         if event == "completed" and ((oid, "delivered") in _kabar_web
                                      or (oid, "picked_up") in _kabar_web):

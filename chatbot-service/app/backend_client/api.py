@@ -5,6 +5,7 @@ Replaces the old mock_backend. All calls send X-Service-Key. Customer/Order use
 """
 
 import logging
+import time
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -53,6 +54,32 @@ def _wa_variants(wa_number: str) -> list[str]:
     if raw and raw not in variants:
         variants.append(raw)
     return variants
+
+
+# Alamat toko diisi Owner di Seller Site (Settings > Store Customization) dan
+# tampil juga di halaman beranda website. Dibaca ulang paling cepat tiap 60
+# detik; kalau backend sedang galat, nilai terakhir yang diketahui dipakai.
+_ALAMAT_TTL_DETIK = 60.0
+_alamat_cache: tuple[float, str | None] | None = None
+
+
+async def get_store_address() -> str | None:
+    """GET /public/store-customization -> store_address, atau None kalau kosong."""
+    global _alamat_cache
+    sekarang = time.monotonic()
+    if _alamat_cache is not None and sekarang - _alamat_cache[0] < _ALAMAT_TTL_DETIK:
+        return _alamat_cache[1]
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+            r = await c.get(f"{_base()}/public/store-customization")
+            r.raise_for_status()
+            data = r.json()
+        alamat = str((data or {}).get("store_address") or "").strip() or None
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        logger.warning("alamat toko tidak terbaca dari backend: %s", exc)
+        return _alamat_cache[1] if _alamat_cache is not None else None
+    _alamat_cache = (sekarang, alamat)
+    return alamat
 
 
 async def upsert_customer(wa_number: str, nama: str, alamat: str, phone: str) -> dict:

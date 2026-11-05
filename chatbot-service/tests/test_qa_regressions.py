@@ -88,6 +88,11 @@ def patch_externals(monkeypatch):
         return orders.get(int(order_id))
 
     monkeypatch.setattr(backend, "get_order", f_get_order)
+
+    async def f_alamat():
+        return "Jl. Uji No. 1, Tembalang, Semarang"
+
+    monkeypatch.setattr(backend, "get_store_address", f_alamat)
     return {"sent": sent, "cancelled": cancelled, "backend": backend,
             "monkeypatch": monkeypatch, "originals": originals, "orders": orders}
 
