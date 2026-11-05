@@ -33,7 +33,7 @@ def _teks(lang: str) -> str:
     lanjut yang jelas, bukan formulir.
     """
     return (bahasa.teks("maaf_keluhan", lang) + "\n\n"
-            + bahasa.teks("tawaran_admin_keluhan", lang))
+            + bahasa.teks("tawaran_admin_lanjut", lang))
 
 
 @tool

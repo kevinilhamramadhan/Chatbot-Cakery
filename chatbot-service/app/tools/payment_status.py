@@ -14,7 +14,6 @@ from app.backend_client import api as backend
 from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State
-from app.core.config import settings
 from app.tools.formatting import rupiah
 
 logger = logging.getLogger(__name__)
@@ -27,10 +26,8 @@ async def jawab_refund(wa_number: str, lang: str) -> str | None:
         return None
     invoice = order.nomor_invoice or f"#{order.order_ref}"
     if order.status == store.MENUNGGU_TRANSFER:
-        surel = settings.store_support_email.strip()
-        tutup = (bahasa.teks("tutup_refund_email", lang, email=surel) if surel
-                 else bahasa.teks("tutup_refund_umum", lang))
-        return bahasa.teks("refund_menunggu", lang, invoice=invoice, tutup=tutup)
+        return bahasa.teks("refund_menunggu", lang, invoice=invoice,
+                           tutup=bahasa.teks("tutup_refund_umum", lang))
     if order.status == store.REFUND_OTOMATIS:
         return bahasa.teks("refund_otomatis_menunggu", lang, invoice=invoice)
     if order.status == store.KABAR_TRANSFER_TERTUNDA:

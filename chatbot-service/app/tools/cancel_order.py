@@ -10,17 +10,18 @@ from app.backend_client import api as backend
 from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State, text_is_cancel
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _jalur_tindak_lanjut(lang: str) -> str:
-    """Satu jalan yang benar-benar bisa ditempuh pelanggan, bukan 'hubungi admin'."""
-    email = settings.store_support_email.strip()
-    if email:
-        return bahasa.teks("tindak_lanjut_email", lang, email=email)
-    return bahasa.teks("tindak_lanjut_umum", lang)
+async def _tawarkan_admin(wa_number: str, lang: str, alasan: str) -> str:
+    """Tindak lanjut lewat admin di chat ini: ditawarkan, tersambung setelah "ya".
+
+    Keputusan Kevin (5 Nov 2026): chatbot tidak lagi mengarahkan pelanggan ke
+    email toko; alasannya ikut terkirim ke admin kalau pelanggan setuju.
+    """
+    await store.set_pending_escalation(wa_number, alasan)
+    return "\n\n" + bahasa.teks("tawaran_admin_lanjut", lang)
 
 
 @tool
@@ -60,15 +61,16 @@ async def cancel_order() -> str:
     if sudah_dibayar and not await _masih_boleh_refund(wa):
         # Kebijakan toko: begitu admin memindahkan pesanan ke "sedang diproses",
         # kuenya sudah dikerjakan dan pembatalan mandiri tidak berlaku lagi.
-        return _teks_sudah_dikerjakan(lang)
+        return bahasa.teks("sudah_dikerjakan", lang) + await _tawarkan_admin(
+            wa, lang, f"Pelanggan ingin membatalkan pesanan {_label(order)} yang sudah "
+                      "dikerjakan")
 
     get_turn_context().next_state = State.AWAITING_CANCEL_CONFIRMATION
     return konfirmasi_batal(order, sudah_dibayar, lang)
 
 
-def _teks_sudah_dikerjakan(lang: str) -> str:
-    alamat = settings.store_support_email.strip() or bahasa.teks("kontak_resmi", lang)
-    return bahasa.teks("sudah_dikerjakan", lang, alamat=alamat)
+def _label(order) -> str:
+    return order.nomor_invoice or f"#{order.order_ref}"
 
 
 async def _masih_boleh_refund(wa_number: str) -> bool:
@@ -120,7 +122,7 @@ async def proses_pembatalan(wa_number: str) -> str:
     Dua jalur dicoba karena backend boleh memilih bentuknya: endpoint cancel
     yang sudah ada (kalau nanti diizinkan menangani pesanan berbayar), lalu
     endpoint refund. Selama keduanya menolak, pelanggan tidak dibiarkan buntu —
-    dia diberi alamat email yang benar-benar ditangani orang.
+    dia ditawari sambungan ke admin di chat ini.
     """
     lang = await store.get_lang(wa_number)
     order = await store.get_active_pending(wa_number)
@@ -161,9 +163,10 @@ async def proses_pembatalan(wa_number: str) -> str:
             menit = round((batas - datetime.now(timezone.utc)).total_seconds() / 60)
             kapan = (bahasa.teks("batal_sendiri_menit", lang, menit=menit) if menit >= 1
                      else bahasa.teks("batal_sendiri_segera", lang))
-            return (bahasa.teks("batal_belum_bisa", lang, label=label, kapan=kapan)
-                    + _jalur_tindak_lanjut(lang))
-        return bahasa.teks("batal_perlu_tim", lang) + _jalur_tindak_lanjut(lang)
+            return bahasa.teks("batal_belum_bisa", lang, label=label, kapan=kapan)
+        return bahasa.teks("batal_perlu_tim", lang) + await _tawarkan_admin(
+            wa_number, lang, f"Pelanggan ingin membatalkan pesanan {_label(order)} yang "
+                             "sudah dibayar (perlu pengembalian dana)")
 
     # Refund manual belum selesai saat ini juga — uangnya baru berpindah setelah
     # admin mentransfernya. Barisnya disimpan dengan status menunggu supaya
@@ -178,8 +181,6 @@ async def proses_pembatalan(wa_number: str) -> str:
         # Belum ada uang yang masuk — jangan menjanjikan pengembalian dana.
         return bahasa.teks("batal_belum_bayar", lang)
     if manual:
-        email = settings.store_support_email.strip()
-        tutup = (bahasa.teks("tutup_refund_email", lang, email=email) if email
-                 else bahasa.teks("tutup_refund_umum", lang))
-        return bahasa.teks("batal_refund_manual", lang, tutup=tutup)
+        return bahasa.teks("batal_refund_manual", lang,
+                           tutup=bahasa.teks("tutup_refund_umum", lang))
     return bahasa.teks("batal_refund_otomatis", lang)

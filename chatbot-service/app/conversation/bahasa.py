@@ -459,14 +459,9 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: "The money goes back automatically to the app you paid with.",
     },
     "sudah_dikerjakan": {
-        ID: ("Pesanan ini sudah dalam tahap pengerjaan sehingga tidak bisa dibatalkan.\n"
-             "Jika ada keluhan mohon kirim ke alamat email kami di {alamat}\n"
-             "Terima Kasih"),
-        EN: ("This order is already being made, so it can no longer be cancelled.\n"
-             "If you have a complaint, please email us at {alamat}\n"
-             "Thank you"),
+        ID: "Pesanan ini sudah dalam tahap pengerjaan sehingga tidak bisa dibatalkan.",
+        EN: "This order is already being made, so it can no longer be cancelled.",
     },
-    "kontak_resmi": {ID: "kontak resmi Toti Cakery", EN: "Toti Cakery's official contact"},
     "tidak_ada_yang_dibatalkan": {
         ID: "Tidak ada pesanan aktif yang perlu dibatalkan 😊",
         EN: "There's no active order to cancel 😊",
@@ -485,15 +480,6 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Pembatalannya perlu diproses tim kami dulu supaya dananya bisa dikembalikan.",
         EN: "Our team needs to process this cancellation first so the money can be returned.",
     },
-    "tindak_lanjut_email": {
-        ID: ("\n\nKirim nomor pesananmu ke {email} ya, nanti tim kami yang "
-             "menindaklanjuti 🙏"),
-        EN: "\n\nPlease send your order number to {email} and our team will follow up 🙏",
-    },
-    "tindak_lanjut_umum": {
-        ID: "\n\nSampaikan nomor pesananmu ke kontak resmi Toti Cakery ya 🙏",
-        EN: "\n\nPlease send your order number to Toti Cakery's official contact 🙏",
-    },
     "batal_belum_bayar": {
         ID: "Pesanan kamu sudah dibatalkan. Terima kasih 🙏",
         EN: "Your order has been cancelled. Thank you 🙏",
@@ -506,13 +492,9 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "Our team is processing your refund by bank transfer, so please allow a "
              "few working days. {tutup}"),
     },
-    "tutup_refund_email": {
-        ID: "Kalau dalam 3 hari kerja belum masuk, kabari kami di {email} ya 🙏",
-        EN: "If it hasn't arrived within 3 working days, let us know at {email} 🙏",
-    },
     "tutup_refund_umum": {
-        ID: "Kalau dalam 3 hari kerja belum masuk, kabari kami ya 🙏",
-        EN: "If it hasn't arrived within 3 working days, please let us know 🙏",
+        ID: "Kalau dalam 3 hari kerja belum masuk, kabari kami lewat chat ini ya 🙏",
+        EN: "If it hasn't arrived within 3 working days, just let us know in this chat 🙏",
     },
     "batal_refund_otomatis": {
         ID: ("Pesanan kamu sudah dibatalkan dan pengembalian dananya diproses ✅\n\n"
@@ -550,7 +532,7 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("We're very sorry for the inconvenience you experienced. Your feedback "
              "will help us do better going forward."),
     },
-    "tawaran_admin_keluhan": {
+    "tawaran_admin_lanjut": {
         ID: ("Mau aku sambungkan ke admin supaya bisa langsung ditindaklanjuti? "
              "Ketik *ya* untuk kusambungkan."),
         EN: ("Would you like me to connect you to our admin so it can be followed up "
@@ -948,9 +930,9 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("We've transferred the refund for order *{invoice}* ✅\n\n"
              "Please check your bank account or the app you used."),
     },
-    "refund_ditransfer_email": {
-        ID: "\n\nKalau belum masuk juga, kabari kami di {email}.",
-        EN: "\n\nIf it still hasn't arrived, let us know at {email}.",
+    "refund_ditransfer_tindak_lanjut": {
+        ID: "\n\nKalau belum masuk juga, kabari kami lewat chat ini ya.",
+        EN: "\n\nIf it still hasn't arrived, just let us know in this chat.",
     },
     "refund_otomatis": {
         ID: ("Pesanan *{invoice}* dibatalkan dan pembayaranmu dikembalikan ✅\n\n"
@@ -960,9 +942,9 @@ _TEMPLAT: dict[str, dict[str, str]] = {
              "The money returns through the payment method you used. It can take a few "
              "business days depending on your bank or e-wallet 🙏"),
     },
-    "refund_otomatis_email": {
-        ID: "\n\nKalau lewat dari itu belum masuk, kabari kami di {email}.",
-        EN: "\n\nIf it hasn't arrived after that, let us know at {email}.",
+    "refund_otomatis_tindak_lanjut": {
+        ID: "\n\nKalau lewat dari itu belum masuk, kabari kami lewat chat ini ya.",
+        EN: "\n\nIf it hasn't arrived after that, just let us know in this chat.",
     },
     "terima_kasih_menunggu": {
         ID: "\n\nTerima kasih sudah menunggu 😊",

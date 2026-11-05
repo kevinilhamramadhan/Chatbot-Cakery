@@ -558,7 +558,7 @@ async def _escalation_offer_expired(wa_number: str) -> bool:
     # Inggris tidak pernah ditemukan dan dianggap kedaluwarsa sejak giliran
     # pertama, sehingga "yes" pelanggan tidak pernah diterima.
     penanda = tuple(bahasa.teks(k, l)[:40]
-                    for k in ("tawaran_admin", "tawaran_admin_keluhan")
+                    for k in ("tawaran_admin", "tawaran_admin_lanjut")
                     for l in (bahasa.ID, bahasa.EN))
     terakhir = -1
     for i, pesan in enumerate(riwayat):

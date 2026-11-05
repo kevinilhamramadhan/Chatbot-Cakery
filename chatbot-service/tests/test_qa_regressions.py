@@ -1090,10 +1090,19 @@ async def test_balasan_keluhan_tidak_menyebut_email(patch_externals):
     from app.tools import keluhan
 
     set_turn_context(TurnContext(wa_number=WA, user_text="kuenya basi"))
-    patch_externals["monkeypatch"].setattr(
-        settings_module, "store_support_email", "halo@toticakery.id", raising=False)
     out = await keluhan.send_apology.ainvoke({"keluhan": "kue basi"})
     assert "@" not in out and "email" not in out.lower()
+
+
+async def test_chatbot_tidak_punya_setelan_email_toko():
+    """Keputusan Kevin (5 Nov 2026): email toko yang tidak terkait konfigurasi
+    backend dihapus; tindak lanjut lewat admin di chat ini."""
+    from app.conversation import bahasa
+
+    assert not hasattr(settings_module, "store_support_email")
+    for kunci, isi in bahasa._TEMPLAT.items():
+        for teks in isi.values():
+            assert "email" not in teks.lower() and "{email}" not in teks, kunci
 
 
 async def test_add_to_cart_menerima_argumen_tanpa_bungkus_items(patch_externals):
@@ -1219,13 +1228,12 @@ async def test_konfirmasi_batal_tanpa_dukungan_backend_tidak_membuntukan(patch_e
         patch_externals["backend"], "cancel_order", f_cancel)
     patch_externals["monkeypatch"].setattr(
         patch_externals["backend"], "refund_order", f_refund)
-    patch_externals["monkeypatch"].setattr(
-        settings_module, "store_support_email", "halo@toticakery.id", raising=False)
 
     out = await proses_pembatalan(WA)
 
-    assert "halo@toticakery.id" in out
-    assert "hubungi admin" not in out.lower()
+    assert "@" not in out and "kontak resmi" not in out.lower()
+    assert "sambungkan ke admin" in out and "*ya*" in out
+    assert (await store.get_or_create_session(WA)).pending_escalation
     assert await store.get_active_pending(WA) is not None, "tidak ada yang dibatalkan"
 
 
@@ -1302,16 +1310,16 @@ async def test_pesanan_yang_sudah_diproses_tidak_ditawari_pembatalan(patch_exter
 
     patch_externals["monkeypatch"].setattr(
         patch_externals["backend"], "get_latest_order", f_latest)
-    patch_externals["monkeypatch"].setattr(
-        settings_module, "store_support_email", "halo@toticakery.id", raising=False)
     set_turn_context(TurnContext(wa_number=WA, user_text="batalin pesananku"))
 
     out = await cancel_order.ainvoke({})
 
     assert "tahap pengerjaan sehingga tidak bisa dibatalkan" in out
-    assert "halo@toticakery.id" in out
-    assert "*ya*" not in out, "jangan menawarkan konfirmasi yang pasti gagal"
+    assert "email" not in out.lower() and "@" not in out
+    # "ya" di sini menyambungkan ke admin, bukan konfirmasi batal yang pasti gagal.
+    assert "sambungkan ke admin" in out
     assert (await store.get_or_create_session(WA)).state != State.AWAITING_CANCEL_CONFIRMATION
+    assert (await store.get_or_create_session(WA)).pending_escalation
 
 
 async def test_pesanan_belum_dibayar_juga_dikonfirmasi_dulu(patch_externals):
@@ -1483,8 +1491,6 @@ async def test_refund_va_dikatakan_manual_qris_otomatis(patch_externals):
 
     patch_externals["monkeypatch"].setattr(
         patch_externals["backend"], "cancel_order", f_cancel)
-    patch_externals["monkeypatch"].setattr(
-        settings_module, "store_support_email", "halo@toticakery.id", raising=False)
 
     for channel, mode, harus_ada, tidak_boleh in (
         ("bank_transfer", "manual", "transfer", "otomatis"),
@@ -1514,7 +1520,7 @@ async def test_refund_va_dikatakan_manual_qris_otomatis(patch_externals):
         assert tidak_boleh not in hasil.lower(), (channel, hasil)
         if channel == "bank_transfer":
             assert "transfer" in tanya.lower(), "konfirmasinya pun harus jujur di awal"
-            assert "halo@toticakery.id" in hasil
+            assert "@" not in hasil and "kabari kami" in hasil
 
 
 async def test_refund_manual_menunggu_transfer_lalu_dikabari_saat_selesai(patch_externals):
@@ -1920,7 +1926,7 @@ async def test_keluhan_minta_maaf_lalu_menawarkan_admin(patch_externals):
     await store.log_message(WA, "out", hasil)
 
     assert "mohon maaf" in hasil.lower(), hasil
-    assert bahasa.teks("tawaran_admin_keluhan", bahasa.ID) in hasil, hasil
+    assert bahasa.teks("tawaran_admin_lanjut", bahasa.ID) in hasil, hasil
     assert bahasa.teks("diteruskan_ke_admin", bahasa.ID)[:30] not in hasil, hasil
     assert await store.is_takeover_active(WA) is False
     ke_admin = [t for nomor, t in patch_externals["sent"] if nomor == "628999000111"]
@@ -1943,11 +1949,11 @@ async def test_keluhan_tawaran_admin_bisa_ditolak(patch_externals):
     assert (await store.get_or_create_session(WA)).pending_escalation is None
 
 
-async def test_tawaran_admin_keluhan_dua_bahasa():
+async def test_tawaran_admin_lanjut_dua_bahasa():
     from app.conversation import bahasa
 
-    idn = bahasa.teks("tawaran_admin_keluhan", bahasa.ID)
-    eng = bahasa.teks("tawaran_admin_keluhan", bahasa.EN)
+    idn = bahasa.teks("tawaran_admin_lanjut", bahasa.ID)
+    eng = bahasa.teks("tawaran_admin_lanjut", bahasa.EN)
     assert idn != eng and "*ya*" in idn and "*yes*" in eng
 
 

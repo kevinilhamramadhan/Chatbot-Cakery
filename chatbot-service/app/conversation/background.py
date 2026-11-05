@@ -68,10 +68,8 @@ async def _teks_kabar_refund(order, kunci: str) -> str:
     selesai mentransfer manual) atau refund_otomatis (di-refund lewat backend)."""
     lang = await store.get_lang(order.wa_number)
     teks = bahasa.teks(kunci, lang, invoice=_label(order))
-    email = settings.store_support_email.strip()
-    if email:
-        teks += bahasa.teks(kunci + "_email", lang, email=email)
-    return teks + bahasa.teks("terima_kasih_menunggu", lang)
+    return teks + bahasa.teks(kunci + "_tindak_lanjut", lang) + bahasa.teks(
+        "terima_kasih_menunggu", lang)
 
 
 async def tutup_karena_refund(order) -> bool:
