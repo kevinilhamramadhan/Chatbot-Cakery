@@ -1323,25 +1323,15 @@ async def test_pesanan_baru_dikabarkan_ke_seller(patch_externals):
     assert "https://" not in teks                                 # teks pelanggan dinetralkan
 
 
-async def test_kabar_diproses_tidak_dobel_dengan_kabar_lunas(patch_externals):
-    """Backend menembak /paid lalu /processing berdempetan saat lunas; kabar
-    "sedang dibuat" hanya untuk perpindahan oleh seller sesudahnya."""
+async def test_kabar_diproses_terkirim_walau_baru_lunas(patch_externals):
+    """/processing hanya ditembak backend saat seller memindahkan pesanan ke
+    in_process, jadi kabar "sedang dibuat" tetap dikirim walau pesanannya baru
+    saja lunas (temuan UAT 5 Nov: admin memproses < 5 menit sesudah lunas)."""
     await store.create_pending_order(
         wa_number=WA, order_ref="900", payment_type="full", total_amount=100, amount_due=100,
         items_json="[]", customer_json="{}", delivery_method="pickup", status="paid",
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
     )
-    assert await background.notify_processing(900) is True
-    assert patch_externals["sent"] == []                          # baru saja lunas
-
-    order = await store.get_active_pending(WA)
-    lama = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=10)
-    patch_externals["monkeypatch"].setattr(order, "updated_at", lama)
-
-    async def f_list(*statuses):
-        return [order]
-
-    patch_externals["monkeypatch"].setattr(store, "list_orders_by_status", f_list)
     assert await background.notify_processing(900) is True
     assert any("sedang kami buat" in t for _, t in patch_externals["sent"])
 
@@ -1395,14 +1385,17 @@ async def test_pesanan_website_dikabari_dari_detail_backend(patch_externals):
     assert "lunasi" not in sent[-1][1]                  # perintah itu hanya untuk pesanan WA
 
     orders[950]["status"] = "in_process"
-    assert await background.kabar_pesanan(950, "processing") is None   # baru dikabari lunas
+    # Seller memindahkan ke diproses tak lama sesudah lunas: tetap dikabari
+    # (backend tidak lagi memindahkan pesanan ke in_process sendiri saat lunas).
+    assert await background.kabar_pesanan(950, "processing") is True
+    assert "sedang kami buat" in sent[-1][1]
     assert await background.kabar_pesanan(950, "overdue") is True
     assert "menghubungimu" in sent[-1][1] and "refund" not in sent[-1][1].lower()
 
     orders[950]["status"] = "picked_up"
     assert await background.kabar_pesanan(950, "picked_up") is True
     assert await background.kabar_pesanan(950, "completed") is None    # tidak dobel
-    assert len(sent) == 3
+    assert len(sent) == 4                 # lunas, diproses, terlambat, selesai
 
 
 async def test_sebab_batal_dibaca_dari_status_backend(patch_externals):

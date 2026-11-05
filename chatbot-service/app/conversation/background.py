@@ -438,13 +438,10 @@ async def notify_ready(order_id: int) -> bool:
 
 
 
-# Kabar "pembayaran diterima" sudah berbunyi "pesananmu akan segera kami
-# proses", dan backend memindahkan pesanan ke in_process tepat saat lunas — jadi
-# /paid dan /processing tiba berdempetan. Kabar "sedang diproses" hanya dikirim
-# kalau seller memindahkannya belakangan.
-# ponytail: dibedakan dari umur kabar lunas, bukan dari penyebab perpindahan;
-# kalau backend suatu saat mengirim penyebabnya, pakai itu.
-_JEDA_SESUDAH_LUNAS = 5 * 60
+# Backend menembak /processing hanya saat seller memindahkan pesanan ke
+# in_process (update_order_status); saat lunas ia hanya menembak /paid. Jadi
+# kabar "sedang diproses" selalu dikirim, walau seller memprosesnya tak lama
+# sesudah lunas.
 
 
 async def notify_processing(order_id: int) -> bool:
@@ -453,9 +450,6 @@ async def notify_processing(order_id: int) -> bool:
     order = next((o for o in orders if o.order_ref == str(order_id)), None)
     if order is None:
         return False
-    umur = (datetime.now(timezone.utc) - _aware(order.updated_at)).total_seconds()
-    if umur < _JEDA_SESUDAH_LUNAS:
-        return True
     lang = await store.get_lang(order.wa_number)
     return await _notify(order.wa_number, bahasa.teks("pesanan_diproses", lang,
                                                       label=_label(order)))
@@ -529,8 +523,7 @@ async def notify_cancelled(order_id, terbaru: dict | None = None) -> bool | None
     return True
 
 
-# Event website yang sudah dikabari, untuk dua aturan di _teks_web: "diproses"
-# tidak menyusul "dibayar" yang baru terkirim, dan "selesai" tidak menyusul
+# Event website yang sudah dikabari, agar "selesai" tidak menyusul
 # "diantar"/"diambil". Pesanan lewat WhatsApp memakai baris pending_orders.
 # ponytail: di memori; restart di antara dua event bisa mengirim kabar
 # berdempetan. Kolom/tabel kalau itu mengganggu.
@@ -541,7 +534,6 @@ async def _teks_web(o: dict, event: str, lang: str) -> str | None:
     """Kabar untuk pesanan dari website, dari detail pesanan di backend."""
     oid = int(o.get("id") or 0)
     inv = (o.get("invoice") or {}).get("nomor_invoice") or f"#{oid}"
-    sekarang = time.monotonic()
     if event == "paid":
         status_inv = str((o.get("invoice") or {}).get("status") or o.get("payment_status") or "").lower()
         if status_inv not in ("paid", "partial"):
@@ -557,9 +549,6 @@ async def _teks_web(o: dict, event: str, lang: str) -> str | None:
                                 sisa=rupiah(o.get("amount_due")), batas=batas)
         return teks
     if event == "processing":
-        lunas = _kabar_web.get((oid, "paid"))
-        if lunas is not None and sekarang - lunas < _JEDA_SESUDAH_LUNAS:
-            return None
         return bahasa.teks("pesanan_diproses", lang, label=inv)
     if event == "ready":
         kunci = ("pesanan_siap_kirim" if o.get("metode_pengiriman") == "delivery"
