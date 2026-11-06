@@ -25,7 +25,9 @@ Yang dicoba dan ditolak karena terukur lebih buruk: variasi pertanyaan per FAQ
 pemilih FAQ (37 dari 128), dan reranker jina-v2-multilingual (36 dari 48,
 2-4 detik per pertanyaan).
 
-Versi Inggris jawaban ada di knowledge_base/faq_en.json, ditulis tangan dan
+Versi Inggris jawaban diutamakan dari kolom `jawaban_en` FAQ di backend (diisi
+Owner di Seller Site, backend 8344c65). Kalau kosong, dipakai
+knowledge_base/faq_en.json, ditulis tangan dan
 dikunci ke sidik jawaban Indonesianya: begitu admin menyunting jawabannya di
 Admin Site, terjemahan lama otomatis tidak dipakai (sesi Inggris kembali
 dijawab model) sampai berkasnya diperbarui. Diterjemahkan model saat ingest

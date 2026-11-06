@@ -38,8 +38,8 @@ class FaqDoc:
     text: str
     pertanyaan: str = ""
     jawaban: str = ""
-    # Hanya dokumen bawaan: teks Inggrisnya sudah ada di bahasa.py, jadi tidak
-    # perlu lewat faq_en.json.
+    # Dokumen bawaan (teks Inggris dari bahasa.py) dan FAQ backend yang versi
+    # Inggrisnya diisi Owner. Kosong = lewat faq_en.json atau dijawab model.
     pertanyaan_en: str = ""
     jawaban_en: str = ""
 
@@ -82,8 +82,12 @@ async def fetch_backend_faq() -> list[FaqDoc]:
         a = str(row.get("jawaban") or "").strip()
         if not q or not a:
             continue
+        # Versi Inggris diisi Owner di Seller Site (backend 8344c65); kosong =
+        # sesi Inggris memakai faq_en.json atau dijawab model.
         docs.append(FaqDoc(source=f"backend-faq-{row.get('id')}", text=f"Q: {q}\nA: {a}",
-                           pertanyaan=q, jawaban=a))
+                           pertanyaan=q, jawaban=a,
+                           pertanyaan_en=str(row.get("pertanyaan_en") or "").strip(),
+                           jawaban_en=str(row.get("jawaban_en") or "").strip()))
     return docs
 
 
@@ -237,6 +241,7 @@ def ingest_documents(docs: list[FaqDoc]) -> int:
                 # Pertanyaan Inggris ke pertanyaan Indonesia skornya rendah
                 # ("where is your shop?" 0,39, di bawah ambang 0,40).
                 chunks.append(d.pertanyaan_en)
+            if d.jawaban_en:
                 meta["jawaban_en"] = d.jawaban_en
             metas = [{**meta, "chunk": i} for i in range(len(chunks))]
         else:

@@ -858,10 +858,14 @@ async def test_faq_comes_from_backend_and_skips_inactive(patch_externals):
 
     rows = [
         {"id": 2, "pertanyaan": "Berapa lama daya tahan kue?",
-         "jawaban": "Tahan 3-4 hari di suhu ruang.", "is_active": True},
+         "jawaban": "Tahan 3-4 hari di suhu ruang.", "is_active": True,
+         "pertanyaan_en": "How long do the cakes last?",
+         "jawaban_en": "They last 3-4 days at room temperature."},
         {"id": 1, "pertanyaan": "Cara pesan?", "jawaban": "Chat WhatsApp.",
          "is_active": False},
         {"id": 3, "pertanyaan": "", "jawaban": "kosong", "is_active": True},
+        {"id": 4, "pertanyaan": "Halal?", "jawaban": "Ya, bahan halal.", "is_active": True,
+         "pertanyaan_en": None, "jawaban_en": "  "},
     ]
 
     def handler(request):
@@ -877,8 +881,38 @@ async def test_faq_comes_from_backend_and_skips_inactive(patch_externals):
     patch_externals["monkeypatch"].setattr(faq_source.httpx, "AsyncClient", factory)
 
     docs = await faq_source.fetch_backend_faq()
-    assert [d.source for d in docs] == ["backend-faq-2"]
+    assert [d.source for d in docs] == ["backend-faq-2", "backend-faq-4"]
     assert "daya tahan" in docs[0].text and "Tahan 3-4 hari" in docs[0].text
+    # Kolom Inggris FAQ dari backend (8344c65, 6 Nov 2026) ikut terbaca.
+    assert docs[0].pertanyaan_en == "How long do the cakes last?"
+    assert docs[0].jawaban_en == "They last 3-4 days at room temperature."
+    assert docs[1].pertanyaan_en == "" and docs[1].jawaban_en == ""
+
+
+def test_jawaban_en_backend_tersimpan_walau_pertanyaan_en_kosong(tmp_path, monkeypatch):
+    """Owner bisa mengisi jawaban Inggris saja; jawabannya tetap dipakai sesi
+    Inggris walau tidak ada chunk pertanyaan Inggris."""
+    from app.rag import faq_source
+
+    simpan = []
+
+    class _Koleksi:
+        def get(self, include=None):
+            return {"metadatas": []}
+
+        def delete(self, where=None):
+            pass
+
+        def upsert(self, ids, documents, metadatas):
+            simpan.append((documents, metadatas))
+
+    monkeypatch.setattr(faq_source, "get_collection", lambda: _Koleksi())
+    faq_source.ingest_documents([faq_source.FaqDoc(
+        source="backend-faq-9", text="Q: Halal?\nA: Ya.", pertanyaan="Halal?",
+        jawaban="Ya.", jawaban_en="Yes, all ingredients are halal.")])
+    docs, metas = simpan[0]
+    assert len(docs) == 2
+    assert all(m["jawaban_en"] == "Yes, all ingredients are halal." for m in metas)
 
 
 async def test_faq_falls_back_to_local_files_when_backend_has_none(patch_externals):
