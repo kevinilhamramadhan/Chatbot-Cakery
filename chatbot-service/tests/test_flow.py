@@ -1302,9 +1302,8 @@ async def test_refund_otomatis_dan_laba_kotor(patch_externals):
     assert "INV-BARU" in r.text and "otomatis" in r.text
 
 
-async def test_kabar_pesanan_baru_ke_staf_mati_secara_bawaan(patch_externals):
-    """Keputusan Kevin (7 Nov 2026): kabar pesanan baru tidak dikirim ke siapa
-    pun kecuali NOTIF_PESANAN_BARU_STAF dinyalakan."""
+async def test_kabar_pesanan_baru_ke_staf_bisa_dimatikan(patch_externals):
+    """NOTIF_PESANAN_BARU_STAF=false: kabar pesanan baru tidak dikirim ke siapa pun."""
     from app.conversation import rbac
 
     async def f_penerima():
@@ -1316,7 +1315,7 @@ async def test_kabar_pesanan_baru_ke_staf_mati_secara_bawaan(patch_externals):
     mp = patch_externals["monkeypatch"]
     mp.setattr(rbac, "nomor_penerima_takeover", f_penerima)
     mp.setattr(patch_externals["backend"], "get_order", f_order)
-    assert background.settings.notif_pesanan_baru_staf is False
+    mp.setattr(background.settings, "notif_pesanan_baru_staf", False)
     assert await background.notify_created(501) is False
     assert patch_externals["sent"] == []
 
