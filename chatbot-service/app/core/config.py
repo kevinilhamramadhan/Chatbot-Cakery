@@ -173,6 +173,9 @@ class Settings(BaseSettings):
 
     # ── Admin / human takeover ────────────────────────────────────────────────
     takeover_expiry_days: int = 1
+    # Kabar "pesanan baru masuk" ke penerima takeover (webhook backend /created).
+    # Mati secara bawaan atas keputusan Kevin (7 Nov 2026); nyalakan lewat env.
+    notif_pesanan_baru_staf: bool = False
 
     # ── Store info (used in "ready for pickup/delivery" messages) ─────────────
     store_name: str = "Toti Cakery"

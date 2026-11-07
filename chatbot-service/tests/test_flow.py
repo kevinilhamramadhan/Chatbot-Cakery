@@ -1302,6 +1302,25 @@ async def test_refund_otomatis_dan_laba_kotor(patch_externals):
     assert "INV-BARU" in r.text and "otomatis" in r.text
 
 
+async def test_kabar_pesanan_baru_ke_staf_mati_secara_bawaan(patch_externals):
+    """Keputusan Kevin (7 Nov 2026): kabar pesanan baru tidak dikirim ke siapa
+    pun kecuali NOTIF_PESANAN_BARU_STAF dinyalakan."""
+    from app.conversation import rbac
+
+    async def f_penerima():
+        return ["6281111111111"]
+
+    async def f_order(order_id):
+        raise AssertionError("tidak perlu membaca pesanan kalau kabarnya mati")
+
+    mp = patch_externals["monkeypatch"]
+    mp.setattr(rbac, "nomor_penerima_takeover", f_penerima)
+    mp.setattr(patch_externals["backend"], "get_order", f_order)
+    assert background.settings.notif_pesanan_baru_staf is False
+    assert await background.notify_created(501) is False
+    assert patch_externals["sent"] == []
+
+
 async def test_pesanan_baru_dikabarkan_ke_seller(patch_externals):
     """Webhook backend /created: semua penerima takeover dapat ringkasan pesanan."""
     from app.conversation import rbac
@@ -1319,6 +1338,7 @@ async def test_pesanan_baru_dikabarkan_ke_seller(patch_externals):
     mp = patch_externals["monkeypatch"]
     mp.setattr(patch_externals["backend"], "get_order", f_order)
     mp.setattr(rbac, "nomor_penerima_takeover", f_penerima)
+    mp.setattr(background.settings, "notif_pesanan_baru_staf", True)
 
     assert await background.notify_created(501) is True
     sent = patch_externals["sent"]

@@ -646,6 +646,9 @@ async def notify_created(order_id: int) -> bool:
     Penerimanya sama dengan penerima takeover: yang bertugas melayani pelanggan,
     diatur dari Admin Site. Dikirim ke semuanya, tidak digilir.
     """
+    if not settings.notif_pesanan_baru_staf:
+        logger.info("Kabar pesanan baru %s tidak dikirim (NOTIF_PESANAN_BARU_STAF mati)", order_id)
+        return False
     try:
         order = await backend.get_order(order_id)
     except Exception as exc:  # noqa: BLE001
