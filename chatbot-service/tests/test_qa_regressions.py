@@ -2594,3 +2594,102 @@ async def test_menu_cadangan_tidak_menawarkan_kue_yang_habis(monkeypatch):
 
     assert "Bolu Pandan" in teks
     assert "Brownies Coklat" not in teks
+
+
+# ── 7 Nov 2026 · pertanyaan/penundaan bukan jawaban ya/batal ─────────────────
+async def _seed_pesanan_dibayar_minta_batal():
+    await store.create_pending_order(
+        wa_number=WA, order_ref="164", payment_ref="MID", payment_type="full",
+        total_amount=150000, amount_due=150000, items_json="[]",
+        customer_json=json.dumps({"channel": "qris"}), delivery_method="pickup",
+        status="paid", nomor_invoice="INV-20261107-164",
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+    )
+    await store.set_state(WA, State.AWAITING_CANCEL_CONFIRMATION)
+
+
+@pytest.mark.parametrize("pesan", ["kebijakan pembatalannya gimana?", "bentar ya",
+                                   "kenapa harus batal?"])
+async def test_pertanyaan_tidak_membatalkan_pesanan_berbayar(patch_externals, pesan):
+    """Uji 7 Nov 2026: ketiga pesan ini membatalkan pesanan yang sudah dibayar."""
+    _mock_agent(patch_externals["monkeypatch"], "Pembatalan bisa selama kue belum diproses kak.")
+    await _seed_pesanan_dibayar_minta_batal()
+
+    r = await handle_message(WA, pesan)
+
+    assert patch_externals["cancelled"] == []
+    # Ditanya ulang lengkap: pesanan mana dan pilihan ya/tidak.
+    assert "INV-20261107-164" in r.text and "*ya*" in r.text and "*tidak*" in r.text
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_CANCEL_CONFIRMATION
+
+
+@pytest.mark.parametrize("pesan", ["ya", "batal", "iya batalin aja"])
+async def test_jawaban_jelas_tetap_membatalkan_pesanan_berbayar(patch_externals, pesan):
+    await _seed_pesanan_dibayar_minta_batal()
+
+    await handle_message(WA, pesan)
+
+    assert patch_externals["cancelled"] == ["164"]
+
+
+@pytest.mark.parametrize("pesan", ["bentar ya", "boleh tanya dulu?", "oke aku pikir dulu"])
+async def test_penundaan_tidak_menyalakan_takeover(patch_externals, pesan):
+    """Uji 7 Nov 2026: ketiga pesan ini menyalakan takeover."""
+    from app.tools.escalate import escalate_to_admin
+
+    _mock_agent(patch_externals["monkeypatch"], "Baik kak.")
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom"}))
+
+    r = await handle_message(WA, pesan)
+
+    assert await store.is_takeover_active(WA) is False
+    assert "*ya*" in r.text and "*tidak*" in r.text
+    await handle_message(WA, "ya")
+    assert await store.is_takeover_active(WA) is True
+
+
+async def _seed_keranjang(state):
+    await store.set_cart(WA, [{"product_id": 5, "nama": "Brownies Coklat",
+                               "harga": 50000.0, "qty": 2}])
+    await store.set_state(WA, state)
+
+
+@pytest.mark.parametrize("state", [State.AWAITING_CART_CONFIRMATION, State.COLLECTING_IDENTITY])
+async def test_tanya_batal_tidak_mengosongkan_keranjang(patch_externals, state):
+    _mock_agent(patch_externals["monkeypatch"], "Bisa kak, selama belum dibayar.")
+    await _seed_keranjang(state)
+
+    await handle_message(WA, "kalau batal bisa refund?")
+
+    assert len(await store.get_cart(WA)) == 1
+
+
+async def test_tanya_di_konfirmasi_keranjang_ditanya_ulang_lengkap(patch_externals):
+    _mock_agent(patch_externals["monkeypatch"], "Bisa kak, tanya aja.")
+    await _seed_keranjang(State.AWAITING_CART_CONFIRMATION)
+
+    r = await handle_message(WA, "boleh tanya dulu?")
+
+    session = await store.get_or_create_session(WA)
+    assert session.state == State.AWAITING_CART_CONFIRMATION
+    assert "Brownies Coklat x2" in r.text and "*sudah sesuai*" in r.text
+
+
+@pytest.mark.parametrize("pesan", ["ga jadi deh", "nggak jadi deh, mahal", "batal"])
+async def test_batal_jelas_tetap_mengosongkan_keranjang(patch_externals, pesan):
+    await _seed_keranjang(State.AWAITING_CART_CONFIRMATION)
+
+    await handle_message(WA, pesan)
+
+    assert await store.get_cart(WA) == []
+
+
+@pytest.mark.parametrize("pesan", ["iya udah bener", "sudah sesuai", "oke gas"])
+async def test_setuju_jelas_tetap_lanjut_ke_nama(patch_externals, pesan):
+    await _seed_keranjang(State.AWAITING_CART_CONFIRMATION)
+
+    await handle_message(WA, pesan)
+
+    assert (await store.get_or_create_session(WA)).state == State.COLLECTING_IDENTITY

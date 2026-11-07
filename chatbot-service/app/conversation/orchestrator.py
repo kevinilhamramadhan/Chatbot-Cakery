@@ -666,15 +666,26 @@ async def _handle_cancel_confirmation(wa_number: str, text: str, lang: str) -> R
     # "sudah sesuai" adalah perintah keranjang, bukan jawaban pertanyaan ini
     # (e2e v12 30 Okt 2026: kalimat itu membatalkan pesanan tanpa "ya").
     if text_perintah_sudah_sesuai(text):
-        return Reply(text=bahasa.teks("ulangi_konfirmasi_batal", lang))
+        return Reply(text=await _ulang_konfirmasi_batal(wa_number, lang))
     if (text_is_confirm(text) or text_is_cancel(text)) and not mentions_quantity(text):
         return Reply(text=await proses_pembatalan(wa_number))
 
-    # Pertanyaan lain dijawab model dulu, lalu pertanyaannya diulang.
+    # Pertanyaan lain ("bentar ya", "kebijakan pembatalannya gimana?") dijawab
+    # model dulu, lalu pertanyaannya diulang lengkap: pesanan mana, dan dananya
+    # kembali lewat mana.
     return await _answer_then_reask(
         wa_number, text,
-        bahasa.teks("ulangi_konfirmasi_batal", lang),
+        await _ulang_konfirmasi_batal(wa_number, lang),
         back_to=State.AWAITING_CANCEL_CONFIRMATION)
+
+
+async def _ulang_konfirmasi_batal(wa_number: str, lang: str) -> str:
+    from app.tools.cancel_order import konfirmasi_batal
+
+    order = await store.get_active_pending(wa_number)
+    if order is None:
+        return bahasa.teks("ulangi_konfirmasi_batal", lang)
+    return konfirmasi_batal(order, order.status in ("paid", "ready"), lang)
 
 
 _KATA_TOLAK = {"tidak", "ga", "gak", "nggak", "engga", "enggak", "jangan", "lanjut",
@@ -732,6 +743,13 @@ async def _handle_confirmation(wa_number: str, text: str, lang: str) -> Reply:
         if "*sudah sesuai*" in body or "*confirm*" in body:
             return reply
         reask = bahasa.teks("ulangi_konfirmasi_keranjang", lang)
+        # Ditanya ulang lengkap dengan isi keranjangnya, supaya pelanggan tahu
+        # persis apa yang disetujuinya dengan *sudah sesuai*.
+        from app.tools.add_to_cart import cart_summary
+
+        judul = bahasa.teks("ringkasan_keranjang_judul", lang)
+        if judul not in body and (cart := await store.get_cart(wa_number)):
+            reask = f"{cart_summary(cart, lang)}\n\n{reask}"
         return Reply(text=f"{body}\n\n{reask}" if body else reask, media=reply.media)
     return reply
 

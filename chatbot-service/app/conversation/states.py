@@ -23,8 +23,9 @@ CONFIRM_WORDS = {
     "checkout", "cukup", "y",
 }
 CANCEL_WORDS = {
-    "batal", "batalkan", "cancel", "gajadi", "gak jadi", "ga jadi", "tidak jadi",
-    "stop",
+    "batal", "batalkan", "batalin", "dibatalkan", "dibatalin", "membatalkan", "cancel",
+    "cancelled", "canceled", "gajadi", "gak jadi", "ga jadi", "nggak jadi", "enggak jadi",
+    "engga jadi", "gk jadi", "tidak jadi", "tdk jadi", "stop",
 }
 
 _PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
@@ -44,6 +45,27 @@ def _tokens(text: str) -> list[str]:
     return _PUNCT_RE.sub(" ", (text or "").lower()).split()
 
 
+# Pertanyaan atau penundaan, bukan jawaban ya/batal. Terukur 7 Nov 2026: "bentar
+# ya" dan "boleh tanya dulu?" menyalakan takeover, dan "kebijakan pembatalannya
+# gimana?" membatalkan pesanan yang sudah dibayar.
+_TUNDA = {"bentar", "sebentar", "tunggu", "dulu", "pikir", "mikir", "dipikir", "nanti",
+          "ntar", "tanya", "nanya", "wait", "later", "think", "ask"}
+_RAGU = _TUNDA | {
+    "ampun", "apa", "apakah", "siapa", "kenapa", "mengapa", "gimana", "bagaimana", "kapan",
+    "berapa", "mana", "emang", "emangnya", "what", "why", "how", "when", "who", "which",
+}
+
+
+def text_ragu(text: str) -> bool:
+    return "?" in (text or "") or bool(set(_tokens(text)) & _RAGU)
+
+
+def _ada_frasa(text: str, frasa) -> bool:
+    """Frasa sebagai kata utuh: "sudah pas" tidak cocok di "sudah pasti"."""
+    t = f" {' '.join(_tokens(text))} "
+    return any(f" {f} " in t for f in frasa)
+
+
 def text_is_confirm(text: str) -> bool:
     """True when the customer is agreeing — not only when they typed the magic words.
 
@@ -54,10 +76,10 @@ def text_is_confirm(text: str) -> bool:
     treated as agreement by the caller — "iya, tambah 1 lagi" is a change.
     """
     words = _tokens(text)
-    if not words:
+    if not words or text_ragu(text):
         return False
     joined = " ".join(words)
-    if joined in CONFIRM_WORDS or any(p in joined for p in _CONFIRM_PHRASES):
+    if joined in CONFIRM_WORDS or _ada_frasa(joined, _CONFIRM_PHRASES):
         return True
     # A short agreement with filler around it: "iya udah bener", "oke gas".
     return len(words) <= 4 and any(w in CONFIRM_WORDS for w in words)
@@ -226,9 +248,14 @@ def text_asks_for_human(text: str) -> bool:
 
 
 def text_bingung_soal_admin(text: str) -> bool:
-    """Bertanya, bukan menjawab, tawaran admin: "aku ngomong sama siapa kalo bukan admin?"."""
-    words = set(_tokens(text))
-    return bool(words & _MANUSIA and words & _TANYA_BINGUNG)
+    """Bertanya, bukan menjawab, tawaran admin: "aku ngomong sama siapa kalo bukan
+    admin?", atau setuju yang menggantung: "bentar ya", "oke aku pikir dulu"."""
+    words = _tokens(text)
+    kata = set(words)
+    # Setuju yang menggantung dibatasi kalimat pendek berkata tunda: "berapa
+    # harganya ya?" adalah pertanyaan lain dan tetap dijawab model.
+    menunda = len(words) <= 4 and bool(kata & CONFIRM_WORDS and kata & _TUNDA)
+    return bool(kata & _MANUSIA and kata & _TANYA_BINGUNG) or menunda
 
 
 _NEGATIF = {
@@ -288,6 +315,14 @@ def text_tanya_termurah(text: str) -> bool:
 
 
 def text_is_cancel(text: str) -> bool:
+    """Perintah batal: kata utuh, bukan pertanyaan. "pembatalannya gimana?" dan
+    "kenapa harus batal?" bukan perintah."""
+    return not text_ragu(text) and _ada_frasa(text, CANCEL_WORDS)
+
+
+def text_menyebut_batal(text: str) -> bool:
+    """Ada kata batal di mana pun ("minta pembatalan"). Hanya untuk penjaga
+    tool cancel_order — tool itu sendiri masih meminta konfirmasi ya/tidak."""
     t = " ".join(_tokens(text))
     return any(w in t for w in CANCEL_WORDS)
 

@@ -9,7 +9,7 @@ from langchain_core.tools import tool
 from app.backend_client import api as backend
 from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
-from app.conversation.states import State, text_is_cancel
+from app.conversation.states import State, text_menyebut_batal
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ async def cancel_order() -> str:
     lang = await store.get_lang(wa)
     # Penjaga data: model pernah memanggil tool ini untuk pesan "order" saja.
     # Membatalkan tanpa kata batal dari pelanggan terlalu mahal kalau salah.
-    if ctx.user_text and not text_is_cancel(ctx.user_text):
+    if ctx.user_text and not text_menyebut_batal(ctx.user_text):
         return bahasa.teks("bukan_niat_batal", lang)
     order = await store.get_active_pending(wa)
 
