@@ -1610,3 +1610,60 @@ async def test_get_store_address_membaca_endpoint_publik(patch_externals, monkey
     monkeypatch.setattr(api_mod, "_alamat_cache", None)
     balasan = {"store_address": None}
     assert await baca() is None
+
+
+BENTO = [
+    {"id": 20, "nama_produk": "Bento Cookies 10cm", "harga_jual": 44000, "is_active": True},
+    {"id": 76, "nama_produk": "Bento Cookies 10cm Brown Sugar", "harga_jual": 38000,
+     "is_active": True},
+    {"id": 75, "nama_produk": "Bento Cookies 10cm Original", "harga_jual": 35000,
+     "is_active": True},
+    {"id": 79, "nama_produk": "Giant Cookies 15cm Brown Sugar", "harga_jual": 70000,
+     "is_active": True},
+]
+
+
+@pytest.fixture
+def katalog_bento(monkeypatch):
+    from app.backend_client import products as products_api
+
+    async def fake_list(only_active=True, kategori=None):
+        return list(BENTO)
+
+    async def fake_get(pid):
+        return next((p for p in BENTO if p["id"] == pid), None)
+
+    monkeypatch.setattr(products_api, "list_products", fake_list)
+    monkeypatch.setattr(products_api, "get_product", fake_get)
+
+
+@pytest.mark.parametrize("teks,nama", [
+    ("bukan bento cookies yang itu, yang 10cm brown sugar", "Bento Cookies 10cm Brown Sugar"),
+    ("ganti jadi bento cookies 10 cm brown sugar", "bento cookies 10 cm brown sugar"),
+    ("ganti yang brown sugar aja", "brown sugar"),
+])
+async def test_update_cart_mengganti_kue(katalog_bento, teks, nama):
+    """Produksi 7 Nov 2026: kue di keranjang tidak bisa diganti ke varian lain;
+    permintaannya ditolak sebagai "jumlah akhir belum jelas"."""
+    await store.set_cart(WA, [{"product_id": 20, "nama": "Bento Cookies 10cm",
+                               "harga": 44000.0, "qty": 2}])
+    await store.set_state(WA, State.AWAITING_CART_CONFIRMATION)
+
+    out = await _ubah([{"product": nama, "qty": 1}], teks)
+
+    assert await store.get_cart(WA) == [{"product_id": 76,
+                                         "nama": "Bento Cookies 10cm Brown Sugar",
+                                         "harga": 38000.0, "qty": 2}]
+    assert "belum jelas" not in out and "Rp76.000" in out
+
+
+async def test_update_cart_ganti_kue_dengan_jumlah_baru(katalog_bento):
+    await store.set_cart(WA, [{"product_id": 75, "nama": "Bento Cookies 10cm Original",
+                               "harga": 35000.0, "qty": 1}])
+    await store.set_state(WA, State.AWAITING_CART_CONFIRMATION)
+
+    await _ubah([{"product": "Bento Cookies 10cm Brown Sugar", "qty": 3}],
+                "ganti ke brown sugar 3 ya")
+
+    cart = await store.get_cart(WA)
+    assert [(c["product_id"], c["qty"]) for c in cart] == [(76, 3)]

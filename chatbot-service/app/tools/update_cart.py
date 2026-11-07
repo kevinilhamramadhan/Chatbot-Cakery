@@ -19,6 +19,7 @@ from app.conversation.context import get_turn_context
 from app.conversation.states import State, mentions_quantity
 from app.core.config import settings
 from app.tools.add_to_cart import _as_items, add_to_cart, cart_summary
+from app.tools.formatting import _SIZE_RE, _tokens, product_label, resolve_product, tersedia
 
 _KATA = re.compile(r"[a-z0-9]+")
 
@@ -38,6 +39,46 @@ def _cocok_di_keranjang(nama: str, cart: list[dict]) -> tuple[dict | None, list[
         return None, []
     kandidat = [it for s, it in skor if s == terbaik]
     return (kandidat[0], []) if len(kandidat) == 1 else (None, kandidat)
+
+
+# Harus ada kata mengganti: "bolu pandan jadi 2" mengubah jumlah, bukan menukar
+# kue, dan "brownies fudgy jadi 2" tidak boleh diam-diam menggantikan Brownies Coklat.
+_GANTI = {"ganti", "gantiin", "diganti", "tukar", "tuker", "bukan", "change", "swap",
+          "instead"}
+
+
+async def _kue_pengganti(nama: str, item: dict | None, cart: list[dict],
+                         user_text: str) -> tuple[dict, dict] | None:
+    """(item di keranjang, produk katalog) kalau kue yang disebut adalah kue LAIN
+    yang dimaksud menggantikan isi keranjang, atau None.
+
+    Produksi 7 Nov 2026: "bukan bento cookies yang itu, yang 10cm brown sugar"
+    dan "ganti jadi bento cookies 10 cm brown sugar" dicocokkan ke Bento Cookies
+    10cm yang sudah di keranjang, lalu ditolak sebagai jumlah yang belum jelas —
+    tidak ada cara mengganti kue tanpa membatalkan semuanya.
+    """
+    if not set(_KATA.findall(user_text.lower())) & _GANTI:
+        return None
+    target = item if item is not None else (cart[0] if len(cart) == 1 else None)
+    if target is None:
+        return None
+    # Semua kata yang disebut sudah ada di nama item: yang dimaksud item itu sendiri.
+    if _tokens(nama) <= _tokens(str(target["nama"])):
+        return None
+    p, kandidat = await resolve_product(nama)
+    if p is None and kandidat:
+        # "yang brown sugar" cocok ke Bento/Giant/Mini Brown Sugar: pilih yang
+        # paling mirip kue yang diganti, kalau hanya ada satu.
+        asal = _tokens(str(target["nama"]))
+        skor = [(len(_tokens(product_label(k)) & asal), k) for k in kandidat]
+        terbaik = max(sk for sk, _ in skor)
+        sama = [k for sk, k in skor if sk == terbaik]
+        p = sama[0] if len(sama) == 1 else None
+    if p is None or p.get("id") == target.get("product_id"):
+        return None
+    if any(c.get("product_id") == p.get("id") for c in cart):
+        return None
+    return target, p
 
 
 def _jumlah_akhir(raw) -> int | None:
@@ -80,13 +121,34 @@ async def update_cart(items: list[dict] | None = None, product: str | None = Non
     if not items:
         return bahasa.teks("ubah_keranjang_item_mana", lang) + "\n\n" + cart_summary(cart, lang)
 
-    tak_ada, seri, tak_jelas, minimum, besar = [], [], [], [], []
+    tak_ada, seri, tak_jelas, minimum, besar, habis = [], [], [], [], [], []
     berubah = False
     for raw in items:
         nama = str(raw.get("product") or raw.get("nama") or "").strip()
         if not nama:
             continue
         item, kandidat = _cocok_di_keranjang(nama, cart)
+        ganti = (await _kue_pengganti(nama, item, cart, ctx.user_text or "")
+                 if raw.get("qty") != 0 else None)
+        if ganti is not None:
+            lama, p = ganti
+            if not tersedia(p) or p.get("harga_jual") is None:
+                habis.append(product_label(p))
+                continue
+            jml = _jumlah_akhir(raw.get("qty"))
+            # Jumlahnya ikut kue lama, kecuali pelanggan menulis angka sendiri
+            # ("10 cm" adalah ukuran, bukan jumlah).
+            if not (jml and mentions_quantity(_SIZE_RE.sub(" ", (ctx.user_text or "").lower()))):
+                jml = lama["qty"]
+            min_order = max(1, int(p.get("minimum_order") or 1))
+            if jml < min_order:
+                minimum.append(bahasa.teks("ubah_keranjang_minimum_item", lang,
+                                           nama=product_label(p), minimum=min_order))
+                continue
+            lama.update(product_id=p.get("id"), nama=product_label(p),
+                        harga=float(p["harga_jual"]), qty=jml)
+            berubah = True
+            continue
         if item is None:
             (seri if kandidat else tak_ada).append(nama)
             continue
@@ -129,6 +191,9 @@ async def update_cart(items: list[dict] | None = None, product: str | None = Non
         catatan.append("; ".join(minimum))
     if besar:
         catatan.append(bahasa.teks("ubah_keranjang_besar", lang, nama="; ".join(besar)))
+    if habis:
+        catatan.append(bahasa.teks("catatan_tidak_tersedia", lang, isi=", ".join(habis)).strip(
+            "\n ()"))
 
     ctx.next_state = State.AWAITING_CART_CONFIRMATION
     msg = cart_summary(cart, lang)
