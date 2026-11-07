@@ -538,6 +538,16 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("Would you like me to connect you to our admin so it can be followed up "
              "right away? Type *yes* and I'll connect you."),
     },
+    # Pelanggan bingung menanggapi tawaran ("aku ngomong sama siapa kalo bukan
+    # admin?"): dijelaskan lalu ditanya ulang, bukan langsung disambungkan.
+    "tawaran_admin_ulang": {
+        ID: ("Sekarang kamu lagi ngobrol sama asisten virtual Toti Cakery, belum "
+             "dengan admin 😊 Mau aku sambungkan ke admin? Balas *ya* untuk "
+             "disambungkan, atau *tidak* kalau mau lanjut sama aku."),
+        EN: ("Right now you're chatting with Toti Cakery's virtual assistant, not an "
+             "admin yet 😊 Shall I connect you to our admin? Reply *yes* to be "
+             "connected, or *no* to keep chatting with me."),
+    },
     # ── Kabar proaktif ───────────────────────────────────────────────────────
     "pesanan_diproses": {
         ID: "Pesananmu *{label}* sedang kami buat sekarang 👩‍🍳 Nanti aku kabari lagi begitu siap.",

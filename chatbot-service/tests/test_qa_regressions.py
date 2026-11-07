@@ -1038,6 +1038,25 @@ async def test_tawaran_admin_ditolak_kalimat_panjang(patch_externals):
     assert await store.is_takeover_active(WA) is False
 
 
+async def test_tawaran_admin_tidak_diterima_pertanyaan_bingung(patch_externals):
+    """Produksi 7 Nov 2026: pelanggan bingung ditawari admin, membalas dengan
+    pertanyaan yang menyebut "admin", dan takeover langsung menyala."""
+    from app.tools.escalate import escalate_to_admin
+
+    _mock_agent(patch_externals["monkeypatch"], "Aku asisten virtual Toti Cakery kak 😊")
+    set_turn_context(TurnContext(wa_number=WA, user_text="mau kue custom"))
+    await store.log_message(
+        WA, "out", await escalate_to_admin.ainvoke({"reason": "kue custom"}))
+
+    r = await handle_message(WA, "Lho sekarang aku ngomong sama siapa kalo bukan admin?")
+    assert await store.is_takeover_active(WA) is False
+    assert "asisten virtual" in r.text and "*ya*" in r.text
+
+    # Tawarannya tetap berlaku: "ya" sesudah ditanya ulang masih menyambungkan.
+    await handle_message(WA, "ya")
+    assert await store.is_takeover_active(WA) is True
+
+
 async def test_tawaran_admin_kedaluwarsa_setelah_beberapa_giliran(patch_externals):
     """Tawaran yang menggantung lama tidak boleh diterima kata "ya" yang
     kebetulan lewat di kalimat lain."""

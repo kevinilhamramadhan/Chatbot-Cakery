@@ -85,6 +85,9 @@ def text_is_gratitude(text: str) -> bool:
 _MANUSIA = {"admin", "cs", "manusia", "orang", "human", "staff", "staf", "owner"}
 _PENOLAKAN = {"ga", "gak", "nggak", "enggak", "gausah", "tidak", "tak", "jangan",
               "no", "not", "dont"}
+# "apa"/"bisa" tidak ikut: "apa bisa ngobrol sama admin?" tetap permintaan.
+_TANYA_BINGUNG = {"siapa", "kenapa", "mengapa", "gimana", "bagaimana", "bukan", "emang",
+                  "emangnya", "who", "why"}
 
 
 _MINTA = {"ngobrol", "bicara", "ngomong", "chat", "hubungi", "hubungkan", "sambungkan",
@@ -213,9 +216,19 @@ def text_asks_for_human(text: str) -> bool:
     jadi takeover tidak pernah menyala dan model malah menjawab "aku asisten
     virtual" dua kali berturut-turut. Kalimat yang menolak ("ga usah admin")
     tidak ikut.
+
+    Pertanyaan tentang admin juga tidak ikut. Terukur 7 Nov 2026: "Lho sekarang
+    aku ngomong sama siapa kalo bukan admin?" menyalakan takeover padahal
+    pelanggan sedang bingung, bukan setuju.
     """
     words = set(_tokens(text))
-    return bool(words & _MANUSIA) and not words & _PENOLAKAN
+    return bool(words & _MANUSIA) and not words & (_PENOLAKAN | _TANYA_BINGUNG)
+
+
+def text_bingung_soal_admin(text: str) -> bool:
+    """Bertanya, bukan menjawab, tawaran admin: "aku ngomong sama siapa kalo bukan admin?"."""
+    words = set(_tokens(text))
+    return bool(words & _MANUSIA and words & _TANYA_BINGUNG)
 
 
 _NEGATIF = {

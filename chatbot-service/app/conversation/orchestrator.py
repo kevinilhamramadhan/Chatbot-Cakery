@@ -23,6 +23,7 @@ from app.conversation.states import (
     State,
     mentions_quantity,
     text_asks_for_human,
+    text_bingung_soal_admin,
     text_menolak,
     text_minta_admin,
     text_menawar,
@@ -302,6 +303,11 @@ async def handle_message(wa_number: str, text: str) -> Reply:
                 reply = Reply(text=bahasa.teks("tawaran_ditolak", lang))
                 await store.log_message(wa_number, "out", reply.text)
                 return reply
+        elif text_bingung_soal_admin(text):
+            # Tawarannya tetap menggantung; ditanyakan ulang dengan pilihan ya/tidak.
+            reply = Reply(text=bahasa.teks("tawaran_admin_ulang", lang))
+            await store.log_message(wa_number, "out", reply.text)
+            return reply
 
     # 2b) Kekecewaan susulan sesudah permintaan maaf. Terukur di gladi demo:
     # "saya agak kecewa sih" dijawab model "Senang banget kalau suka". Dilihat
@@ -559,7 +565,7 @@ async def _escalation_offer_expired(wa_number: str) -> bool:
     # Inggris tidak pernah ditemukan dan dianggap kedaluwarsa sejak giliran
     # pertama, sehingga "yes" pelanggan tidak pernah diterima.
     penanda = tuple(bahasa.teks(k, l)[:40]
-                    for k in ("tawaran_admin", "tawaran_admin_lanjut")
+                    for k in ("tawaran_admin", "tawaran_admin_lanjut", "tawaran_admin_ulang")
                     for l in (bahasa.ID, bahasa.EN))
     terakhir = -1
     for i, pesan in enumerate(riwayat):
