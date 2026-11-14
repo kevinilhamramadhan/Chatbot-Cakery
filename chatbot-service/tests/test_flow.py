@@ -1667,3 +1667,65 @@ async def test_update_cart_ganti_kue_dengan_jumlah_baru(katalog_bento):
 
     cart = await store.get_cart(WA)
     assert [(c["product_id"], c["qty"]) for c in cart] == [(76, 3)]
+
+
+# ── Rate limit backend (HTTP 429) ─────────────────────────────────────────────
+def _ditolak_limiter(metode: str, jalur: str):
+    import httpx
+    request = httpx.Request(metode, f"http://backend/api{jalur}")
+    response = httpx.Response(429, request=request, headers={"Retry-After": "60"},
+                              json={"error": "Rate limit exceeded: 5 per 1 minute"})
+    return httpx.HTTPStatusError("429", request=request, response=response)
+
+
+async def test_pesanan_kena_rate_limit_dijawab_ramai_dan_bisa_diulang(patch_externals):
+    """429 saat membuat pesanan bukan galat sistem: pelanggan diberi tahu sedang
+    ramai, keranjang tetap ada, pesanan tidak dibuat dua kali, dan mengulang
+    sesudahnya berhasil."""
+    mp, backend = patch_externals["monkeypatch"], patch_externals["backend"]
+    asli = backend.create_order
+    percobaan = []
+
+    async def ditolak(*a, **k):
+        percobaan.append(1)
+        raise _ditolak_limiter("POST", "/orders")
+
+    mp.setattr(backend, "create_order", ditolak)
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "full"):
+        await handle_message(WA, msg)
+    r = await handle_message(WA, "va")
+
+    assert "ramai" in r.text.lower() and "1 menit" in r.text
+    assert "gagal" not in r.text.lower()
+    assert len(percobaan) == 1                       # tidak diulang otomatis
+    assert patch_externals["charges"] == []
+    assert await store.get_cart(WA)                  # keranjang masih ada
+
+    mp.setattr(backend, "create_order", asli)
+    r = await handle_message(WA, "va")
+    assert "8808123456789012" in r.text
+    assert (await store.get_or_create_session(WA)).state == State.AWAITING_PAYMENT
+
+
+async def test_tagihan_kena_rate_limit_membatalkan_pesanan_dan_dijawab_ramai(patch_externals):
+    mp, backend = patch_externals["monkeypatch"], patch_externals["backend"]
+    dibatalkan = []
+
+    async def ditolak(*a, **k):
+        raise _ditolak_limiter("POST", "/payments")
+
+    async def f_cancel(order_id, wa=None):
+        dibatalkan.append(order_id)
+        return {"status": "success"}
+
+    mp.setattr(backend, "create_payment", ditolak)
+    mp.setattr(backend, "cancel_order", f_cancel)
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+    for msg in ("sudah sesuai", "Budi", "Jl. Test 1", "pickup", "lusa", "full"):
+        await handle_message(WA, msg)
+    r = await handle_message(WA, "qris")
+
+    assert "ramai" in r.text.lower()
+    assert dibatalkan == [30001]                     # tidak ada pesanan yatim di backend
+    assert await store.get_active_pending(WA) is None

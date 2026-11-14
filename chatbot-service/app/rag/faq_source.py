@@ -20,6 +20,7 @@ import httpx
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.backend_client import api as backend_api
+from app.backend_client import batas
 from app.conversation import bahasa
 from app.core.config import settings
 from app.rag.store import get_collection
@@ -62,7 +63,8 @@ async def fetch_backend_faq() -> list[FaqDoc]:
     )
     try:
         async with httpx.AsyncClient(timeout=settings.backend_request_timeout_seconds,
-                                     headers=headers) as client:
+                                     headers=headers,
+                                     event_hooks=batas.kait()) as client:
             resp = await client.get(url)
         if resp.status_code >= 400:
             logger.warning("Backend /faq -> %s; memakai berkas FAQ lokal", resp.status_code)

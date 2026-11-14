@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app.backend_client import api as backend
+from app.backend_client import batas as batas_laju
 from app.backend_client import products as products_api
 from app.conversation import bahasa, store, tanggal
 from app.conversation.context import OutboundMedia, get_turn_context_or_none
@@ -71,6 +72,12 @@ async def _tagihan_lain(wa_number: str, lang: str) -> str:
             delivery_method=o.get("metode_pengiriman") or "pickup", expires_at=expires_at)
     await store.set_state(wa_number, State.AWAITING_PAYMENT)
     return bahasa.teks("masih_ada_tagihan_luar", lang, invoice=invoice, jumlah=rupiah(amount_due))
+
+
+def _sedang_padat(exc: httpx.HTTPStatusError, lang: str | None) -> str:
+    """Balasan untuk 429 rate limiter, dengan perkiraan waktu dari Retry-After."""
+    detik = batas_laju.detik_tunggu(exc.response) if exc.response is not None else 60.0
+    return bahasa.teks("sedang_padat", lang, menit=max(1, -(-int(detik) // 60)))
 
 
 def _alasan_backend(exc: httpx.HTTPStatusError) -> str:
@@ -208,6 +215,11 @@ async def finalize_order(wa_number: str) -> str:
             fulfillment_date=tgl,
         )
     except httpx.HTTPStatusError as exc:
+        # 429 dari rate limiter: backend sedang ramai, bukan galat sistem.
+        # Tidak diulang otomatis supaya tidak menjadi pesanan ganda.
+        if batas_laju.karena_limit(exc):
+            logger.warning("create order ditahan rate limit backend")
+            return _sedang_padat(exc, lang)
         # 409 is a business answer, not a hiccup: the backend refuses a second
         # order while an invoice is still unpaid. Telling the customer to "coba
         # ulangi sebentar lagi" sent them into a retry that can never succeed.
@@ -249,6 +261,8 @@ async def finalize_order(wa_number: str) -> str:
             await backend.cancel_order(order_id, wa_number)
         except Exception:  # noqa: BLE001
             logger.warning("could not cancel orphaned order %s", order_id)
+        if batas_laju.karena_limit(exc):
+            return _sedang_padat(exc, lang)
         return bahasa.teks("tagihan_gagal", lang)
 
     # An invoice nobody can pay is worse than an honest failure. The backend

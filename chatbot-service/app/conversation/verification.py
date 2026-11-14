@@ -58,6 +58,11 @@ MSG_THROTTLED = (
     "Kamu mencoba verifikasi terlalu sering. Tunggu sebentar ya, lalu minta kode "
     "baru dari halaman pendaftaran."
 )
+# Rate limiter backend menolak sementara; kodenya sendiri masih berlaku.
+MSG_BUSY = (
+    "Verifikasi sedang ramai, jadi belum bisa kuproses 🙏\n"
+    "Kodenya masih berlaku. Coba kirim ulang pesan tadi sekitar 1 menit lagi ya."
+)
 MSG_ERROR = (
     "Maaf, verifikasi sedang tidak bisa diproses. Coba lagi sebentar lagi ya 🙏"
 )
@@ -67,6 +72,7 @@ _STATUS_REPLY = {
     "mismatch": MSG_MISMATCH,
     "not_found": MSG_NOT_FOUND,
     "locked": MSG_LOCKED,
+    "busy": MSG_BUSY,
 }
 
 _WINDOW_SECONDS = 3600

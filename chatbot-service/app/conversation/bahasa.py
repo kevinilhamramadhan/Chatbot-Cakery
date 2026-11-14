@@ -356,6 +356,14 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Maaf, pembuatan pesanan gagal. Coba ulangi sebentar lagi ya 🙏",
         EN: "Sorry, I couldn't create your order. Please try again in a moment 🙏",
     },
+    # Rate limiter backend menolak sementara (HTTP 429). Bukan galat sistem dan
+    # tidak diulang otomatis; pelanggan yang mengulang sesudah jendelanya lewat.
+    "sedang_padat": {
+        ID: ("Maaf, permintaan sedang ramai jadi pesananmu belum bisa kuproses 🙏\n"
+             "Keranjang dan datamu masih tersimpan. Coba ulangi sekitar {menit} menit lagi ya."),
+        EN: ("Sorry, things are busy right now, so I couldn't process your order yet 🙏\n"
+             "Your cart and details are saved. Please try again in about {menit} minute(s)."),
+    },
     "tagihan_gagal": {
         ID: "Maaf, pembuatan tagihan gagal. Coba ulangi sebentar lagi ya 🙏",
         EN: "Sorry, I couldn't create the invoice. Please try again in a moment 🙏",

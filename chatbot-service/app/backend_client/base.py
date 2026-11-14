@@ -9,6 +9,7 @@ import logging
 
 import httpx
 
+from app.backend_client import batas
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -38,8 +39,13 @@ class BackendClient:
         for attempt in (1, 2):
             try:
                 async with httpx.AsyncClient(timeout=self._timeout,
-                                             headers=self._headers) as client:
+                                             headers=self._headers,
+                                             event_hooks=batas.kait()) as client:
                     resp = await client.get(url, params=params)
+            except batas.BackendSibuk as exc:
+                # Kuota rate limit habis: mengulang sekarang pasti ditolak lagi.
+                logger.warning("Backend GET %s ditahan rate limit (%s dtk)", url, exc.detik)
+                return None
             except httpx.HTTPError as exc:  # connection/timeout
                 last_exc = exc
                 if attempt == 1:

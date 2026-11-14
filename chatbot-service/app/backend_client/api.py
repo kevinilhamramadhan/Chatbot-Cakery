@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 import httpx
 
+from app.backend_client import batas
 from app.core.config import settings
 from app.core.security import canonical_wa_number, valid_wa_number
 
@@ -70,7 +71,7 @@ async def get_store_address() -> str | None:
     if _alamat_cache is not None and sekarang - _alamat_cache[0] < _ALAMAT_TTL_DETIK:
         return _alamat_cache[1]
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
             r = await c.get(f"{_base()}/public/store-customization")
             r.raise_for_status()
             data = r.json()
@@ -84,7 +85,7 @@ async def get_store_address() -> str | None:
 
 async def upsert_customer(wa_number: str, nama: str, alamat: str, phone: str) -> dict:
     number = _wa_variants(wa_number)[0]
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
         r = await c.post(f"{_base()}/customers",
                          json={"nomor_wa": number, "nama": nama, "alamat": alamat},
                          headers=_headers("backend_customers_key"))
@@ -107,7 +108,7 @@ async def create_order(customer_id: int, items: list[dict], metode_pengiriman: s
         "items": [{"product_id": i["product_id"], "jumlah": i.get("jumlah", i.get("qty"))}
                   for i in items],
     }
-    async with httpx.AsyncClient(timeout=_WRITE_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_WRITE_TIMEOUT, event_hooks=batas.kait()) as c:
         r = await c.post(f"{_base()}/orders", json=payload, headers=_headers())
         r.raise_for_status()
         d = r.json()
@@ -126,7 +127,7 @@ async def create_payment(order_id, amount, channel: str = "bank_transfer",
     from the order for that type and rejects a mismatch with 400 (its
     anti-tampering check), so `amount` must be derived the same way.
     """
-    async with httpx.AsyncClient(timeout=_WRITE_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_WRITE_TIMEOUT, event_hooks=batas.kait()) as c:
         r = await c.post(f"{_base()}/payments",
                          json={"order_id": int(order_id),
                                "payment_method": channel,
@@ -141,7 +142,7 @@ async def create_payment(order_id, amount, channel: str = "bank_transfer",
 
 
 async def get_payment_status(order_id, wa_number: str) -> dict | None:
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
         r = await c.get(f"{_base()}/payments/{int(order_id)}/status",
                         params={"nomor_wa": _nomor(wa_number)},
                         headers=_headers("backend_payment_status_key"))
@@ -152,7 +153,7 @@ async def get_payment_status(order_id, wa_number: str) -> dict | None:
 
 
 async def get_latest_order(wa_number: str) -> dict | None:
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
         for number in _wa_variants(wa_number):
             r = await c.get(f"{_base()}/orders/latest", params={"nomor_wa": number},
                             headers=_headers("backend_orders_read_key"))
@@ -169,7 +170,7 @@ async def get_order(order_id) -> dict | None:
     Service key `orders:read` boleh membaca `GET /orders/{id}` sejak backend
     dcd422b; dipakai notifikasi pesanan baru ke seller.
     """
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
         r = await c.get(f"{_base()}/orders/{int(order_id)}",
                         headers=_headers("backend_orders_read_key"))
         if r.status_code == 404:
@@ -179,7 +180,7 @@ async def get_order(order_id) -> dict | None:
 
 
 async def cancel_order(order_id, wa_number: str) -> dict:
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
         r = await c.post(f"{_base()}/orders/{int(order_id)}/cancel",
                          params={"nomor_wa": _nomor(wa_number)},
                          headers=_headers("backend_orders_cancel_key"))
@@ -200,7 +201,7 @@ async def refund_order(order_id, reason: str, wa_number: str = "") -> dict | Non
     if wa_number:
         payload["nomor_wa"] = canonical_wa_number(wa_number) or wa_number
     try:
-        async with httpx.AsyncClient(timeout=_WRITE_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=_WRITE_TIMEOUT, event_hooks=batas.kait()) as c:
             r = await c.post(f"{_base()}/orders/{int(order_id)}/refund",
                              json=payload, headers=_headers("backend_refund_key"))
             if r.status_code >= 400:
@@ -230,7 +231,7 @@ async def get_takeover_status(wa_number: str) -> dict | None:
     None means "the backend has no row for this number" — the caller must treat
     that as unknown, NOT as "takeover is off".
     """
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
         for number in _wa_variants(wa_number):
             r = await c.get(f"{_base()}/customers/{_path_number(number)}/takeover",
                             headers=_headers("backend_customers_key"))
@@ -244,7 +245,7 @@ async def get_takeover_status(wa_number: str) -> dict | None:
 async def set_takeover(wa_number: str, active: bool, expires_at: str | None) -> dict:
     payload = {"active": active, "expires_at": expires_at}
     last: httpx.Response | None = None
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
         for number in _wa_variants(wa_number):
             r = await c.post(f"{_base()}/customers/{_path_number(number)}/takeover",
                              json=payload, headers=_headers("backend_customers_key"))
@@ -267,7 +268,7 @@ async def get_report_summary(start_date: str, end_date: str) -> dict | None:
     the tools then tell the Owner the report isn't available yet.
     """
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
             r = await c.get(f"{_base()}/reports/financial-summary",
                             params={"start_date": start_date, "end_date": end_date},
                             headers=_headers("backend_financial_summary_key"))
@@ -281,7 +282,7 @@ async def get_report_summary(start_date: str, end_date: str) -> dict | None:
 async def get_takeover_admin_numbers() -> list[str]:
     # C2: GET /admin/takeover-handlers -> {"numbers": [...]}; [] -> caller falls back to env.
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
             r = await c.get(f"{_base()}/admin/takeover-handlers",
                             headers=_headers("backend_customers_key"))
             if r.status_code >= 400:
@@ -304,7 +305,7 @@ async def _takeover_payload() -> dict | list | None:
     memutuskan sendiri mau memakai cache lama atau menyerah.
     """
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
             r = await c.get(f"{_base()}/admin/takeover-handlers",
                             headers=_headers("backend_customers_key"))
             if r.status_code >= 400:
@@ -333,7 +334,7 @@ async def get_owner_numbers() -> list[str] | None:
     backend yang sedang jalan — pemanggilnya lalu memakai sumber lama.
     """
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
             r = await c.get(f"{_base()}/users/owner-numbers",
                             headers=_headers("backend_owner_numbers_key"))
             if r.status_code >= 400:
@@ -394,7 +395,7 @@ async def periksa_kunci() -> list[str]:
         ("daftar Owner", "GET", "/users/owner-numbers", {}, "backend_owner_numbers_key"),
     ]
     ditolak = []
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
         for nama, metode, path, kw, kunci in uji:
             r = await c.request(metode, f"{_base()}{path}", headers=_headers(kunci), **kw)
             if r.status_code in (401, 403):
@@ -413,8 +414,19 @@ async def confirm_wa_verification(code: str, phone: str) -> dict:
     Kontrak nyata backend (commit 59a5d11): POST /auth/verify/wa/confirm dengan
     {nonce, sender_phone}, balasan 200 / 409 mismatch / 429 percobaan habis /
     404 nonce tidak dikenal-kedaluwarsa-sudah dipakai.
+
+    Endpoint ini juga dibatasi rate limiter backend, yang sama-sama menjawab
+    429. Itu bukan "percobaan habis": kodenya masih sah dan pelanggan cukup
+    mengirim ulang sebentar lagi, jadi dipetakan ke status "busy".
     """
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    try:
+        return await _confirm_wa_verification(code, phone)
+    except batas.BackendSibuk:
+        return {"status": "busy"}
+
+
+async def _confirm_wa_verification(code: str, phone: str) -> dict:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, event_hooks=batas.kait()) as c:
         r = await c.post(f"{_base()}/auth/verify/wa/confirm",
                          json={"nonce": code, "sender_phone": phone},
                          headers=_headers("backend_wa_verification_key"))
@@ -424,6 +436,8 @@ async def confirm_wa_verification(code: str, phone: str) -> dict:
         return {"status": "not_found"}
     if r.status_code == 409:      # nomor pengirim != nomor yang didaftarkan
         return {"status": "mismatch"}
+    if batas.dari_limiter(r):
+        return {"status": "busy"}
     if r.status_code in (423, 429):   # percobaan habis, kode dikunci
         return {"status": "locked"}
     r.raise_for_status()

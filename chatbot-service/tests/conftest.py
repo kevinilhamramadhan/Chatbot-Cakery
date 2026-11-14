@@ -32,6 +32,7 @@ os.environ.update({
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 
+from app.backend_client import batas  # noqa: E402
 from app.conversation import rbac, tanggal  # noqa: E402
 from app.core.database import Base, engine  # noqa: E402
 
@@ -48,6 +49,8 @@ async def fresh_db():
     # Direktori peran di-cache di level modul; tanpa ini satu test bisa mewarisi
     # daftar Owner milik test sebelumnya.
     rbac.bersihkan_cache()
+    # Penahan rate limit backend juga di level modul.
+    batas.reset()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
