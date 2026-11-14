@@ -176,3 +176,65 @@ async def test_jawaban_di_luar_pilihan_tetap_ke_model(katalog):
                        "Sebutkan yang mana ya? 😊")
     assert len(diterima) == 4
     assert await store.get_cart(WA) == []
+
+
+# ── Ukuran yang ditulis tanpa "cm" (uji model v12 di server, 15 Nov 2026) ────
+CAKES = [
+    {"id": 64, "nama_produk": "Cake Vanilla 10cm", "harga_jual": 95000, "is_active": True},
+    {"id": 66, "nama_produk": "Cake Vanilla 15cm", "harga_jual": 145000, "is_active": True},
+    {"id": 68, "nama_produk": "Cake Vanilla 18cm", "harga_jual": 190000, "is_active": True},
+    {"id": 70, "nama_produk": "Cake Vanilla 20cm", "harga_jual": 235000, "is_active": True},
+    {"id": 71, "nama_produk": "Cake Cokelat 20cm", "harga_jual": 253000, "is_active": True},
+]
+
+
+@pytest.fixture
+def kue_ukuran(katalog):
+    from app.backend_client import products as products_api
+
+    async def daftar(only_active=True, kategori=None):
+        return CAKES
+
+    katalog.setattr(products_api, "list_products", daftar)
+    return katalog
+
+
+@pytest.mark.parametrize("teks", ["pesan cake vanilla ukuran 20", "mau cake vanilla diameter 20",
+                                  "cake vanilla size 20 ya"])
+async def test_ukuran_tanpa_cm_dikenali(kue_ukuran, teks):
+    """Model meneruskan nama apa adanya: 'cake vanilla ukuran 20' (qty 1 atau 20)."""
+    for qty in (1, 20):
+        await store.set_cart(WA, [])
+        await _tambah(teks, [{"product": teks.replace("pesan ", "").replace("mau ", ""), "qty": qty}])
+        cart = await store.get_cart(WA)
+        assert [(c["product_id"], c["qty"]) for c in cart] == [(70, 1)], (teks, qty)
+
+
+async def test_ukuran_tanpa_cm_dengan_jumlah(kue_ukuran):
+    await _tambah("mau cake vanilla ukuran 20 dua", [{"product": "cake vanilla ukuran 20", "qty": 2}])
+    assert [(c["product_id"], c["qty"]) for c in await store.get_cart(WA)] == [(70, 2)]
+
+
+async def test_angka_polos_tetap_jumlah(kue_ukuran):
+    """Tanpa kata ukuran, '2' adalah jumlah dan namanya tetap ambigu (ditanyakan)."""
+    out = await _tambah("mau cake vanilla 2", [{"product": "cake vanilla", "qty": 2}])
+    assert await store.get_cart(WA) == []
+    assert "Cake Vanilla 20cm" in out
+
+
+@pytest.mark.parametrize("jawaban", ["yang 20", "ukuran 20 aja", "20cm"])
+async def test_jawaban_ukuran_atas_yang_mana(kue_ukuran, jawaban):
+    import app.conversation.orchestrator as orch
+
+    await store.log_message(WA, "in", "mau cake vanilla")
+    await store.log_message(
+        WA, "out", "Ada beberapa pilihan untuk 'cake vanilla': Cake Vanilla 10cm (Rp95.000), "
+                   "Cake Vanilla 15cm (Rp145.000), Cake Vanilla 18cm (Rp190.000), "
+                   "Cake Vanilla 20cm (Rp235.000). Sebutkan yang mana ya? 😊")
+
+    async def model_tidak_boleh_dipanggil(wa, text):
+        raise AssertionError("tidak boleh diteruskan ke model")
+
+    kue_ukuran.setattr(orch, "_run_agent_turn", model_tidak_boleh_dipanggil)
+    await handle_message(WA, jawaban)
+    assert [(c["product_id"], c["qty"]) for c in await store.get_cart(WA)] == [(70, 1)]

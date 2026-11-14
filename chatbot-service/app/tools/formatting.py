@@ -46,6 +46,9 @@ _SPELLING = {
 
 # "10 cm" -> "10cm": the catalogue writes sizes closed up, customers don't.
 _SIZE_RE = re.compile(r"(\d+)\s*(cm|inch|in)\b")
+# "ukuran 20" / "diameter 20" -> "20cm": ukuran yang ditulis tanpa satuan. Hanya
+# sesudah kata ukuran, karena angka polos ("cake vanilla 2") adalah jumlah.
+_UKURAN_RE = re.compile(r"\b(?:ukuran|diameter|size|uk)\.?\s*(\d+)\b(?!\s*(?:cm|inch|in)\b)")
 
 
 def _kata(s: str) -> list[str]:
@@ -53,7 +56,7 @@ def _kata(s: str) -> list[str]:
     # strip punctuation, then rstrip("s") folds singular/plural ("cupcake" ==
     # "cupcakes") — without it a bare "cupcake" matched one variant arbitrarily.
     # Finally fold known spelling variants so "cokelat" == "coklat".
-    s = _SIZE_RE.sub(r"\1\2", s.lower())
+    s = _SIZE_RE.sub(r"\1\2", _UKURAN_RE.sub(r"\1cm", s.lower()))
     out = []
     for raw in s.split():
         w = raw.strip(".,?!()\"'").rstrip("s")

@@ -426,6 +426,11 @@ async def _jawab_pilihan_kue(wa_number: str, text: str) -> Reply | None:
     except Exception:  # noqa: BLE001 - tanpa katalog, model yang menjawab
         return None
     tawaran = [p for p in semua if product_label(p).casefold() in terakhir.casefold()]
+    # "yang 20" sesudah pilihan ukuran: angka polos dibaca sebagai "20cm" bila
+    # hanya itu yang ada di nama pilihan (pilihan "Isi 4/6/9" memakai angka polos).
+    token_tawaran = set().union(*(_tokens(product_label(p)) for p in tawaran)) if tawaran else set()
+    kata = {f"{k}cm" if (k.isdigit() and k not in token_tawaran and f"{k}cm" in token_tawaran) else k
+            for k in kata}
     cocok = [p for p in tawaran if kata <= _tokens(product_label(p))]
     if len(tawaran) < 2 or len(cocok) != 1:
         return None

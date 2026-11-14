@@ -83,14 +83,14 @@ def _hanya_jumlah(text: str) -> bool:
 
 
 def _jumlah_di_luar_nama(teks: str, p: dict, qty: int) -> int | None:
-    """Jumlah untuk kue yang namanya memuat angka ("Cupcakes Cokelat Isi 4").
+    """Jumlah untuk kue yang namanya memuat angka ("Cupcakes Cokelat Isi 4", "Cake Vanilla 20cm").
 
     Berlaku hanya kalau pelanggan menulis nama lengkapnya. Angka di dalam nama
     bukan jumlah: tanpa angka lain di pesan, jumlahnya 1. Kalau ada angka lain,
     jumlah dari model dipakai hanya bila angka itu memang tertulis; selain itu
     None, artinya tanyakan.
     """
-    if not any(k.isdigit() for k in _kata(p.get("nama_produk") or p.get("nama") or "")):
+    if not any(any(h.isdigit() for h in k) for k in _kata(p.get("nama_produk") or p.get("nama") or "")):
         return qty
     sisa = sisa_tanpa_nama(teks, p)
     if sisa is None:
