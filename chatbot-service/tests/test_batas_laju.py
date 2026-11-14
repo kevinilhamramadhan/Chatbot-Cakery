@@ -116,3 +116,32 @@ async def test_get_produk_tidak_diulang_saat_ditahan(monkeypatch):
     assert await base_mod.backend_client.get("/products/") is None
     assert await base_mod.backend_client.get("/products/") is None
     assert len(panggilan) == 1
+
+
+async def test_header_scope_menandai_limiter_walau_badan_berubah(backend_palsu):
+    """Sejak backend c52820a, X-RateLimit-Scope adalah kontraknya; badan boleh berubah."""
+    backend_palsu["balas"] = lambda r: httpx.Response(
+        429, headers={"Retry-After": "20", "X-RateLimit-Scope": "service"},
+        json={"detail": "format badan yang lain"})
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        await api_mod.get_order(1)
+    assert batas.karena_limit(exc.value)
+    with pytest.raises(batas.BackendSibuk):
+        await api_mod.get_order(2)
+    assert len(backend_palsu["panggilan"]) == 1
+
+
+async def test_verifikasi_dengan_header_scope_dijawab_ramai(backend_palsu):
+    backend_palsu["balas"] = lambda r: httpx.Response(
+        429, headers={"Retry-After": "30", "X-RateLimit-Scope": "service"},
+        json={"error": "Rate limit exceeded: 60 per 1 minute"})
+    assert await api_mod.confirm_wa_verification("ABC123", "628111") == {"status": "busy"}
+
+
+async def test_429_bisnis_tanpa_header_scope_tetap_bukan_limiter(backend_palsu):
+    """HTTPException 429 (percobaan OTP habis) tidak membawa X-RateLimit-Scope."""
+    backend_palsu["balas"] = lambda r: httpx.Response(
+        429, headers={"Retry-After": "60"}, json={"detail": "Terlalu banyak percobaan"})
+    assert await api_mod.confirm_wa_verification("ABC123", "628111") == {"status": "locked"}
+    backend_palsu["balas"] = lambda r: httpx.Response(200, json={})
+    assert await api_mod.confirm_wa_verification("DEF456", "628222") == {"status": "ok"}

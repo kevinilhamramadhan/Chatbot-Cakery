@@ -17,8 +17,9 @@ Aturan di sini:
 429 yang bukan dari rate limiter (misalnya kode verifikasi yang dikunci
 sesudah tiga kali salah nomor) adalah jawaban bisnis untuk satu pelanggan dan
 tidak boleh menahan endpoint itu untuk pelanggan lain. Keduanya dibedakan dari
-badan balasannya: rate limiter (SlowAPI) menulis `{"error": "Rate limit
-exceeded: ..."}`, sedangkan jawaban bisnis memakai `{"detail": ...}`.
+header `X-RateLimit-Scope` yang hanya ada pada 429 rate limiter; untuk backend
+lama tanpa header itu, dari badannya: rate limiter (SlowAPI) menulis
+`{"error": "Rate limit exceeded: ..."}`, jawaban bisnis memakai `{"detail": ...}`.
 """
 
 import logging
@@ -54,9 +55,17 @@ def _kunci(request: httpx.Request) -> str:
 
 
 def dari_limiter(response: httpx.Response) -> bool:
-    """True kalau 429 ini berasal dari rate limiter, bukan jawaban bisnis."""
+    """True kalau 429 ini berasal dari rate limiter, bukan jawaban bisnis.
+
+    Penanda utamanya header `X-RateLimit-Scope` (`ip` atau `service`), yang
+    sejak backend c52820a dipasang di setiap 429 dari rate limiter dan tidak
+    pernah di 429 bisnis (HTTPException). Badan balasan hanya cadangan untuk
+    backend yang belum mengirim header itu; formatnya bukan kontrak.
+    """
     if response.status_code != 429:
         return False
+    if response.headers.get("X-RateLimit-Scope", "").strip():
+        return True
     try:
         data = response.json()
     except ValueError:
