@@ -10,14 +10,17 @@ from langchain_core.tools import tool
 
 from app.conversation import bahasa, rbac, store
 from app.conversation.context import get_turn_context
-from app.conversation.states import State, mentions_quantity
+from app.conversation.states import NUMBER_WORDS, State, mentions_quantity
 from app.core.config import settings
 from app.tools.formatting import (
+    _kata,
+    disebut_lengkap,
     menu_fallback,
     options_line,
     product_label,
     resolve_product,
     rupiah,
+    sisa_tanpa_nama,
     tersedia,
 )
 
@@ -79,6 +82,26 @@ def _hanya_jumlah(text: str) -> bool:
     return len(kata) == 1 and mentions_quantity(kata[0])
 
 
+def _jumlah_di_luar_nama(teks: str, p: dict, qty: int) -> int | None:
+    """Jumlah untuk kue yang namanya memuat angka ("Cupcakes Cokelat Isi 4").
+
+    Berlaku hanya kalau pelanggan menulis nama lengkapnya. Angka di dalam nama
+    bukan jumlah: tanpa angka lain di pesan, jumlahnya 1. Kalau ada angka lain,
+    jumlah dari model dipakai hanya bila angka itu memang tertulis; selain itu
+    None, artinya tanyakan.
+    """
+    if not any(k.isdigit() for k in _kata(p.get("nama_produk") or p.get("nama") or "")):
+        return qty
+    sisa = sisa_tanpa_nama(teks, p)
+    if sisa is None:
+        return qty
+    if not mentions_quantity(sisa):
+        return 1
+    tertulis = {int(k) if k.isdigit() else NUMBER_WORDS[k]
+                for k in _kata(sisa) if k.isdigit() or k in NUMBER_WORDS}
+    return qty if qty in tertulis else None
+
+
 async def _kue_barusan_dibahas(wa: str, label: str) -> bool:
     """Kue ini disebut di balasan bot terakhir, dan balasan itu bukan daftar.
 
@@ -136,12 +159,21 @@ async def add_to_cart(items: list[dict] | None = None, product: str | None = Non
             continue
         p, options = await resolve_product(name_q)
         if p is None and options:
-            # Several products fit ("cupcake" -> isi 4/6/9…): ask, never guess.
-            ambiguous.append(f"'{name_q}': {options_line(options)}")
-            continue
+            # Pelanggan sudah menulis nama lengkap salah satu pilihan; model
+            # yang memotongnya. Selain itu: several products fit ("cupcake" ->
+            # isi 4/6/9…): ask, never guess.
+            p = disebut_lengkap(ctx.user_text, options)
+            if p is None:
+                ambiguous.append(f"'{name_q}': {options_line(options)}")
+                continue
         if p is None:
             not_found.append(name_q)
             continue
+        if qty > 1 and ctx.user_text:
+            qty = _jumlah_di_luar_nama(ctx.user_text, p, qty)
+            if qty is None:
+                unclear_qty.append(product_label(p))
+                continue
         # Stok dicek di sini, bukan nanti waktu checkout: backend menolak
         # POST /orders untuk produk yang stoknya nol, dan pelanggan yang baru
         # diberi tahu setelah mengisi nama, alamat, dan metode bayar sudah

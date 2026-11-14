@@ -357,7 +357,9 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         reply = Reply(text=bahasa.teks("keranjang_kosong_tool", lang))
     else:
         reply = None
-        if not settings.intent_dari_model:
+        if state == State.IDLE:
+            reply = await _jawab_pilihan_kue(wa_number, text)
+        if reply is None and not settings.intent_dari_model:
             reply = await _aturan_kata_kunci(wa_number, text, lang, state)
         if reply is None:
             # IDLE / AWAITING_PAYMENT / ORDER_ACTIVE -> LLM agent (with tools).
@@ -390,6 +392,54 @@ async def handle_message(wa_number: str, text: str) -> Reply:
     if reply.text:
         await store.log_message(wa_number, "out", reply.text)
     return reply
+
+
+_PENGISI_PILIHAN = {"yang", "aja", "saja", "ya", "yaa", "yah", "deh", "dong", "kak", "kakak", "min",
+                    "itu", "mau", "pilih", "ambil", "sih", "nih", "the", "one", "please"}
+
+
+async def _jawab_pilihan_kue(wa_number: str, text: str) -> Reply | None:
+    """Jawaban atas "Ada beberapa pilihan ... Sebutkan yang mana ya?"; None = bukan itu.
+
+    Pertanyaannya dari templat kita sendiri, jadi jawabannya tidak boleh
+    bergantung pada model: di produksi (9 Nov 2026) "yang isi 4" sesudah
+    pertanyaan itu dijawab model dengan seluruh menu. Hanya berlaku bila pesan
+    pelanggan, sesudah kata pengisi dibuang, seluruhnya cocok dengan nama tepat
+    satu pilihan yang tadi ditawarkan. Kue lain, pertanyaan, jawaban yang cocok
+    ke dua pilihan, atau jawaban yang membawa jumlah tetap diserahkan ke model.
+    """
+    from app.backend_client import products as products_api
+    from app.tools.add_to_cart import add_to_cart
+    from app.tools.formatting import _kata, _tokens, product_label
+
+    riwayat = await store.recent_history(wa_number, limit=4, exclude_last_user=text)
+    terakhir = next((m["content"] for m in reversed(riwayat) if m["role"] == "assistant"), "")
+    awalan = [bahasa.teks("ada_beberapa_pilihan", b, daftar="\x00").split("\x00")[0]
+              for b in (bahasa.ID, bahasa.EN)]
+    if not terakhir or not any(terakhir.startswith(a) for a in awalan):
+        return None
+    kata = {k for k in _kata(text) if k not in _PENGISI_PILIHAN}
+    if not kata:
+        return None
+    try:
+        semua = await products_api.list_products(only_active=True)
+    except Exception:  # noqa: BLE001 - tanpa katalog, model yang menjawab
+        return None
+    tawaran = [p for p in semua if product_label(p).casefold() in terakhir.casefold()]
+    cocok = [p for p in tawaran if kata <= _tokens(product_label(p))]
+    if len(tawaran) < 2 or len(cocok) != 1:
+        return None
+    nama = product_label(cocok[0])
+    ctx = get_turn_context_or_none()
+    if ctx is None:
+        return None
+    # Pengaman add_to_cart membaca teks pelanggan; maknanya di sini sudah pasti
+    # "kue ini, satu", jadi itulah yang diberikan.
+    ctx.user_text = nama
+    jawab = await add_to_cart.ainvoke({"items": [{"product": nama, "qty": 1}]})
+    if ctx.next_state:
+        await store.set_state(wa_number, ctx.next_state)
+    return Reply(text=jawab, media=ctx.media)
 
 
 async def _aturan_kata_kunci(wa_number: str, text: str, lang: str, state: str) -> Reply | None:

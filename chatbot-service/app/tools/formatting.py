@@ -48,18 +48,51 @@ _SPELLING = {
 _SIZE_RE = re.compile(r"(\d+)\s*(cm|inch|in)\b")
 
 
-def _tokens(s: str) -> set[str]:
+def _kata(s: str) -> list[str]:
+    """Kata yang sudah dinormalkan, berurutan dan boleh berulang (lihat _tokens)."""
     # strip punctuation, then rstrip("s") folds singular/plural ("cupcake" ==
     # "cupcakes") — without it a bare "cupcake" matched one variant arbitrarily.
     # Finally fold known spelling variants so "cokelat" == "coklat".
     s = _SIZE_RE.sub(r"\1\2", s.lower())
-    out = set()
+    out = []
     for raw in s.split():
         w = raw.strip(".,?!()\"'").rstrip("s")
         if not w:
             continue
-        out.add(_SPELLING.get(w, w))
+        out.append(_SPELLING.get(w, w))
     return out
+
+
+def _tokens(s: str) -> set[str]:
+    return set(_kata(s))
+
+
+def disebut_lengkap(teks: str, kandidat: list[dict]) -> dict | None:
+    """Kandidat yang SELURUH kata namanya ditulis pelanggan, kalau hanya satu.
+
+    Model 1,7 B kadang memotong angka dari nama kue dan memakainya sebagai
+    jumlah: "saya mau Cupcakes Cokelat Isi 4" menjadi product="Cupcakes Cokelat
+    Isi", qty=4, lalu bot bertanya "Isi 4, Isi 6, atau Isi 9?" padahal pelanggan
+    sudah menulis nama lengkapnya (produksi, 9 Nov 2026). Ini mencocokkan teks
+    pelanggan dengan nama di katalog, bukan menebak maksud.
+    """
+    kata = set(_kata(teks or ""))
+    cocok = [p for p in kandidat if (t := _tokens(product_label(p))) and t <= kata]
+    if not cocok:
+        return None
+    terpanjang = max(len(_tokens(product_label(p))) for p in cocok)
+    cocok = [p for p in cocok if len(_tokens(product_label(p))) == terpanjang]
+    return cocok[0] if len(cocok) == 1 else None
+
+
+def sisa_tanpa_nama(teks: str, p: dict) -> str | None:
+    """Teks pelanggan tanpa kata-kata nama kue `p`; None kalau namanya tidak ditulis lengkap."""
+    kata = _kata(teks or "")
+    for t in _kata(product_label(p)):
+        if t not in kata:
+            return None
+        kata.remove(t)
+    return " ".join(kata)
 
 
 async def resolve_product(query: str) -> tuple[dict | None, list[dict]]:
