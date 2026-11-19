@@ -1819,3 +1819,51 @@ async def test_minta_refund_saat_refund_berjalan_dijawab_statusnya(patch_externa
     r = await handle_message(WA, "mau refund dong")
     assert "INV-301" in r.text
     assert not (await store.get_or_create_session(WA)).pending_escalation
+
+
+
+# ── Cadangan saat model tidak memanggil tool (uji menu 19 Nov 2026) ───────────
+async def _keranjang_brownies_menunggu_konfirmasi(monkeypatch, jawaban_model):
+    from app.conversation import orchestrator
+
+    async def model_tanpa_tool(wa, text, history):
+        return jawaban_model
+
+    monkeypatch.setattr(orchestrator, "run_agent", model_tanpa_tool)
+    await _seed_cart_awaiting_confirmation([{"product": "Brownies Coklat", "qty": 1}])
+
+
+async def test_kue_yang_dilewatkan_model_tetap_masuk_keranjang(patch_externals):
+    """Dengan isi keranjang, "pesan Bolu Pandan 1" dijawab model tanpa tool."""
+    await _keranjang_brownies_menunggu_konfirmasi(
+        patch_externals["monkeypatch"], "Siap kak, ada lagi?")
+    r = await handle_message(WA, "pesan Bolu Pandan 1")
+    cart = await store.get_cart(WA)
+    assert [(c["product_id"], c["qty"]) for c in cart] == [(5, 1), (8, 1)]
+    assert "Bolu Pandan" in r.text
+    r = await handle_message(WA, "tambah bolu pandan dua")
+    assert [(c["product_id"], c["qty"]) for c in await store.get_cart(WA)] == [(5, 1), (8, 3)]
+
+
+@pytest.mark.parametrize("pesan", ["bolu pandan enak ga?", "bolu pandan itu yang gimana",
+                                   "pesan bolu pandan 1 atau 2", "mau bolu pandan"])
+async def test_cadangan_tidak_menebak(patch_externals, pesan):
+    """Pertanyaan, dua angka, atau "mau" tanpa jumlah tetap urusan model."""
+    await _keranjang_brownies_menunggu_konfirmasi(patch_externals["monkeypatch"], "Boleh kak.")
+    await handle_message(WA, pesan)
+    assert [(c["product_id"], c["qty"]) for c in await store.get_cart(WA)] == [(5, 1)]
+
+
+
+@pytest.mark.parametrize("pesan", ["aturan refund gimana?", "kebijakan pengembalian dana apa ya",
+                                   "what is your refund policy?"])
+async def test_aturan_refund_dijawab_tanpa_model(patch_externals, mode_intent, pesan):
+    from app.conversation import orchestrator
+
+    async def model_tidak_boleh_dipanggil(*a, **k):
+        raise AssertionError("aturan refund tidak ada di FAQ, jangan diimprovisasi model")
+
+    patch_externals["monkeypatch"].setattr(orchestrator, "run_agent", model_tidak_boleh_dipanggil)
+    r = await handle_message(WA, pesan)
+    assert "admin" in r.text
+    assert not (await store.get_or_create_session(WA)).pending_escalation

@@ -19,6 +19,7 @@ from app.conversation.context import (
     set_turn_context,
 )
 from app.conversation.states import (
+    NUMBER_WORDS,
     _PUNCT_RE,
     State,
     mentions_quantity,
@@ -32,6 +33,7 @@ from app.conversation.states import (
     text_tanya_cara_lunasi,
     text_tanya_refund,
     text_minta_refund,
+    text_tanya_aturan_refund,
     text_tanya_sisa,
     text_tanya_status_pesanan,
     text_tanya_termurah,
@@ -359,6 +361,9 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         from app.tools.cancel_order import arahkan_refund
 
         reply = Reply(text=await arahkan_refund(wa_number, lang))
+    elif (state in (State.IDLE, State.ORDER_ACTIVE, State.AWAITING_PAYMENT)
+          and text_tanya_aturan_refund(text)):
+        reply = Reply(text=bahasa.teks("aturan_refund", lang))
     elif (state == State.IDLE and text_perintah_sudah_sesuai(text)
           and not await store.get_cart(wa_number)):
         # "Ketik *sudah sesuai*" juga kata dari templat kita sendiri. Dengan
@@ -800,8 +805,12 @@ async def _handle_confirmation(wa_number: str, text: str, lang: str) -> Reply:
     # by calling add_to_cart again and silently doubling the order. That is now
     # blocked inside the tool itself (it will not grow a line the customer did
     # not put a number on), so the routing here does not have to guess.
+    cart_sebelum = await store.get_cart(wa_number)
     reply = await _run_agent_turn(wa_number, text)
     if (await store.get_or_create_session(wa_number)).state == State.AWAITING_CART_CONFIRMATION:
+        cadangan = await _cadangan_tambah_kue(wa_number, text, cart_sebelum)
+        if cadangan is not None:
+            return Reply(text=cadangan)
         body = (reply.text or "").strip()
         # Ringkasan keranjang sudah ditutup dengan ajakan yang sama; ditempel
         # lagi, pelanggan membaca "ketik sudah sesuai" dua kali berturut-turut.
@@ -817,6 +826,50 @@ async def _handle_confirmation(wa_number: str, text: str, lang: str) -> Reply:
             reask = f"{cart_summary(cart, lang)}\n\n{reask}"
         return Reply(text=f"{body}\n\n{reask}" if body else reask, media=reply.media)
     return reply
+
+
+_KATA_PESAN = {"pesan", "pesen", "tambah", "tambahin", "tambahkan", "order", "beli", "add", "ambil"}
+_KATA_MAU = {"mau", "minta", "want", "like"}
+
+
+async def _cadangan_tambah_kue(wa_number: str, text: str, cart_sebelum: list) -> str | None:
+    """Pesanan kue yang dilewatkan model saat keranjang menunggu konfirmasi.
+
+    Uji menu 19 Nov 2026: dengan lima kue di keranjang, "pesan Bolu Pandan 1"
+    dijawab model tanpa memanggil tool apa pun -- keranjang tidak berubah dan
+    pelanggan hanya melihat ringkasan lama, seolah kuenya sudah masuk. Hanya
+    dipakai kalau keranjang memang tidak berubah, pelanggan menulis kata pesan
+    dan nama lengkap SATU kue dari katalog, dan paling banyak satu angka lain
+    (jumlahnya). Selebihnya tetap urusan model.
+    """
+    from app.backend_client import products as products_api
+    from app.tools.add_to_cart import add_to_cart
+    from app.tools.formatting import _kata, disebut_lengkap, product_label, sisa_tanpa_nama
+
+    if await store.get_cart(wa_number) != cart_sebelum or "?" in text:
+        return None
+    kata = set(_kata(text))
+    angka_ada = mentions_quantity(text)
+    if not (kata & _KATA_PESAN or (kata & _KATA_MAU and angka_ada)):
+        return None
+    try:
+        katalog = await products_api.list_products(only_active=True)
+    except Exception:  # noqa: BLE001
+        return None
+    p = disebut_lengkap(text, katalog)
+    if p is None:
+        return None
+    sisa = sisa_tanpa_nama(text, p) or ""
+    angka = [int(k) if k.isdigit() else NUMBER_WORDS[k]
+             for k in _kata(sisa) if k.isdigit() or k in NUMBER_WORDS]
+    if len(angka) > 1:
+        return None
+    ctx = get_turn_context_or_none()
+    if ctx is not None:
+        ctx.user_text = text
+    logger.info("cadangan add_to_cart untuk %s (model tidak memanggil tool)", product_label(p))
+    return await add_to_cart.ainvoke(
+        {"items": [{"product": product_label(p), "qty": angka[0] if angka else 1}]})
 
 
 async def _batal_sebagian(wa_number: str, text: str) -> bool:

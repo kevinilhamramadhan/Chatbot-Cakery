@@ -99,7 +99,17 @@ def _jumlah_di_luar_nama(teks: str, p: dict, qty: int) -> int | None:
         return 1
     tertulis = {int(k) if k.isdigit() else NUMBER_WORDS[k]
                 for k in _kata(sisa) if k.isdigit() or k in NUMBER_WORDS}
-    return qty if qty in tertulis else None
+    if qty in tertulis:
+        return qty
+    # Uji menu 19 Nov 2026: "pesan Cupcakes Cokelat Isi 4 1" dikirim model
+    # sebagai product="Cupcakes Cokelat Isi", qty=4 -- angka dari nama kue,
+    # bukan jumlah. Kalau qty dari model persis angka di nama dan pelanggan
+    # menulis tepat satu angka lain, angka itulah jumlahnya.
+    angka_nama = {int(h) for k in _kata(p.get("nama_produk") or p.get("nama") or "")
+                  for h in re.findall(r"\d+", k)}
+    if qty in angka_nama and len(tertulis) == 1:
+        return next(iter(tertulis))
+    return None
 
 
 async def _kue_barusan_dibahas(wa: str, label: str) -> bool:

@@ -506,6 +506,15 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         EN: ("I couldn't find a paid order under this number. Refund requests are handled "
              "directly by our admin, who can help check it."),
     },
+    "aturan_refund": {
+        ID: ("Pengembalian dana (refund) untuk pesanan yang sudah dibayar ditangani "
+             "langsung oleh admin kami: admin yang mengecek pesanannya lalu memproses "
+             "pengembaliannya. Pesanan yang belum dibayar tidak perlu refund, cukup "
+             "ketik *batal*.\n\nKalau mau mengajukan refund, ketik *mau refund* ya."),
+        EN: ("Refunds for paid orders are handled directly by our admin, who checks the "
+             "order and processes the refund. Unpaid orders don't need a refund, just "
+             "type *cancel*.\n\nTo request a refund, type *I want a refund*."),
+    },
     "refund_belum_bayar": {
         ID: ("Pesanan *{label}* belum dibayar, jadi belum ada dana yang perlu "
              "dikembalikan. Kalau ingin membatalkannya, ketik *batal* ya."),

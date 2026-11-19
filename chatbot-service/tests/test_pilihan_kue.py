@@ -89,9 +89,28 @@ async def test_jumlah_yang_ditulis_terpisah_tetap_dipakai():
     assert [(c["product_id"], c["qty"]) for c in cart] == [(31, 2)]
 
 
+@pytest.mark.parametrize("teks, jumlah", [("mau Cupcakes Cokelat Isi 4 tiga ya", 3),
+                                          ("kak mau pesan Cupcakes Cokelat Isi 4 1", 1),
+                                          ("pesan Cupcakes Cokelat Isi 4 2", 2)])
+async def test_angka_nama_yang_dikira_jumlah_diganti_angka_tertulis(teks, jumlah):
+    """Uji menu 19 Nov 2026: model mengirim product='Cupcakes Cokelat Isi', qty=4
+    (angka dari nama). Pelanggan menulis tepat satu angka lain: itulah jumlahnya,
+    tidak perlu ditanyakan ulang."""
+    out = await _tambah(teks, [{"product": "Cupcakes Cokelat Isi", "qty": 4}])
+    cart = await store.get_cart(WA)
+    assert [(c["product_id"], c["qty"]) for c in cart] == [(31, jumlah)], out
+
+
 async def test_jumlah_model_yang_tidak_ditulis_pelanggan_ditanyakan():
-    """Nama lengkap + angka lain di pesan, tetapi jumlah dari model bukan angka itu."""
+    """Jumlah dari model bukan angka di nama dan bukan angka yang ditulis pelanggan."""
     out = await _tambah("mau Cupcakes Cokelat Isi 4 tiga ya",
+                        [{"product": "Cupcakes Cokelat Isi", "qty": 5}])
+    assert await store.get_cart(WA) == []
+    assert "jumlah" in out.lower() or "berapa" in out.lower()
+
+
+async def test_dua_angka_lain_tetap_ditanyakan():
+    out = await _tambah("mau Cupcakes Cokelat Isi 4 2 atau 3",
                         [{"product": "Cupcakes Cokelat Isi", "qty": 4}])
     assert await store.get_cart(WA) == []
     assert "jumlah" in out.lower() or "berapa" in out.lower()

@@ -245,6 +245,14 @@ def text_minta_refund(text: str) -> bool:
     return not (words & _STATUS_REFUND or words & _INFO_REFUND)
 
 
+def text_tanya_aturan_refund(text: str) -> bool:
+    """"aturan refund gimana?", "kebijakan pengembalian dana" -- tidak ada di FAQ
+    toko (uji 19 Nov 2026: dijawab model "soal resep dan cara bayar yang spesial")."""
+    words = set(_tokens(text))
+    return bool((words & _REFUND or (words & _UANG and words & _KEMBALI))
+                and words & _INFO_REFUND)
+
+
 def text_tanya_status_pesanan(text: str) -> bool:
     """"pesanan saya sudah siap belum?" — terukur dijawab model soal harga."""
     words = set(_tokens(text))
