@@ -223,6 +223,28 @@ def text_tanya_refund(text: str) -> bool:
     return bool(words & _UANG and words & _KEMBALI)
 
 
+_REFUND = {"refund", "refundnya", "refundku", "direfund", "merefund", "ngerefund", "pengembalian"}
+# Pertanyaan status refund yang sudah berjalan, bukan pengajuan baru.
+_STATUS_REFUND = {"kapan", "when", "status", "statusnya", "masuk", "cair", "sampai",
+                  "ditransfer", "diproses"}
+# Pertanyaan kebijakan dijawab FAQ, bukan langsung disambungkan ke admin.
+_INFO_REFUND = {"kebijakan", "aturan", "aturannya", "syarat", "syaratnya", "ketentuan",
+                "policy", "terms"}
+
+
+def text_minta_refund(text: str) -> bool:
+    """Pengajuan refund: "mau refund", "minta uangku dikembalikan", "refund dong".
+
+    Keputusan Kevin (19 Nov 2026): refund selalu ditangani admin lewat takeover.
+    Pertanyaan status ("refundku kapan masuk?") dan kebijakan ("aturan refund
+    gimana?") tidak termasuk.
+    """
+    words = set(_tokens(text))
+    if not (words & _REFUND or (words & _UANG and words & _KEMBALI)):
+        return False
+    return not (words & _STATUS_REFUND or words & _INFO_REFUND)
+
+
 def text_tanya_status_pesanan(text: str) -> bool:
     """"pesanan saya sudah siap belum?" — terukur dijawab model soal harga."""
     words = set(_tokens(text))

@@ -1245,9 +1245,10 @@ async def test_tool_status_pembayaran_mengenali_refund(patch_externals):
     assert "dikembalikan" in out and "belum terdeteksi" not in out
 
 
-async def test_batal_setelah_bayar_minta_konfirmasi_dulu(patch_externals):
-    """Uang pelanggan tidak berpindah karena satu kalimat: pesanan yang sudah
-    dibayar dijawab pertanyaan tertutup dulu, bukan langsung dibatalkan."""
+async def test_batal_setelah_bayar_diarahkan_ke_admin(patch_externals):
+    """Keputusan 19 Nov 2026: pesanan yang sudah dibayar tidak dibatalkan atau
+    di-refund chatbot sendiri. Pelanggan ditawari admin; uangnya tidak berpindah
+    dan pesanannya tetap aktif sampai admin memprosesnya."""
     from app.tools.cancel_order import cancel_order
 
     await _seed_awaiting_payment(order_ref="9101")
@@ -1257,19 +1258,27 @@ async def test_batal_setelah_bayar_minta_konfirmasi_dulu(patch_externals):
     async def f_latest(wa):
         return {"id": 9101, "status": "pending"}
 
+    async def f_refund(order_ref, reason, wa_number=""):
+        raise AssertionError("refund ditangani admin, bukan chatbot")
+
     patch_externals["monkeypatch"].setattr(
         patch_externals["backend"], "get_latest_order", f_latest)
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "refund_order", f_refund)
     set_turn_context(TurnContext(wa_number=WA, user_text="batalin pesananku"))
 
     out = await cancel_order.ainvoke({})
 
-    assert "*ya*" in out and "dana" in out.lower()
+    assert "admin" in out and "*ya*" in out
+    alasan = (await store.get_or_create_session(WA)).pending_escalation
+    assert alasan and "refund" in alasan
+    assert (await store.get_or_create_session(WA)).state != State.AWAITING_CANCEL_CONFIRMATION
     assert await store.get_active_pending(WA) is not None, "belum boleh dibatalkan"
 
 
 async def test_konfirmasi_batal_tanpa_dukungan_backend_tidak_membuntukan(patch_externals):
-    """Selama backend belum mengizinkan chatbot me-refund, jawaban "ya" tidak
-    boleh berakhir buntu — pelanggan diberi alamat yang benar-benar ditangani."""
+    """Pesanan yang pembayarannya masuk di antara pertanyaan "yakin batal?" dan
+    jawaban "ya" tidak berakhir buntu: pelanggan ditawari admin di chat ini."""
     from app.tools.cancel_order import proses_pembatalan
 
     await _seed_awaiting_payment(order_ref="9102")
@@ -1322,35 +1331,47 @@ async def test_batal_belum_bayar_ditolak_backend_tidak_menjanjikan_dana(patch_ex
     assert (await store.get_or_create_session(WA)).state == State.AWAITING_PAYMENT
 
 
-async def test_konfirmasi_batal_berhasil_saat_backend_mengizinkan(patch_externals):
-    """Begitu backend mengizinkan (cancel berbayar ATAU refund lewat service key),
-    jalurnya langsung hidup tanpa perubahan kode lagi."""
+async def test_pembatalan_berbayar_tidak_merefund_sendiri(patch_externals):
+    """Keputusan 19 Nov 2026: walaupun backend mengizinkan refund lewat service
+    key, chatbot tidak memanggilnya. VA maupun QRIS sama-sama ke admin."""
     from app.tools.cancel_order import proses_pembatalan
-
-    await _seed_awaiting_payment(order_ref="9103")
-    pesanan = await store.get_active_pending(WA)
-    await store.update_pending_order(pesanan.id, status="paid")
 
     dipanggil = []
 
     async def f_cancel(order_ref, wa=None):
-        raise httpx.HTTPStatusError("409", request=None, response=None)
+        dipanggil.append(("cancel", order_ref))
+        return {"status": "success"}
 
     async def f_refund(order_ref, reason, wa_number=""):
-        dipanggil.append((order_ref, wa_number))
-        return {"id": int(order_ref), "status": "cancelled"}
+        dipanggil.append(("refund", order_ref))
+        return {"id": int(order_ref), "status": "cancelled", "refund_mode": "auto"}
 
     patch_externals["monkeypatch"].setattr(
         patch_externals["backend"], "cancel_order", f_cancel)
     patch_externals["monkeypatch"].setattr(
         patch_externals["backend"], "refund_order", f_refund)
 
-    out = await proses_pembatalan(WA)
+    for ref, channel in (("9103", "qris"), ("9106", "bank_transfer")):
+        await store.create_pending_order(
+            wa_number=WA, order_ref=ref, payment_ref="MID", payment_type="full",
+            total_amount=100000, amount_due=100000, items_json="[]",
+            customer_json=json.dumps({"channel": channel}), delivery_method="pickup",
+            status="paid", nomor_invoice=f"INV-{ref}",
+            expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+        )
+        await store.set_state(WA, State.AWAITING_CANCEL_CONFIRMATION)
 
-    assert dipanggil and dipanggil[0][0] == "9103"
-    assert "dibatalkan" in out and "pengembalian dananya" in out
-    assert await store.get_active_pending(WA) is None
-    assert (await store.get_or_create_session(WA)).state == State.IDLE
+        out = await proses_pembatalan(WA)
+
+        assert f"INV-{ref}" in out and "admin" in out and "*ya*" in out, (channel, out)
+        assert "otomatis" not in out.lower() and "dibatalkan ✅" not in out
+        assert (await store.get_active_pending(WA)).order_ref == ref
+        assert (await store.get_or_create_session(WA)).state == State.ORDER_ACTIVE
+        # Pesanan berikutnya di putaran loop menggantikan yang ini.
+        await store.update_pending_order((await store.get_active_pending(WA)).id,
+                                         status="cancelled")
+
+    assert dipanggil == [], "chatbot tidak boleh membatalkan/merefund pesanan berbayar"
 
 
 async def test_pesanan_yang_sudah_diproses_tidak_ditawari_pembatalan(patch_externals):
@@ -1538,57 +1559,13 @@ async def test_webhook_refund_ditolak_kalau_backend_bilang_belum_refund(patch_ex
     assert await store.get_active_pending(WA) is not None
 
 
-async def test_refund_va_dikatakan_manual_qris_otomatis(patch_externals):
-    """VA tidak bisa di-refund otomatis oleh Midtrans (terukur: status 418),
-    sedangkan QRIS bisa. Pelanggan harus diberi tahu bedanya — yang manual
-    butuh beberapa hari kerja karena ada orang yang harus transfer."""
-    from app.tools.cancel_order import cancel_order, proses_pembatalan
-
-    async def f_cancel(order_ref, wa=None):
-        raise httpx.HTTPStatusError("409", request=None, response=None)
-
-    patch_externals["monkeypatch"].setattr(
-        patch_externals["backend"], "cancel_order", f_cancel)
-
-    for channel, mode, harus_ada, tidak_boleh in (
-        ("bank_transfer", "manual", "transfer", "otomatis"),
-        ("qris", "auto", "otomatis", "beberapa hari kerja"),
-    ):
-        await store.set_customer(WA, {"nama": "Kevin", "alamat": "Jl. Mawar",
-                                      "metode_pengiriman": "pickup", "channel": channel})
-        await store.create_pending_order(
-            wa_number=WA, order_ref=f"93{channel[:2]}", payment_ref="MID",
-            payment_type="full", total_amount=100000, amount_due=100000,
-            items_json="[]", customer_json=json.dumps({"channel": channel}),
-            delivery_method="pickup", status="paid", nomor_invoice=f"INV-{channel}",
-            expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
-        )
-
-        async def f_refund(order_ref, reason, wa_number="", _m=mode):
-            return {"order_id": order_ref, "status": "cancelled", "refund_mode": _m}
-
-        patch_externals["monkeypatch"].setattr(
-            patch_externals["backend"], "refund_order", f_refund)
-        set_turn_context(TurnContext(wa_number=WA, user_text="batalin pesananku"))
-
-        tanya = await cancel_order.ainvoke({})
-        hasil = await proses_pembatalan(WA)
-
-        assert harus_ada in hasil.lower(), (channel, hasil)
-        assert tidak_boleh not in hasil.lower(), (channel, hasil)
-        if channel == "bank_transfer":
-            assert "transfer" in tanya.lower(), "konfirmasinya pun harus jujur di awal"
-            assert "@" not in hasil and "kabari kami" in hasil
-
-
-async def test_refund_manual_menunggu_transfer_lalu_dikabari_saat_selesai(patch_externals):
-    """VA tidak bisa di-refund otomatis, jadi uangnya baru berpindah setelah admin
-    mentransfer. Pelanggan dapat dua kabar: 'sedang diproses' waktu membatalkan,
-    dan 'sudah kami transfer' waktu admin menandainya selesai di Admin Site."""
+async def test_refund_berbayar_dikerjakan_admin_lalu_pelanggan_dikabari(patch_externals):
+    """Alur lengkap sejak 19 Nov 2026: pelanggan minta batal pesanan berbayar ->
+    ditawari admin (pesanan tetap aktif) -> admin me-refund dari Seller Site ->
+    backend menembak webhook /refunded -> pelanggan dikabari, sekali saja."""
     from app.conversation import background
     from app.tools.cancel_order import proses_pembatalan
 
-    await store.set_customer(WA, {"channel": "bank_transfer"})
     await store.create_pending_order(
         wa_number=WA, order_ref="94", payment_ref="MID", payment_type="full",
         total_amount=100000, amount_due=100000, items_json="[]",
@@ -1597,26 +1574,20 @@ async def test_refund_manual_menunggu_transfer_lalu_dikabari_saat_selesai(patch_
         expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
     )
 
-    async def f_cancel(order_ref, wa=None):
-        raise httpx.HTTPStatusError("409", request=None, response=None)
-
-    async def f_refund(order_ref, reason, wa_number=""):
-        return {"order_id": order_ref, "status": "cancelled", "refund_mode": "manual"}
-
-    patch_externals["monkeypatch"].setattr(
-        patch_externals["backend"], "cancel_order", f_cancel)
-    patch_externals["monkeypatch"].setattr(
-        patch_externals["backend"], "refund_order", f_refund)
-
     pesan1 = await proses_pembatalan(WA)
-    assert "mohon ditunggu" in pesan1.lower()
-    # Pelanggan bebas memesan lagi walau dananya belum masuk.
-    assert await store.get_active_pending(WA) is None
+    assert "admin" in pesan1
+    assert await store.get_active_pending(WA) is not None, "admin yang memutuskan"
 
-    # Admin selesai transfer -> backend menembak webhook refunded.
+    async def f_status(order_ref, wa=None):
+        return {"invoice_status": "refunded", "amount_paid": 0, "amount_due": 0}
+
+    patch_externals["monkeypatch"].setattr(
+        patch_externals["backend"], "get_payment_status", f_status)
+
     assert await background.notify_refunded(94) is True
     kabar = [t for _wa, t in patch_externals["sent"]]
-    assert kabar and "sudah kami transfer" in kabar[-1]
+    assert kabar and "INV-94" in kabar[-1] and "dikembalikan" in kabar[-1]
+    assert await store.get_active_pending(WA) is None
 
     # Tidak dikabari dua kali.
     assert await background.notify_refunded(94) is False
@@ -2624,12 +2595,16 @@ async def test_pertanyaan_tidak_membatalkan_pesanan_berbayar(patch_externals, pe
 
 
 @pytest.mark.parametrize("pesan", ["ya", "batal", "iya batalin aja"])
-async def test_jawaban_jelas_tetap_membatalkan_pesanan_berbayar(patch_externals, pesan):
+async def test_jawaban_jelas_pesanan_berbayar_diarahkan_ke_admin(patch_externals, pesan):
+    """Sesi lama yang masih menunggu konfirmasi batal pesanan berbayar: sejak
+    19 Nov 2026 jawaban jelas tidak membatalkan sendiri, tapi menawarkan admin."""
     await _seed_pesanan_dibayar_minta_batal()
 
-    await handle_message(WA, pesan)
+    r = await handle_message(WA, pesan)
 
-    assert patch_externals["cancelled"] == ["164"]
+    assert patch_externals["cancelled"] == []
+    assert "INV-20261107-164" in r.text and "admin" in r.text
+    assert (await store.get_or_create_session(WA)).pending_escalation
 
 
 @pytest.mark.parametrize("pesan", ["bentar ya", "boleh tanya dulu?", "oke aku pikir dulu"])

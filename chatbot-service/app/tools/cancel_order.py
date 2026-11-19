@@ -10,6 +10,7 @@ from app.backend_client import api as backend
 from app.conversation import bahasa, store
 from app.conversation.context import get_turn_context
 from app.conversation.states import State, text_menyebut_batal
+from app.tools.formatting import rupiah
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +30,8 @@ async def cancel_order() -> str:
     """Batalkan pesanan pelanggan.
 
     Gunakan saat pelanggan minta membatalkan pesanannya. Pesanan yang belum
-    dibayar langsung dibatalkan; yang sudah dibayar (DP maupun lunas) dijawab
-    dengan pertanyaan konfirmasi lebih dulu, karena pembatalannya sekalian
-    dengan pengembalian dana.
+    dibayar dibatalkan setelah dikonfirmasi; yang sudah dibayar (DP maupun
+    lunas) diarahkan ke admin, karena pengembalian dananya ditangani admin.
     """
     ctx = get_turn_context()
     wa = ctx.wa_number
@@ -58,15 +58,83 @@ async def cancel_order() -> str:
     # belum jadi pesanan tetap langsung dikosongkan (lihat di atas): tidak ada
     # yang hilang di sisi toko.
     sudah_dibayar = order.status in ("paid", "ready")
-    if sudah_dibayar and not await _masih_boleh_refund(wa):
-        # Kebijakan toko: begitu admin memindahkan pesanan ke "sedang diproses",
-        # kuenya sudah dikerjakan dan pembatalan mandiri tidak berlaku lagi.
-        return bahasa.teks("sudah_dikerjakan", lang) + await _tawarkan_admin(
-            wa, lang, f"Pelanggan ingin membatalkan pesanan {_label(order)} yang sudah "
-                      "dikerjakan")
+    if sudah_dibayar:
+        return await _batal_berbayar_ke_admin(wa, lang, order)
 
     get_turn_context().next_state = State.AWAITING_CANCEL_CONFIRMATION
     return konfirmasi_batal(order, sudah_dibayar, lang)
+
+
+async def _batal_berbayar_ke_admin(wa_number: str, lang: str, order) -> str:
+    """Pesanan yang sudah dibayar tidak dibatalkan chatbot sendiri.
+
+    Keputusan Kevin (19 Nov 2026): setiap pengembalian dana ditangani admin
+    lewat takeover. Admin memutuskan dan mengerjakan refund-nya dari Seller
+    Site; kabar "dana sudah dikembalikan" tetap dikirim chatbot begitu backend
+    menandai pesanannya refunded (notify_refunded / _check_refunded).
+    """
+    if not await _masih_boleh_refund(wa_number):
+        # Kebijakan toko: begitu admin memindahkan pesanan ke "sedang diproses",
+        # kuenya sudah dikerjakan dan pembatalan mandiri tidak berlaku lagi.
+        return bahasa.teks("sudah_dikerjakan", lang) + await _tawarkan_admin(
+            wa_number, lang, f"Pelanggan ingin membatalkan pesanan {_label(order)} yang "
+                             "sudah dikerjakan")
+    return bahasa.teks("batal_berbayar_ke_admin", lang, label=_label(order)) + \
+        await _tawarkan_admin(
+            wa_number, lang, f"Pelanggan ingin membatalkan pesanan {_label(order)} yang "
+                             "sudah dibayar dan minta refund")
+
+
+_PESANAN_TUTUP = {"cancelled", "refunded", "cancelled_settlement_expired"}
+
+
+async def arahkan_refund(wa_number: str, lang: str) -> str:
+    """Pelanggan minta refund: diarahkan ke admin takeover, tidak diproses sendiri.
+
+    Berlaku untuk pesanan dari mana pun. Pesanan WhatsApp dibaca dari baris
+    lokalnya; pesanan website (tidak punya baris lokal) dari pesanan terakhir
+    nomor ini di backend. Takeover tetap menunggu "ya" seperti tawaran admin
+    lainnya, dan alasannya (invoice, nominal, status) ikut terkirim ke admin.
+    """
+    from app.tools.payment_status import jawab_refund
+
+    # Refund yang sudah berjalan dijawab statusnya, tidak diajukan dua kali.
+    berjalan = await jawab_refund(wa_number, lang)
+    if berjalan:
+        return berjalan
+
+    lokal = await store.get_active_pending(wa_number)
+    if lokal is not None:
+        if lokal.status not in ("paid", "ready"):
+            return bahasa.teks("refund_belum_bayar", lang, label=_label(lokal))
+        return bahasa.teks("refund_lewat_admin", lang, label=_label(lokal)) + \
+            await _tawarkan_admin(
+                wa_number, lang, f"Pelanggan minta refund pesanan {_label(lokal)} "
+                                 f"(tagihan terbayar {rupiah(lokal.amount_due)})")
+
+    try:
+        o = await backend.get_latest_order(wa_number)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("pesanan terakhir tidak terbaca saat minta refund: %s", exc)
+        o = None
+    inv = (o or {}).get("invoice") or {}
+    status_inv = str(inv.get("status") or (o or {}).get("payment_status") or "").lower()
+    status_pesanan = str((o or {}).get("status") or "").lower()
+    label = inv.get("nomor_invoice") or (f"#{o.get('id')}" if o else "")
+
+    if o and status_pesanan not in _PESANAN_TUTUP and status_inv in ("paid", "partial"):
+        dibayar = (o or {}).get("amount_paid")
+        nominal = f", sudah dibayar {rupiah(dibayar)}" if dibayar else ""
+        return bahasa.teks("refund_lewat_admin", lang, label=label) + await _tawarkan_admin(
+            wa_number, lang, f"Pelanggan minta refund pesanan {label} "
+                             f"(status {status_pesanan or '-'}{nominal})")
+    if o and status_pesanan == "pending" and status_inv == "unpaid":
+        return bahasa.teks("refund_belum_bayar", lang, label=label)
+    # Tidak ada pesanan berbayar atas nomor ini (mungkin dibayar dari nomor
+    # lain): tetap disambungkan, admin yang mencocokkan datanya.
+    return bahasa.teks("refund_tanpa_pesanan", lang) + await _tawarkan_admin(
+        wa_number, lang, "Pelanggan minta refund, tapi tidak ada pesanan berbayar "
+                         "yang aktif atas nomor ini")
 
 
 def _label(order) -> str:
@@ -119,10 +187,9 @@ def konfirmasi_batal(order, sudah_dibayar: bool, lang: str | None = None) -> str
 async def proses_pembatalan(wa_number: str) -> str:
     """Jalankan pembatalan sesudah pelanggan menjawab ya.
 
-    Dua jalur dicoba karena backend boleh memilih bentuknya: endpoint cancel
-    yang sudah ada (kalau nanti diizinkan menangani pesanan berbayar), lalu
-    endpoint refund. Selama keduanya menolak, pelanggan tidak dibiarkan buntu —
-    dia ditawari sambungan ke admin di chat ini.
+    Hanya pesanan yang belum dibayar yang dibatalkan di sini. Pesanan yang
+    sudah dibayar (misalnya pembayarannya masuk di antara pertanyaan dan
+    jawaban "ya") diarahkan ke admin, sama seperti di cancel_order.
     """
     lang = await store.get_lang(wa_number)
     order = await store.get_active_pending(wa_number)
@@ -130,57 +197,32 @@ async def proses_pembatalan(wa_number: str) -> str:
         await store.set_state(wa_number, State.IDLE)
         return bahasa.teks("tidak_ada_yang_dibatalkan", lang)
 
-    sudah_dibayar = order.status in ("paid", "ready")
-    berhasil = False
-    mode = ""
-    try:
-        await backend.cancel_order(order.order_ref, order.wa_number)
-        berhasil = True
-    except Exception:  # noqa: BLE001 - 409 kalau pesanannya sudah dibayar
-        hasil = await backend.refund_order(
-            order.order_ref, "Dibatalkan pelanggan lewat chatbot", wa_number)
-        berhasil = hasil is not None
-        # Backend menandai apakah Midtrans benar-benar mengembalikan dananya
-        # ("auto") atau cuma dicatat dan uangnya ditransfer orang ("manual").
-        # Bedanya nyata untuk pelanggan: yang manual butuh beberapa hari kerja.
-        mode = str((hasil or {}).get("refund_mode") or "")
-
-    if not berhasil:
-        logger.info("pembatalan belum bisa otomatis untuk %s", order.order_ref)
+    if order.status in ("paid", "ready"):
         # Pertanyaan "yakin batal?" sudah terjawab; tetap di keadaan itu membuat
         # pesan berikutnya dibaca sebagai jawaban ya/tidak lagi.
-        await store.set_state(wa_number, State.ORDER_ACTIVE if sudah_dibayar
-                              else State.AWAITING_PAYMENT)
-        if not sudah_dibayar:
-            # Belum ada uang masuk: jangan menjanjikan pengembalian dana. Sejak
-            # backend d46c973 pesanan dengan transaksi Midtrans pending dibatalkan
-            # di gateway dulu; 409/502 tersisa hanya bila gateway gagal atau
-            # hasilnya belum pasti. Tagihan yang tidak dibayar tetap dibatalkan
-            # worker backend saat batasnya lewat.
-            label = order.nomor_invoice or f"#{order.order_ref}"
-            batas = order.expires_at if order.expires_at.tzinfo else \
-                order.expires_at.replace(tzinfo=timezone.utc)
-            menit = round((batas - datetime.now(timezone.utc)).total_seconds() / 60)
-            kapan = (bahasa.teks("batal_sendiri_menit", lang, menit=menit) if menit >= 1
-                     else bahasa.teks("batal_sendiri_segera", lang))
-            return bahasa.teks("batal_belum_bisa", lang, label=label, kapan=kapan)
-        return bahasa.teks("batal_perlu_tim", lang) + await _tawarkan_admin(
-            wa_number, lang, f"Pelanggan ingin membatalkan pesanan {_label(order)} yang "
-                             "sudah dibayar (perlu pengembalian dana)")
+        await store.set_state(wa_number, State.ORDER_ACTIVE)
+        return await _batal_berbayar_ke_admin(wa_number, lang, order)
 
-    # Refund manual belum selesai saat ini juga — uangnya baru berpindah setelah
-    # admin mentransfernya. Barisnya disimpan dengan status menunggu supaya
-    # kabar "dana sudah kami transfer" nanti masih punya sasaran.
-    manual = mode == "manual" or (not mode and _bayar_pakai_va(order))
-    await store.update_pending_order(
-        order.id, status=store.MENUNGGU_TRANSFER if (manual and sudah_dibayar)
-        else store.REFUND_OTOMATIS if sudah_dibayar else "cancelled")
+    try:
+        await backend.cancel_order(order.order_ref, order.wa_number)
+    except Exception:  # noqa: BLE001
+        logger.info("pembatalan belum bisa otomatis untuk %s", order.order_ref)
+        await store.set_state(wa_number, State.AWAITING_PAYMENT)
+        # Belum ada uang masuk: jangan menjanjikan pengembalian dana. Sejak
+        # backend d46c973 pesanan dengan transaksi Midtrans pending dibatalkan
+        # di gateway dulu; 409/502 tersisa hanya bila gateway gagal atau
+        # hasilnya belum pasti. Tagihan yang tidak dibayar tetap dibatalkan
+        # worker backend saat batasnya lewat.
+        label = order.nomor_invoice or f"#{order.order_ref}"
+        batas = order.expires_at if order.expires_at.tzinfo else \
+            order.expires_at.replace(tzinfo=timezone.utc)
+        menit = round((batas - datetime.now(timezone.utc)).total_seconds() / 60)
+        kapan = (bahasa.teks("batal_sendiri_menit", lang, menit=menit) if menit >= 1
+                 else bahasa.teks("batal_sendiri_segera", lang))
+        return bahasa.teks("batal_belum_bisa", lang, label=label, kapan=kapan)
+
+    await store.update_pending_order(order.id, status="cancelled")
     await store.set_cart(wa_number, [])
     await store.set_state(wa_number, State.IDLE)
-    if not sudah_dibayar:
-        # Belum ada uang yang masuk — jangan menjanjikan pengembalian dana.
-        return bahasa.teks("batal_belum_bayar", lang)
-    if manual:
-        return bahasa.teks("batal_refund_manual", lang,
-                           tutup=bahasa.teks("tutup_refund_umum", lang))
-    return bahasa.teks("batal_refund_otomatis", lang)
+    # Belum ada uang yang masuk — jangan menjanjikan pengembalian dana.
+    return bahasa.teks("batal_belum_bayar", lang)

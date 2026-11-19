@@ -1272,20 +1272,19 @@ async def test_backend_mati_dikabari_setelah_dua_kali_gagal(patch_externals, mon
 
 
 async def test_refund_otomatis_dan_laba_kotor(patch_externals):
-    """Dua temuan uji langsung 14 Okt 2026."""
-    from app.tools.cancel_order import cancel_order
-
+    """Uji langsung 14 Okt 2026, disesuaikan keputusan 19 Nov 2026: jawaban "ya"
+    pada konfirmasi batal pesanan berbayar menawarkan admin, bukan me-refund
+    sendiri, dan refund manual lama tetap dijawab statusnya."""
     mp, backend = patch_externals["monkeypatch"], patch_externals["backend"]
 
     async def tolak(order_id, wa=None):
-        raise RuntimeError("409")
+        raise AssertionError("pesanan berbayar tidak dibatalkan chatbot")
 
     async def refund(order_id, reason, wa_number=""):
-        return {"refund_mode": "auto"}
+        raise AssertionError("refund ditangani admin")
 
     mp.setattr(backend, "cancel_order", tolak)
     mp.setattr(backend, "refund_order", refund)
-    # Refund manual lama tidak boleh menutupi refund otomatis yang baru.
     await store.create_pending_order(
         wa_number=WA, order_ref="94", payment_type="dp", total_amount=100, amount_due=50,
         items_json="[]", customer_json="{}", delivery_method="pickup",
@@ -1297,9 +1296,11 @@ async def test_refund_otomatis_dan_laba_kotor(patch_externals):
         status="paid", nomor_invoice="INV-BARU", qris_url="http://x",
         expires_at=dt.datetime.now(dt.timezone.utc))
     await store.set_state(WA, State.AWAITING_CANCEL_CONFIRMATION)
-    await handle_message(WA, "ya")
+    r = await handle_message(WA, "ya")
+    assert "INV-BARU" in r.text and "admin" in r.text
+    assert (await store.get_active_pending(WA)).order_ref == "107"
     r = await handle_message(WA, "uang saya kapan kembali?")
-    assert "INV-BARU" in r.text and "otomatis" in r.text
+    assert "INV-LAMA" in r.text
 
 
 async def test_kabar_pesanan_baru_ke_staf_bisa_dimatikan(patch_externals):
@@ -1729,3 +1730,92 @@ async def test_tagihan_kena_rate_limit_membatalkan_pesanan_dan_dijawab_ramai(pat
     assert "ramai" in r.text.lower()
     assert dibatalkan == [30001]                     # tidak ada pesanan yatim di backend
     assert await store.get_active_pending(WA) is None
+
+
+
+# ── Refund lewat admin (keputusan Kevin, 19 Nov 2026) ─────────────────────────
+@pytest.mark.parametrize("teks, harapan", [
+    ("mau refund dong kak", True),
+    ("saya minta uang saya dikembalikan", True),
+    ("refund pesanan aku ya", True),
+    ("bisa refund ga kak?", True),
+    ("I want a refund", True),
+    ("refund saya kapan masuk?", False),          # status refund yang berjalan
+    ("uang saya kapan kembali?", False),
+    ("aturan refund gimana?", False),             # kebijakan -> FAQ
+    ("mau pesan brownies 2", False),
+    ("ada uang kembalian ga kalau bayar cash", False),
+])
+def test_deteksi_minta_refund(teks, harapan):
+    from app.conversation.states import text_minta_refund
+    assert text_minta_refund(teks) is harapan
+
+
+@pytest.fixture(params=[False, True], ids=["v10", "v11"])
+def mode_intent(request, monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "intent_dari_model", request.param)
+    return request.param
+
+
+async def test_minta_refund_pesanan_wa_ditawari_admin_lalu_takeover(patch_externals, mode_intent):
+    async def refund(order_id, reason, wa_number=""):
+        raise AssertionError("refund ditangani admin, bukan chatbot")
+
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "refund_order", refund)
+    await store.create_pending_order(
+        wa_number=WA, order_ref="300", payment_type="full", total_amount=150000,
+        amount_due=150000, items_json="[]", customer_json="{}", delivery_method="pickup",
+        status="paid", nomor_invoice="INV-300", expires_at=dt.datetime.now(dt.timezone.utc))
+    await store.set_state(WA, State.ORDER_ACTIVE)
+
+    r = await handle_message(WA, "kak mau refund dong")
+    assert "INV-300" in r.text and "admin" in r.text and "*ya*" in r.text
+    alasan = (await store.get_or_create_session(WA)).pending_escalation
+    assert "refund" in alasan and "INV-300" in alasan and "Rp150.000" in alasan
+    assert await store.get_active_pending(WA) is not None   # belum ada yang dibatalkan
+
+    r = await handle_message(WA, "ya")
+    assert await store.is_takeover_active(WA)
+    ke_admin = [t for wa, t in patch_externals["sent"] if wa.startswith("628999000111")]
+    assert ke_admin and "INV-300" in ke_admin[-1] and "refund" in ke_admin[-1]
+
+
+async def test_minta_refund_pesanan_website_dibaca_dari_backend(patch_externals, mode_intent):
+    async def latest(wa):
+        return {"id": 950, "status": "pending", "amount_paid": "200000",
+                "invoice": {"nomor_invoice": "INV-950", "status": "paid"}}
+
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "get_latest_order", latest)
+    r = await handle_message(WA, "saya minta uang saya dikembalikan")
+    assert "INV-950" in r.text and "admin" in r.text
+    alasan = (await store.get_or_create_session(WA)).pending_escalation
+    assert "INV-950" in alasan and "Rp200.000" in alasan
+
+
+async def test_minta_refund_pesanan_belum_dibayar_tidak_ke_admin(patch_externals, mode_intent):
+    async def latest(wa):
+        return {"id": 951, "status": "pending", "amount_paid": "0",
+                "invoice": {"nomor_invoice": "INV-951", "status": "unpaid"}}
+
+    patch_externals["monkeypatch"].setattr(patch_externals["backend"], "get_latest_order", latest)
+    r = await handle_message(WA, "mau refund")
+    assert "INV-951" in r.text and "belum dibayar" in r.text and "*batal*" in r.text
+    assert not (await store.get_or_create_session(WA)).pending_escalation
+
+
+async def test_minta_refund_tanpa_pesanan_tetap_ditawari_admin(patch_externals, mode_intent):
+    r = await handle_message(WA, "mau refund")
+    assert "belum menemukan pesanan" in r.text and "admin" in r.text
+    assert (await store.get_or_create_session(WA)).pending_escalation
+
+
+async def test_minta_refund_saat_refund_berjalan_dijawab_statusnya(patch_externals, mode_intent):
+    await store.create_pending_order(
+        wa_number=WA, order_ref="301", payment_type="full", total_amount=100, amount_due=100,
+        items_json="[]", customer_json="{}", delivery_method="pickup",
+        status=store.MENUNGGU_TRANSFER, nomor_invoice="INV-301",
+        expires_at=dt.datetime.now(dt.timezone.utc))
+    r = await handle_message(WA, "mau refund dong")
+    assert "INV-301" in r.text
+    assert not (await store.get_or_create_session(WA)).pending_escalation

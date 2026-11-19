@@ -31,6 +31,7 @@ from app.conversation.states import (
     text_tanya_alamat_toko,
     text_tanya_cara_lunasi,
     text_tanya_refund,
+    text_minta_refund,
     text_tanya_sisa,
     text_tanya_status_pesanan,
     text_tanya_termurah,
@@ -349,6 +350,15 @@ async def handle_message(wa_number: str, text: str) -> Reply:
         # Templat kita sendiri berbunyi "Ketik *lunasi*" -- sama seperti *batal*,
         # kata yang kita suruh ketik tidak boleh bergantung pada model.
         reply = Reply(text=jawab, media=_media_giliran())
+    elif (state in (State.IDLE, State.ORDER_ACTIVE, State.AWAITING_PAYMENT)
+          and text_minta_refund(text)):
+        # Keputusan Kevin (19 Nov 2026): pengajuan refund selalu ditangani admin
+        # lewat takeover, dari pesanan WhatsApp maupun website. Deterministik di
+        # kedua mode intent: model tidak punya tool untuk ini, dan refund adalah
+        # urusan uang yang tidak boleh diimprovisasi.
+        from app.tools.cancel_order import arahkan_refund
+
+        reply = Reply(text=await arahkan_refund(wa_number, lang))
     elif (state == State.IDLE and text_perintah_sudah_sesuai(text)
           and not await store.get_cart(wa_number)):
         # "Ketik *sudah sesuai*" juga kata dari templat kita sendiri. Dengan

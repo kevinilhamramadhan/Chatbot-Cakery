@@ -488,6 +488,30 @@ _TEMPLAT: dict[str, dict[str, str]] = {
         ID: "Pembatalannya perlu diproses tim kami dulu supaya dananya bisa dikembalikan.",
         EN: "Our team needs to process this cancellation first so the money can be returned.",
     },
+    "batal_berbayar_ke_admin": {
+        ID: ("Pesanan *{label}* sudah dibayar, jadi pembatalan dan pengembalian "
+             "dananya ditangani langsung oleh admin kami."),
+        EN: ("Order *{label}* has already been paid, so the cancellation and refund are "
+             "handled directly by our admin."),
+    },
+    "refund_lewat_admin": {
+        ID: ("Pengajuan refund untuk pesanan *{label}* ditangani langsung oleh admin "
+             "kami, nanti admin yang mengecek dan memprosesnya."),
+        EN: ("Refund requests for order *{label}* are handled directly by our admin, "
+             "who will check and process it."),
+    },
+    "refund_tanpa_pesanan": {
+        ID: ("Aku belum menemukan pesanan yang sudah dibayar atas nomor ini. Pengajuan "
+             "refund ditangani langsung oleh admin kami, jadi admin bisa bantu mengeceknya."),
+        EN: ("I couldn't find a paid order under this number. Refund requests are handled "
+             "directly by our admin, who can help check it."),
+    },
+    "refund_belum_bayar": {
+        ID: ("Pesanan *{label}* belum dibayar, jadi belum ada dana yang perlu "
+             "dikembalikan. Kalau ingin membatalkannya, ketik *batal* ya."),
+        EN: ("Order *{label}* hasn't been paid yet, so there's nothing to refund. "
+             "If you'd like to cancel it, just type *cancel*."),
+    },
     "batal_belum_bayar": {
         ID: "Pesanan kamu sudah dibatalkan. Terima kasih 🙏",
         EN: "Your order has been cancelled. Thank you 🙏",
